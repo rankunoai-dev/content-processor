@@ -66,3 +66,12 @@ git worktree add ../content-processor-lane4 -b lane/L4-verify
 - **Found for L0 (K16):** block ids from `html_source` restart at `<resource>:src:0` for every extraction, so source and rendered blocks share `extraction_id`/`region_id` and collide in the Postgres `extractions` table (memory ledger unaffected). L2 state blocks use unique ids (`<resource>:stateN:i`).
 - **Open contract requests:** none.
 - **Next for L2:** B-8 scroll accumulation, B-9 virtualization, B-11 frames, B-12 shadow DOM.
+
+## [2026-10-16] Lane L0 (Integrator), session 3: merged Lane 2
+
+- **Branch:** `main`
+- **What landed:** `lane/L2-explorer` rebased onto `4040e20` (one conflict, this file, resolved by keeping both entries) and fast-forwarded into `main` as `76ed7bd`.
+- **Gate on the merged tree:** ruff format and check clean, mypy --strict clean (54 files), 269 passed, 9 skipped (Postgres), coverage 89%.
+- **All lanes:** rebase on `main` now to pick up `explore/`, the `on_page` hook in `BrowserRenderer.render`, and the new `RenderWorker(explorer_factory=...)` parameter. Fakes of `Renderer.render` must accept `on_page=None`.
+- **Open:** K16 (block id collisions in the Postgres `extractions` table) is L0's next item; K1 still needs `CP_DATABASE_URL`.
+- **Process note:** commit `4040e20` was made on `main` by the L3 session. Lanes other than L0 must not commit to `main`; put the request in `CONTRACT_REQUESTS.md` instead.
