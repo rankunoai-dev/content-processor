@@ -157,3 +157,20 @@ git worktree add ../content-processor-lane4 -b lane/L4-verify
   - **Extractor owner (`adapters/html_source.py`):** an `<iframe>` with its own `hidden` attribute or `display:none` is not marked hidden (only a hidden parent is). R3 errs safe (gap instead of skip).
 - **Blocked on:** nothing. K5 still keeps every real record discovery-open until L2 lands.
 
+---
+
+## [2026-10-16] Lane L0 (Integrator), session 4: Wave 1 complete (merged L1, L2, L3, L4)
+
+- **Branch:** `main`
+- **What landed:**
+  - Merged `lane/L1-acquisition` (`d2de673`): depth-1 linked downloads, T2 impersonated fetcher, expected MIME link carrying.
+  - Merged `lane/L2-explorer` (`76ed7bd`): state explorer (B-1), disclosures/accordions (B-2), tabs (B-3), side-effect guard.
+  - Merged `lane/L3-docs` (`ee9e9b1`): PDF extras (forms, annotations, attachments), table continuation across pages, per-region multilingual OCR routing.
+  - Merged `lane/L4-verify` (`3b11f86`): honest `UrlRecord` assembly, deterministic rules R1, R2, R3, R10, gate reporting fix K14, Defect K15 closed, V-7 release gate passing with zero false `VERIFIED_WITHIN_SCOPE`.
+- **Gate on the fully merged tree:**
+  - `ruff format --check .`: 128 files clean.
+  - `ruff check .`: 0 errors.
+  - `mypy --strict src fixtures`: 0 errors across 63 source files.
+  - `pytest --cov=src`: 399 passed, 9 skipped (Postgres). Total coverage: 90.06% (threshold ≥ 85.0%).
+- **Open contract requests:** CR-002, CR-003, CR-004, CR-005, CR-006 filed in `docs/CONTRACT_REQUESTS.md`.
+- **Next steps:** Wave 2 (L5 Outputs & Analysis, L6 Platform & Ops CLI wiring, landing CR-002..CR-006).
