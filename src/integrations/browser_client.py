@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -32,11 +32,13 @@ from pydantic import Field
 from src.core.logger import get_logger
 from src.core.schemas import StrictModel
 
-__all__ = ["BrowserRenderer", "CapturedResponse", "RenderLimits", "RenderResult"]
+__all__ = ["BrowserRenderer", "CapturedResponse", "PageHook", "RenderLimits", "RenderResult"]
 
 _logger = get_logger("integrations.browser_client")
 
 HostChecker = Callable[[str], tuple[bool, str]]
+PageHook = Callable[[Any], Awaitable[None]]
+"""Called with the live page after the base state is captured (e.g. state exploration)."""
 
 ANALYTICS_HOSTS: tuple[str, ...] = (
     "googletagmanager.com",
@@ -110,7 +112,9 @@ class RenderLimits(StrictModel):
         "the page counts as settled; late hydration shorter than this is caught.",
     )
     poll_interval_s: float = Field(default=0.5, gt=0)
-    max_page_time_s: float = Field(default=90.0, gt=0)
+    max_page_time_s: float = Field(
+        default=150.0, gt=0, description="Whole render incl. any page hook (exploration)"
+    )
     max_response_body_bytes: int = Field(default=2 * 1024 * 1024, ge=1)
     max_captured_responses: int = Field(default=50, ge=0)
     screenshot_quality: int = Field(default=70, ge=10, le=100)
@@ -219,13 +223,18 @@ class BrowserRenderer:
             await self.stop()
             await self.start()
 
-    async def render(self, url: str) -> RenderResult:
-        """Render `url` with a fresh context. Never raises."""
+    async def render(self, url: str, on_page: PageHook | None = None) -> RenderResult:
+        """Render `url` with a fresh context. Never raises.
+
+        `on_page` runs on the live page after the base DOM, text and screenshot are
+        captured and before the context closes. Its failures are recorded as console
+        errors; they never discard the base capture.
+        """
         started = time.perf_counter()
         await self._recycle_if_needed()
         try:
             async with asyncio.timeout(self._limits.max_page_time_s):
-                result = await self._render_inner(url)
+                result = await self._render_inner(url, on_page)
         except TimeoutError:
             result = RenderResult(
                 requested_url=url, final_url=url, transport_error="render_timeout"
@@ -240,7 +249,9 @@ class BrowserRenderer:
         result.elapsed_ms = (time.perf_counter() - started) * 1000
         return result
 
-    async def _render_inner(self, url: str) -> RenderResult:  # noqa: C901 - one pipeline
+    async def _render_inner(  # noqa: C901 - one pipeline
+        self, url: str, on_page: PageHook | None = None
+    ) -> RenderResult:
         assert self._browser is not None  # noqa: S101 - start() precondition
         context = await self._browser.new_context(
             user_agent=self._ua,
@@ -327,6 +338,12 @@ class BrowserRenderer:
             except PlaywrightError as exc:
                 screenshot = b""
                 console_errors.append(f"screenshot_failed:{str(exc)[:120]}")
+            final_url = page.url
+            if on_page is not None:
+                try:
+                    await on_page(page)
+                except Exception as exc:  # noqa: BLE001 - a hook must not lose the base capture
+                    console_errors.append(f"page_hook_failed:{type(exc).__name__}:{str(exc)[:120]}")
 
             hops: list[str] = []
             headers: dict[str, str] = {}
@@ -343,7 +360,7 @@ class BrowserRenderer:
                 hops = list(reversed(chain))
             return RenderResult(
                 requested_url=url,
-                final_url=page.url,
+                final_url=final_url,
                 http_status=status,
                 headers=headers,
                 hops=hops,

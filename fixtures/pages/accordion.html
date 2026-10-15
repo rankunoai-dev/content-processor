@@ -1,0 +1,18 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Help</title></head>
+<body><nav><button aria-expanded="false" aria-controls="menu">Products</button><ul id="menu" hidden><li>Menu item</li></ul></nav>
+<main><h1>Help</h1><h2>Shipping</h2>
+<button class="acc" aria-expanded="false" aria-controls="a1">How long does delivery take?</button>
+<div id="a1" hidden><p>Delivery takes 3 to 5 working days.</p></div>
+<button class="acc" aria-expanded="false" aria-controls="a2">Can I return an item?</button>
+<div id="a2" hidden><p>Returns are accepted within 30 days, except sale items.</p></div>
+</main>
+<script>
+document.querySelectorAll('button[aria-controls]').forEach(function (b) {
+  b.addEventListener('click', function () {
+    if (b.dataset.post) { fetch('/lead', {method: 'POST', body: 'x'}).catch(function () {}); }
+    var open = b.getAttribute('aria-expanded') === 'true';
+    b.setAttribute('aria-expanded', String(!open));
+    document.getElementById(b.getAttribute('aria-controls')).hidden = open;
+  });
+});
+</script></body></html>

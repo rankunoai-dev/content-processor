@@ -1,0 +1,17 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Contact</title></head>
+<body><main><h1>Contact</h1>
+<button class="acc" aria-expanded="false" aria-controls="a1">Opening hours</button>
+<div id="a1" hidden><p>We are open 9 to 5, Monday to Friday.</p></div>
+<button class="acc" aria-expanded="false" aria-controls="a3" data-post="1">Show phone number</button>
+<div id="a3" hidden><p>Call 0800 123 456.</p></div>
+</main>
+<script>
+document.querySelectorAll('button[aria-controls]').forEach(function (b) {
+  b.addEventListener('click', function () {
+    if (b.dataset.post) { fetch('/lead', {method: 'POST', body: 'x'}).catch(function () {}); }
+    var open = b.getAttribute('aria-expanded') === 'true';
+    b.setAttribute('aria-expanded', String(!open));
+    document.getElementById(b.getAttribute('aria-controls')).hidden = open;
+  });
+});
+</script></body></html>

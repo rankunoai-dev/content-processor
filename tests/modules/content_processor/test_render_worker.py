@@ -40,9 +40,12 @@ class FakeRenderer:
     def __init__(self, result: RenderResult) -> None:
         self.result = result
         self.calls: list[str] = []
+        self.run_hook = False
 
-    async def render(self, url: str) -> RenderResult:
+    async def render(self, url: str, on_page=None) -> RenderResult:
         self.calls.append(url)
+        if on_page is not None and self.run_hook:
+            await on_page(None)
         return self.result
 
 
