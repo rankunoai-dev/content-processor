@@ -9,6 +9,7 @@ to English silently.
 
 from __future__ import annotations
 
+import importlib
 import io
 import shutil
 import unicodedata
@@ -136,14 +137,17 @@ def select_ocr_packs(
     return candidates[:3] or (["eng"] if allowed_packs is None or "eng" in allowed_packs else [])
 
 
+def _tesseract() -> Any:
+    """Load pytesseract lazily; it ships no type information."""
+    return importlib.import_module("pytesseract")
+
+
 def is_ocr_available() -> bool:
     """Check if the Tesseract OCR executable is available in PATH or system."""
     if shutil.which("tesseract") is not None:
         return True
     try:
-        import pytesseract
-
-        pytesseract.get_tesseract_version()
+        _tesseract().get_tesseract_version()
         return True
     except Exception:
         return False
@@ -162,7 +166,8 @@ def run_ocr(
     Otherwise, invokes pytesseract if available, or returns engine_available=False.
     """
     if ocr_runner is not None:
-        return ocr_runner(image_bytes, packs=packs, psm=psm)
+        result: OcrResult = ocr_runner(image_bytes, packs=packs, psm=psm)
+        return result
 
     if not is_ocr_available():
         return OcrResult(
@@ -174,15 +179,15 @@ def run_ocr(
         )
 
     try:
-        import pytesseract
-        from pytesseract import Output
+        pytesseract = _tesseract()
+        output_dict = pytesseract.Output.DICT
 
         image = Image.open(io.BytesIO(image_bytes))
         lang_str = "+".join(packs) if packs else "eng"
         config = f"--psm {psm}"
 
         data = pytesseract.image_to_data(
-            image, lang=lang_str, config=config, output_type=Output.DICT
+            image, lang=lang_str, config=config, output_type=output_dict
         )
 
         spans: list[OcrSpan] = []

@@ -1,4 +1,4 @@
-"""PDF extraction: native text, structured tables, visual image regions, and second-opinion triggers.
+"""PDF extraction: native text, tables, visual image regions, and second-opinion triggers.
 
 ARCHITECTURE.md §6:
 - Primary: PyMuPDF spans with coordinates, font sizes, bboxes, page labels.
@@ -14,7 +14,7 @@ from __future__ import annotations
 import hashlib
 import io
 import re
-from typing import Literal
+from typing import Any, Literal
 
 import pymupdf
 from pydantic import Field
@@ -33,7 +33,8 @@ TOOL_VERSION = "pdf/1.0"
 Role = Literal["main", "nav", "footer", "aside", "legal", "chrome", "unknown"]
 
 _DISCLAIMER_KEYWORDS = re.compile(
-    r"copyright|all rights reserved|confidential|terms\s*(?:and|&)\s*conditions|privacy policy|disclaimer",
+    r"copyright|all rights reserved|confidential|terms\s*(?:and|&)\s*conditions"
+    r"|privacy policy|disclaimer",
     re.IGNORECASE,
 )
 
@@ -97,7 +98,9 @@ def extract_pdf(
 ) -> PdfExtraction:
     """Extract native text, tables, and visual image regions from a PDF document."""
     try:
-        doc = pymupdf.open(stream=pdf_bytes, filetype="pdf")
+        # PyMuPDF ships no usable type information; treat the document as Any.
+        fitz: Any = pymupdf
+        doc: Any = fitz.open(stream=pdf_bytes, filetype="pdf")
     except Exception as exc:
         _logger.error("pdf_open_error", extra={"error": str(exc), "resource_id": resource_id})
         return PdfExtraction(
@@ -152,6 +155,7 @@ def extract_pdf(
             )
         )
 
+    page_count = len(doc)
     reading_order_idx = 1
     total_chars = 0
     garbled_chars = 0
@@ -197,7 +201,7 @@ def extract_pdf(
                         if size > max_size:
                             max_size = size
                         flags = int(span.get("flags", 0))
-                        if flags & 2 != 0:  # bit 1 is bold in PyMuPDF
+                        if flags & 16 != 0:  # PyMuPDF span flag bit 4 = bold (bit 1 = italic)
                             is_bold = True
                 if span_texts:
                     line_texts.append("".join(span_texts))
@@ -383,7 +387,6 @@ def extract_pdf(
             warnings.append("pypdf_second_opinion_acquired")
 
     # Scanned document detection: has pages and image regions, but 0 native text blocks
-    page_count = len(doc) if hasattr(doc, "__len__") else page_index + 1
     is_scanned = pages_with_native_text == 0 and len(image_regions) > 0
 
     return PdfExtraction(

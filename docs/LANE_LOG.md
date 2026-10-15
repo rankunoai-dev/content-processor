@@ -49,3 +49,19 @@ git worktree add ../content-processor-lane4 -b lane/L4-verify
 - **Gate:** ruff clean, mypy strict clean (51 files), tests green, coverage 89%.
 - **Available to other lanes:** Lane 3 can rebase on `main` to inherit clean mypy typing without local `Any` workarounds.
 - **Open contract requests:** CR-002 (L1 edges), CR-003 (L2/L4 states and regions).
+
+## [2026-10-16] Lane L3 (Documents and OCR), session 1: adapters typed, doc worker
+
+- **Branch / worktree:** `lane/L3-docs` at `../content-processor-lane3`, rebased on `main` 029205e
+- **What landed:**
+  - C-2: PDF, OCR and image adapters now pass ruff and `mypy --strict` without touching `pyproject.toml` (untyped PyMuPDF and pytesseract handled locally via `Any`). Two bugs fixed in `pdf.py`: `len(doc)` was called after `doc.close()` (page count would raise), and the bold test used the italic flag bit.
+  - C-3: `workers/doc_worker.py`, `DocWorker` for `EXTRACT_DOC` and `EXTRACT_IMAGE`. Extraction runs in a spawned child process with a wall-clock kill (`run_isolated`); timeout becomes PARTIAL plus a LIMIT_HIT gap, crashes retry, oversize payloads are PARTIAL.
+  - C-4 (part): scanned PDFs and full-page image regions are OCRed per region even when other regions have native text. Missing Tesseract yields an UNSUPPORTED gap, never a silent empty result.
+  - Tests: `test_doc_worker.py` (14), `test_ocr_adapter.py` (5).
+- **Gate:** ruff clean, `mypy --strict src fixtures` clean (55 files), tests pass (Postgres tests skipped), coverage 86.3%.
+- **Available to other lanes:** `DocWorker(ledger=, evidence=, run_id=, worker_id=).run_until_idle()`. Task payload it expects: `{"resource_id", "sha256"}`.
+- **Open contract requests:** CR-001 still OPEN (L3 deps in a CI-installed extra; mypy overrides for `pymupdf.*`, `pytesseract.*` would let me drop the local `Any` shims).
+- **Blocked on / needs from others:**
+  - L1: `fetch_worker` leaves non-HTML payloads at `IN_PROGRESS acquired:awaiting_extraction`; it must enqueue `EXTRACT_DOC` / `EXTRACT_IMAGE` with the payload above.
+  - Operator: Tesseract is not installed on this machine (C-1), so OCR is only tested through an injected runner. Install it with the core language packs to exercise the real engine.
+- **Not done yet:** C-1 startup detection, C-5/C-6/C-7, C-9, C-10, `fixtures/docs/`.
