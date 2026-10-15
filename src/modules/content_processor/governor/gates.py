@@ -66,6 +66,14 @@ _AGE_GATE = re.compile(
     r"i am a (healthcare|medical))",
     re.IGNORECASE,
 )
+_SIGNIN_PROMPT = re.compile(
+    r"\b((sign|log) ?in (to|before you) (view|access|continue|read|download|see)|"
+    r"(sign|log) ?in required|you must (sign|log) ?in)\b",
+    re.IGNORECASE,
+)
+_SIGNIN_MAX_WORDS = 40
+_SENTENCE = re.compile(r"(?<=[.!?])\s+")
+_HEADINGS = ("h1", "h2", "h3", "h4", "h5", "h6")
 _WS = re.compile(r"\s+")
 
 
@@ -125,6 +133,24 @@ def _main_text(tree: HTMLParser) -> str:
     return _text(main)
 
 
+def _teaser_words(tree: HTMLParser) -> int:
+    """Words of real content left around a lead-gen form.
+
+    Main text without the form, headings and the sentences that only ask the
+    visitor to fill the form or download. `verify.gaps` decides PARTIAL
+    (teaser kept) or BLOCKED (nothing else) from this count.
+    """
+    main = tree.css_first("main") or tree.css_first("article") or tree.body
+    if main is None:
+        return 0
+    for tag in ("nav", "footer", "header", "script", "style", "noscript", "form", *_HEADINGS):
+        for node in main.css(tag):
+            node.decompose()
+    sentences = _SENTENCE.split(_text(main))
+    kept = [s for s in sentences if not (_GATE_PHRASES.search(s) or _DOWNLOAD_CTA.search(s))]
+    return sum(len(s.split()) for s in kept)
+
+
 def detect_gates(dom_html: bytes, inner_text: str = "") -> list[GateFinding]:
     """Detect content gates in a document.
 
@@ -158,6 +184,23 @@ def detect_gates(dom_html: bytes, inner_text: str = "") -> list[GateFinding]:
             )
             break
 
+    # Sign-in prompt without a form: a tiny page whose content is "sign in to view"
+    # (e.g. an HTML login notice served where a document was expected, case 106).
+    signin = _SIGNIN_PROMPT.search(main_text)
+    if signin and main_words < _SIGNIN_MAX_WORDS and not findings:
+        findings.append(
+            GateFinding(
+                kind="login_wall",
+                severity="blocks_main_content",
+                evidence=[
+                    f"phrase:{signin.group(0)[:40]}",
+                    "no_password_input",
+                    f"main_words={main_words}",
+                ],
+                main_word_count=main_words,
+            )
+        )
+
     # Lead-generation wall: email input + download/access CTA + asset vocabulary.
     for form in tree.css("form"):
         inputs = form.css("input")
@@ -178,6 +221,7 @@ def detect_gates(dom_html: bytes, inner_text: str = "") -> list[GateFinding]:
             evidence.append(f"phrase:{gate_hit.group(0)[:40]}")
         evidence.append(f"asset:{asset_hit.group(0)[:30]}")
         evidence.append(f"main_words={main_words}")
+        evidence.append(f"teaser_words={_teaser_words(HTMLParser(dom_html))}")
         findings.append(
             GateFinding(
                 kind="lead_gen_form_wall",

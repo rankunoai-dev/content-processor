@@ -1,6 +1,6 @@
 {
   "schema_version": "1.0",
-  "notes": "Expected classifier verdicts and badges for the local fixture server. Every entry is a release-gate assertion: a wrong verdict fails Stage 0.",
+  "notes": "Expected classifier verdicts and badges for the local fixture server. Every entry is a release-gate assertion: a wrong verdict fails Stage 0. expect_badge is the badge once discovery is closed; with discovery open a stricter badge is expected. VERIFIED_WITHIN_SCOPE is allowed only where expect_badge says so (V-7).",
   "fixtures": [
     {
       "path": "/pages/static_ok",
@@ -22,7 +22,8 @@
       ],
       "must_contain": [
         "Open the statement"
-      ]
+      ],
+      "expect_badge": "VERIFIED_WITHIN_SCOPE"
     },
     {
       "path": "/pages/template_hidden",
@@ -35,7 +36,8 @@
       ],
       "must_contain": [
         "Visible paragraph."
-      ]
+      ],
+      "expect_badge": "VERIFIED_WITHIN_SCOPE"
     },
     {
       "path": "/pages/soft_hyphen",
@@ -43,7 +45,8 @@
       "expect_block": "NONE",
       "must_contain_normalized": [
         "Versicherungsbedingungen"
-      ]
+      ],
+      "expect_badge": "VERIFIED_WITHIN_SCOPE"
     },
     {
       "path": "/pages/third_party_widget",
@@ -56,7 +59,8 @@
       },
       "must_contain": [
         "Main article body."
-      ]
+      ],
+      "expect_badge": "VERIFIED_WITHIN_SCOPE"
     },
     {
       "path": "/pages/honeypot",
@@ -67,7 +71,8 @@
       ],
       "must_contain": [
         "Public content."
-      ]
+      ],
+      "expect_badge": "VERIFIED_WITHIN_SCOPE"
     },
     {
       "path": "/pages/details_collapsed",
@@ -77,7 +82,9 @@
         "collapsed_published": [
           "Collapsed but published answer."
         ]
-      }
+      },
+      "expect_badge": "NEEDS_REVIEW",
+      "notes": "Collapsed answer is published but not visible until a disclosure opens; reaches VERIFIED_WITHIN_SCOPE only when the state explorer (B-2) opens it. Update with the L2 merge."
     },
     {
       "path": "/pages/delayed_hydration",
@@ -89,7 +96,9 @@
       ],
       "must_not_contain_in_source": [
         "Hydrated content arrived."
-      ]
+      ],
+      "expect_badge": "VERIFIED_WITHIN_SCOPE",
+      "notes": "Only with a renderer that runs scripts; the in-process release gate refuses to render it and expects a stricter badge."
     },
     {
       "path": "/challenge-200",
@@ -116,13 +125,16 @@
       "case": "106",
       "requested_mime": "application/pdf",
       "expect_block": "WRONG_PAYLOAD",
-      "expect_badge": "BLOCKED"
+      "expect_badge": "BLOCKED",
+      "expect_gate": "login_wall",
+      "notes": "HTML sign-in notice where a PDF was expected (K15). BLOCKED twice over: R10 wrong_payload when the expected type is known, and the sign-in-prompt gate when it is not."
     },
     {
       "path": "/rate-limited",
       "case": "77",
       "expect_block": "RATE",
-      "expect_retry_after_s": 7
+      "expect_retry_after_s": 7,
+      "notes": "No expect_badge: RUNNING while the retry is pending, FAILED after max attempts. VERIFIED is forbidden like for every fixture without VERIFIED_WITHIN_SCOPE."
     },
     {
       "path": "/pay-per-crawl",
@@ -134,19 +146,29 @@
       "path": "/meta-refresh",
       "case": "97",
       "expect_block": "NONE",
-      "expect_redirect_kind": "meta"
+      "expect_redirect_kind": "meta",
+      "expect_badge": "VERIFIED_WITHIN_SCOPE",
+      "notes": "Follows the meta refresh to /pages/static_ok."
     },
     {
       "path": "/truncated",
       "case": "104",
       "expect_block": "NONE",
-      "expect_integrity": "truncated"
+      "expect_integrity": "truncated",
+      "expect_badge": "PARTIAL"
     },
     {
       "path": "/gated",
       "case": "81",
       "expect_block": "AUTH_WALL",
       "expect_badge": "BLOCKED"
+    },
+    {
+      "path": "/private/secret",
+      "case": "84",
+      "expect_block": "NONE",
+      "expect_badge": "EXCLUDED",
+      "notes": "Disallowed by robots.txt under the respect policy; excluded before any fetch, kept in the denominator."
     },
     {
       "path": "/pages/gated_whitepaper",
@@ -184,7 +206,8 @@
       "case": "215-trap",
       "expect_block": "NONE",
       "expect_gate": null,
-      "trap": "false_positive"
+      "trap": "false_positive",
+      "expect_badge": "VERIFIED_WITHIN_SCOPE"
     }
   ],
   "seeds": [
