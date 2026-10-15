@@ -30,6 +30,7 @@ __all__ = [
     "SQL_SAVE_HOST",
     "SQL_SET_ROBOTS",
     "SQL_TASK_COUNTS",
+    "SQL_UPSERT_BLOCK",
     "SQL_UPSERT_RESOURCE",
 ]
 
@@ -210,6 +211,14 @@ ON CONFLICT (run_id, schedule_key) DO UPDATE
 SET final_url = EXCLUDED.final_url, status = EXCLUDED.status,
     status_reason = EXCLUDED.status_reason, payload_sha256 = EXCLUDED.payload_sha256,
     acquired_at_tier = EXCLUDED.acquired_at_tier, record = EXCLUDED.record, updated_at = now()
+"""
+
+SQL_UPSERT_BLOCK = """
+INSERT INTO extractions (extraction_id, run_id, region_id, block_key, method, tool_version, record)
+VALUES (%(extraction_id)s, %(run_id)s, %(region_id)s, %(block_key)s, %(method)s, %(tool_version)s,
+        %(record)s::jsonb)
+ON CONFLICT (run_id, region_id, method) DO UPDATE
+SET block_key = EXCLUDED.block_key, tool_version = EXCLUDED.tool_version, record = EXCLUDED.record
 """
 
 SQL_RESOURCE_COUNTS = """

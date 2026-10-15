@@ -11,7 +11,7 @@ from datetime import datetime
 from typing import Protocol
 
 from src.core.schemas import StrictModel
-from src.modules.content_processor.contracts import Resource, RunEvent, Task
+from src.modules.content_processor.contracts import ContentBlock, Resource, RunEvent, Task
 from src.modules.content_processor.enums import TaskKind, TaskState
 from src.modules.content_processor.governor.escalation import HostAccessState
 
@@ -59,6 +59,10 @@ class LedgerPort(Protocol):
 
     def upsert_resource(self, resource: Resource, host: str) -> None:
         """Insert or update the resource row keyed by (run_id, schedule_key)."""
+        ...
+
+    def upsert_blocks(self, resource_id: str, blocks: Sequence[ContentBlock]) -> None:
+        """Insert or update extracted blocks for a resource (keyed by region and method)."""
         ...
 
     def append_event(self, event: RunEvent) -> int:

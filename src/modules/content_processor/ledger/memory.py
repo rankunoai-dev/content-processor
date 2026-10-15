@@ -11,13 +11,20 @@ from collections.abc import Iterable, Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from src.modules.content_processor.contracts import Resource, RunEvent, Task
+from src.modules.content_processor.contracts import ContentBlock, Resource, RunEvent, Task
 from src.modules.content_processor.enums import AccessTier, TaskKind, TaskState
 from src.modules.content_processor.governor.escalation import CircuitState, HostAccessState
 from src.modules.content_processor.ledger.sql import HOST_SLOT_KINDS
 from src.modules.content_processor.workers.ports import RobotsCache
 
 __all__ = ["MemoryLedger"]
+
+
+def _layer_counts(blocks: Sequence[ContentBlock]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for b in blocks:
+        counts[b.layer.value] = counts.get(b.layer.value, 0) + 1
+    return counts
 
 
 class MemoryLedger:
@@ -37,6 +44,7 @@ class MemoryLedger:
         self._base_delay = base_delay_s
         self._max_concurrency = max_concurrency
         self.resources: dict[str, Resource] = {}
+        self.blocks: dict[str, list[ContentBlock]] = {}
         self.events: list[RunEvent] = []
         self.hosts: dict[str, HostAccessState] = {}
         self.robots: dict[str, RobotsCache] = {}
@@ -56,6 +64,7 @@ class MemoryLedger:
                 continue
             stored = task.model_copy(update={"id": self._next_id})
             self._tasks[self._next_id] = stored
+            known.add(task.idempotency_key)
             self._next_id += 1
             added += 1
         return added
@@ -152,6 +161,10 @@ class MemoryLedger:
         """Keep the latest record per schedule key."""
         self.resources[resource.schedule_key] = resource.model_copy(deep=True)
 
+    def upsert_blocks(self, resource_id: str, blocks: Sequence[ContentBlock]) -> None:
+        """Replace the block set of a resource (same region keys overwrite)."""
+        self.blocks[resource_id] = [b.model_copy(deep=True) for b in blocks]
+
     def append_event(self, event: RunEvent) -> int:
         """Append in order."""
         self.events.append(event)
@@ -226,6 +239,7 @@ class MemoryLedger:
                     ),
                     "tier": r.acquired_at_tier.value if r.acquired_at_tier else None,
                     "sha256": r.payload_sha256,
+                    "blocks_by_layer": _layer_counts(self.blocks.get(r.resource_id, [])),
                 }
                 for r in self.resources.values()
             ],

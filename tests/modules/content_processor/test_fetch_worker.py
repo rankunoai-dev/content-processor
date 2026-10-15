@@ -40,6 +40,7 @@ class InMemoryLedger:
     def __init__(self) -> None:
         self.tasks: dict[int, Task] = {}
         self.resources: dict[str, Resource] = {}
+        self.blocks: dict[str, list] = {}
         self.events: list[RunEvent] = []
         self.hosts: dict[str, HostAccessState] = {}
         self.robots: dict[str, RobotsCache] = {}
@@ -94,6 +95,9 @@ class InMemoryLedger:
 
     def upsert_resource(self, resource: Resource, host: str) -> None:
         self.resources[resource.schedule_key] = resource.model_copy(deep=True)
+
+    def upsert_blocks(self, resource_id: str, blocks) -> None:
+        self.blocks[resource_id] = list(blocks)
 
     def append_event(self, event: RunEvent) -> int:
         self.events.append(event)
@@ -159,14 +163,18 @@ async def _run(ledger: InMemoryLedger, worker: FetchWorker, url: str) -> Resourc
 async def test_clean_page_is_acquired_with_evidence(worker_env, tmp_path: Path):
     ledger, worker = worker_env
     res = await _run(ledger, worker, "http://testserver/pages/static_ok")
-    assert res.status is EntityStatus.IN_PROGRESS
-    assert res.status_reason == "acquired:awaiting_extraction"
+    assert res.status is EntityStatus.EXTRACTED_UNVERIFIED
+    assert res.status_reason == "source_extracted"
+    texts = [b.normalized_text for b in ledger.blocks[res.resource_id]]
+    assert "Eligibility applies only to annual plans." in texts
     assert res.payload_sha256 and LocalEvidenceStore(tmp_path, "t1").exists(res.payload_sha256)
     assert res.sniffed_mime == "text/html" and res.acquired_at_tier is AccessTier.T1_POLITE_HTTP
     assert res.block_verdict is not None and not res.block_verdict.is_block
     assert ledger.robots[HOST].status == 200
     assert ledger.hosts[HOST].clean_streak == 1
-    assert [e.new_state for e in ledger.events if e.entity_type == "resource"] == ["IN_PROGRESS"]
+    assert [e.new_state for e in ledger.events if e.entity_type == "resource"] == [
+        "EXTRACTED_UNVERIFIED"
+    ]
 
 
 async def test_robots_disallow_is_excluded_without_fetching(worker_env):

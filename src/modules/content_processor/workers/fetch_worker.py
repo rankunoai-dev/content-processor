@@ -19,6 +19,7 @@ from urllib.parse import urlsplit, urlunsplit
 from src.core.logger import get_logger
 from src.integrations.evidence_store import EvidenceStore
 from src.integrations.http_client import FetchResult, HttpFetcher
+from src.modules.content_processor.adapters.html_source import extract_html_source
 from src.modules.content_processor.contracts import (
     BlockVerdict,
     RedirectHop,
@@ -233,13 +234,36 @@ class FetchWorker:
             else:
                 host_state.record_success()
                 self._ledger.save_host_state(tenant, host_state)
-                self._upsert(
-                    task, resource, EntityStatus.IN_PROGRESS, "acquired:awaiting_extraction"
-                )
+                if result.sniffed_mime == "text/html":
+                    self._extract_source(task, resource, result, evidence_ref.sha256)
+                else:
+                    self._upsert(
+                        task, resource, EntityStatus.IN_PROGRESS, "acquired:awaiting_extraction"
+                    )
             self._ledger.complete(task.id or 0, self._worker_id)
             return
 
         self._handle_block(task, resource, block, result, host_state)
+
+    def _extract_source(
+        self, task: Task, resource: Resource, result: FetchResult, sha256: str
+    ) -> None:
+        """Run the source channel on an acquired HTML payload (Stage 1b)."""
+        extraction = extract_html_source(
+            result.body,
+            base_url=result.final_url,
+            evidence_id=f"evidence:{sha256}",
+            resource_id=resource.resource_id,
+            state_id=f"{self._run_id}|source",
+        )
+        self._ledger.upsert_blocks(resource.resource_id, extraction.blocks)
+        reasons = ["source_extracted"]
+        if extraction.placeholder_suspected:
+            reasons.append("placeholder_content_suspected")
+        if extraction.needs_render_hint:
+            reasons.append("needs_render")
+        reasons.extend(extraction.warnings)
+        self._upsert(task, resource, EntityStatus.EXTRACTED_UNVERIFIED, ";".join(reasons))
 
     def _handle_block(
         self,

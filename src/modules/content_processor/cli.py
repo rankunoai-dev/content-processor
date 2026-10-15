@@ -22,6 +22,7 @@ from src.core.logger import get_logger
 from src.integrations.evidence_store import LocalEvidenceStore
 from src.integrations.http_client import FetchLimits, HttpFetcher
 from src.modules.content_processor.contracts import RunScope
+from src.modules.content_processor.export.content import whole_content
 from src.modules.content_processor.ledger.memory import MemoryLedger
 from src.modules.content_processor.ledger.tasks import TaskLedger, new_run_id
 from src.modules.content_processor.planner import fetch_tasks_for
@@ -173,6 +174,20 @@ async def _dryrun(args: argparse.Namespace) -> int:
     text = json.dumps(report, indent=2, default=str)
     if args.out:
         Path(args.out).write_text(text + "\n", encoding="utf-8")
+        content_path = Path(args.out).with_suffix(".content.jsonl")
+        with content_path.open("w", encoding="utf-8") as handle:
+            for res in ledger.resources.values():
+                blocks = ledger.blocks.get(res.resource_id, [])
+                body_text = whole_content(blocks)
+                row = {
+                    "url": res.requested_url,
+                    "status": res.status.value,
+                    "reason": res.status_reason,
+                    "word_count": len(body_text.split()),
+                    "main_only": whole_content(blocks, include_boilerplate=False),
+                    "whole_content": body_text,
+                }
+                handle.write(json.dumps(row, ensure_ascii=False) + "\n")
     sys.stdout.write(text + "\n")
     return 0
 

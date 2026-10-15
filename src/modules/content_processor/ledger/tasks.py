@@ -20,7 +20,13 @@ import psycopg
 from psycopg.rows import dict_row
 
 from src.core.logger import get_logger
-from src.modules.content_processor.contracts import Resource, RunEvent, RunScope, Task
+from src.modules.content_processor.contracts import (
+    ContentBlock,
+    Resource,
+    RunEvent,
+    RunScope,
+    Task,
+)
 from src.modules.content_processor.enums import AccessTier, TaskKind, TaskState
 from src.modules.content_processor.governor.escalation import CircuitState, HostAccessState
 from src.modules.content_processor.ledger import sql
@@ -278,6 +284,24 @@ class TaskLedger:
                     "record": resource.model_dump_json(),
                 },
             )
+        self._conn.commit()
+
+    def upsert_blocks(self, resource_id: str, blocks: Sequence[ContentBlock]) -> None:
+        """Insert or update extracted blocks (one row per region and method)."""
+        with self._conn.cursor() as cur:
+            for block in blocks:
+                cur.execute(
+                    sql.SQL_UPSERT_BLOCK,
+                    {
+                        "extraction_id": block.block_id,
+                        "run_id": block.state_id.split("|", 1)[0],
+                        "region_id": block.region_id,
+                        "block_key": block.block_key,
+                        "method": block.method,
+                        "tool_version": block.tool_version,
+                        "record": block.model_dump_json(),
+                    },
+                )
         self._conn.commit()
 
     def resource_counts(self, run_id: str) -> dict[str, int]:
