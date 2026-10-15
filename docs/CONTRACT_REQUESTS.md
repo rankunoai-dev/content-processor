@@ -26,7 +26,7 @@ Only Lane L0 edits `contracts.py`, `enums.py`, `workers/ports.py`, `ledger/schem
 - **File(s):** pyproject.toml
 - **Change:** move `pymupdf`, `pypdf`, `pdfplumber`, `pytesseract`, `pillow` from the `docs` extra into an installable extra that CI installs; add mypy overrides for `pymupdf.*` untyped calls if L3 cannot type them locally.
 - **Why:** C-2, K3
-- **Status:** OPEN
+- **Status:** LANDED
 
 ### CR-002: Port methods for embedded assets and edges
 - **Lane:** L1 (anticipated by L0)

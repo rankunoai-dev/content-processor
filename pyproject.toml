@@ -63,8 +63,13 @@ module = "tests.*"
 disallow_untyped_defs = false
 
 [[tool.mypy.overrides]]
-module = ["selectolax.*"]
+module = ["selectolax.*", "pytesseract.*", "pdfplumber.*", "pypdf.*"]
 ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["pymupdf.*", "fitz.*"]
+ignore_missing_imports = true
+disallow_untyped_calls = false
 
 [tool.pytest.ini_options]
 minversion = "8.0"

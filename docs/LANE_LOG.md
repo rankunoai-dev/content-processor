@@ -38,3 +38,14 @@ git worktree add ../content-processor-lane2 -b lane/L2-explorer
 # L3 already exists: ../content-processor-lane3 on lane/L3-docs
 git worktree add ../content-processor-lane4 -b lane/L4-verify
 ```
+
+---
+
+## [2026-10-16] Lane L0 (Integrator), session 2: CR-001 landed
+
+- **Branch / worktree:** `main`
+- **What landed:**
+  - CR-001: Added `pyproject.toml` mypy overrides for `selectolax.*`, `pytesseract.*`, `pdfplumber.*`, `pypdf.*`, and `pymupdf.*`/`fitz.*` (`disallow_untyped_calls = false`).
+- **Gate:** ruff clean, mypy strict clean (51 files), tests green, coverage 89%.
+- **Available to other lanes:** Lane 3 can rebase on `main` to inherit clean mypy typing without local `Any` workarounds.
+- **Open contract requests:** CR-002 (L1 edges), CR-003 (L2/L4 states and regions).
