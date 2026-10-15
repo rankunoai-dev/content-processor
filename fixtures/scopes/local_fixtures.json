@@ -20,17 +20,29 @@
     "http://127.0.0.1:8765/meta-refresh",
     "http://127.0.0.1:8765/truncated",
     "http://127.0.0.1:8765/gated",
-    "http://127.0.0.1:8765/private/secret"
+    "http://127.0.0.1:8765/private/secret",
+    "http://127.0.0.1:8765/pages/gated_whitepaper",
+    "http://127.0.0.1:8765/pages/pincode_modal",
+    "http://127.0.0.1:8765/pages/product_unavailable",
+    "http://127.0.0.1:8765/pages/age_gate",
+    "http://127.0.0.1:8765/pages/newsletter_only"
   ],
-  "hosts_in_scope": ["127.0.0.1"],
+  "hosts_in_scope": [
+    "127.0.0.1"
+  ],
   "authorization": {
     "kind": "PUBLIC_THIRD_PARTY",
     "reference": "fixtures",
     "approved_by": "gaurav.doshi@rankuno.com",
     "approved_at": "2026-10-15T00:00:00Z",
-    "hosts": ["127.0.0.1"]
+    "hosts": [
+      "127.0.0.1"
+    ]
   },
   "access_tier_ceiling": "T3_FIDELITY_BROWSER",
   "egress_allow_private": true,
-  "budgets": {"cost_ceiling_usd": 0.0, "max_runtime_s": 600}
+  "budgets": {
+    "cost_ceiling_usd": 0.0,
+    "max_runtime_s": 600
+  }
 }

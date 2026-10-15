@@ -39,8 +39,10 @@ from src.modules.content_processor.enums import (
 )
 from src.modules.content_processor.governor.block_classifier import classify_response
 from src.modules.content_processor.governor.escalation import ActionKind
+from src.modules.content_processor.governor.gates import detect_gates
 from src.modules.content_processor.governor.robots import evaluate_robots
 from src.modules.content_processor.ledger.keys import task_key
+from src.modules.content_processor.verify.gaps import gap_for_gate
 from src.modules.content_processor.workers.ports import LedgerPort, RobotsCache
 
 __all__ = ["FetchWorker", "user_agent_for"]
@@ -264,6 +266,12 @@ class FetchWorker:
         if extraction.needs_render_hint:
             reasons.append("needs_render")
         reasons.extend(extraction.warnings)
+        for finding in detect_gates(result.body):
+            gap, _ = gap_for_gate(
+                self._run_id, resource.resource_id, finding, [f"evidence:{sha256}"]
+            )
+            self._ledger.record_gap(gap)
+            reasons.append(f"gate:{finding.kind}")
         self._upsert(task, resource, EntityStatus.EXTRACTED_UNVERIFIED, ";".join(reasons))
         self._ledger.enqueue_followups(
             [

@@ -40,6 +40,7 @@ __all__ = [
     "ClaimContext",
     "ContentBlock",
     "DiscoveryState",
+    "FormPersona",
     "Gap",
     "InteractionPolicy",
     "InventoryCounts",
@@ -138,6 +139,32 @@ def _default_robots(kind: AuthorizationKind) -> RobotsPolicy:
     return RobotsPolicy.RESPECT
 
 
+_FREEMAIL = frozenset(
+    {"gmail.com", "yahoo.com", "outlook.com", "hotmail.com", "icloud.com", "proton.me", "aol.com"}
+)
+
+
+class FormPersona(StrictModel):
+    """A real, consenting business identity for lead forms (feasibility doc, Path A)."""
+
+    full_name: str = Field(min_length=3)
+    business_email: str = Field(pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+    company: str = Field(min_length=2)
+    job_title: str = Field(min_length=2)
+    consent_reference: str = Field(min_length=3, description="Where the person consented")
+    approval_reference: str = Field(min_length=3, description="AI Lead approval for this use")
+    max_submissions_per_host_per_day: int = Field(default=1, ge=0, le=5)
+
+    @model_validator(mode="after")
+    def _no_freemail(self) -> FormPersona:
+        """Business identities only; invented or free-mail personas are refused."""
+        domain = self.business_email.rsplit("@", 1)[-1].lower()
+        if domain in _FREEMAIL:
+            msg = "persona.business_email must be a business domain, not free mail"
+            raise ValueError(msg)
+        return self
+
+
 class RunScope(StrictModel):
     """Declared scope of a run. Hashed into `scope_hash` for recrawl identity."""
 
@@ -176,6 +203,12 @@ class RunScope(StrictModel):
         default=None, description="Restrict OCR packs; None = full multilingual routing"
     )
     recrawl_of_run_id: str | None = None
+    gated_content_policy: Literal["report_gap", "persona", "hitl"] = Field(
+        default="report_gap",
+        description="report_gap always runs; persona adds authorized form filling; "
+        "hitl adds the review-queue export",
+    )
+    persona: FormPersona | None = None
     egress_allow_private: bool = Field(
         default=False,
         description="Development only: allow loopback/private hosts for the local fixture server.",
@@ -217,6 +250,19 @@ class RunScope(StrictModel):
                 raise ValueError(msg)
         if self.egress_allow_private and self.profile is not EnvironmentProfile.DEVELOPMENT:
             msg = "egress_allow_private is permitted only in the development profile"
+            raise ValueError(msg)
+        if self.gated_content_policy == "persona" and self.persona is None:
+            msg = "gated_content_policy=persona requires scope.persona"
+            raise ValueError(msg)
+        if (
+            self.persona is not None
+            and self.authorization.kind is AuthorizationKind.PUBLIC_THIRD_PARTY
+            and not self.persona.approval_reference.startswith("persona:")
+        ):
+            msg = (
+                "persona use on public third-party hosts needs an AI Lead approval reference "
+                "of the form persona:<ticket>"
+            )
             raise ValueError(msg)
         if self.access_context == "authenticated_client" and (
             self.authorization.kind is not AuthorizationKind.OWNER_AUTHORIZED

@@ -11,7 +11,7 @@ from collections.abc import Iterable, Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from src.modules.content_processor.contracts import ContentBlock, Resource, RunEvent, Task
+from src.modules.content_processor.contracts import ContentBlock, Gap, Resource, RunEvent, Task
 from src.modules.content_processor.enums import AccessTier, TaskKind, TaskState
 from src.modules.content_processor.governor.escalation import CircuitState, HostAccessState
 from src.modules.content_processor.ledger.sql import HOST_SLOT_KINDS
@@ -46,6 +46,7 @@ class MemoryLedger:
         self.resources: dict[str, Resource] = {}
         self.blocks: dict[str, list[ContentBlock]] = {}
         self.summaries: dict[str, dict[str, dict[str, Any]]] = {}
+        self.gaps: dict[str, Gap] = {}
         self.events: list[RunEvent] = []
         self.hosts: dict[str, HostAccessState] = {}
         self.robots: dict[str, RobotsCache] = {}
@@ -181,6 +182,14 @@ class MemoryLedger:
         """Keep the latest summary per key."""
         self.summaries.setdefault(resource_id, {})[key] = value
 
+    def record_gap(self, gap: Gap) -> None:
+        """Keep the latest version of each gap."""
+        self.gaps[gap.gap_id] = gap.model_copy(deep=True)
+
+    def get_gaps(self, resource_id: str) -> list[Gap]:
+        """Gaps for one resource, in insertion order."""
+        return [g.model_copy(deep=True) for g in self.gaps.values() if g.resource_id == resource_id]
+
     def upsert_blocks(self, resource_id: str, blocks: Sequence[ContentBlock]) -> None:
         """Replace the block set of a resource (same region keys overwrite)."""
         self.blocks[resource_id] = [b.model_copy(deep=True) for b in blocks]
@@ -261,6 +270,15 @@ class MemoryLedger:
                     "sha256": r.payload_sha256,
                     "blocks_by_layer": _layer_counts(self.blocks.get(r.resource_id, [])),
                     "render": self.summaries.get(r.resource_id, {}).get("render"),
+                    "gaps": [
+                        {
+                            "type": g.gap_type.value,
+                            "reason": g.reason,
+                            "status": g.status.value,
+                            "evidence": g.evidence_ids,
+                        }
+                        for g in self.get_gaps(r.resource_id)
+                    ],
                 }
                 for r in self.resources.values()
             ],

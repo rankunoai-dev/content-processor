@@ -24,6 +24,7 @@ from src.integrations.evidence_store import LocalEvidenceStore
 from src.integrations.http_client import FetchLimits, HttpFetcher
 from src.modules.content_processor.contracts import RunScope
 from src.modules.content_processor.export.content import whole_content
+from src.modules.content_processor.export.review_queue import write_review_queue
 from src.modules.content_processor.ledger.memory import MemoryLedger
 from src.modules.content_processor.ledger.tasks import TaskLedger, new_run_id
 from src.modules.content_processor.planner import fetch_tasks_for
@@ -187,7 +188,7 @@ async def _dryrun(args: argparse.Namespace) -> int:
         )
         try:
             rendered = await render_worker.run_until_idle(
-                max_tasks=args.max_tasks, idle_polls=5, poll_s=0.5
+                max_tasks=args.max_tasks, idle_polls=5, poll_s=0.5, max_wait_s=60.0
             )
         finally:
             await renderer.stop()
@@ -200,9 +201,12 @@ async def _dryrun(args: argparse.Namespace) -> int:
         "rendered": rendered,
         **ledger.report(),
     }
-    text = json.dumps(report, indent=2, default=str)
     if args.out:
+        text = json.dumps(report, indent=2, default=str)
         Path(args.out).write_text(text + "\n", encoding="utf-8")
+        queue_path = Path(args.out).with_suffix(".review_queue.jsonl")
+        queued = write_review_queue(queue_path, ledger.resources.values(), ledger.get_gaps)
+        report["review_queue"] = {"path": str(queue_path), "items": queued}
         content_path = Path(args.out).with_suffix(".content.jsonl")
         with content_path.open("w", encoding="utf-8") as handle:
             for res in ledger.resources.values():
@@ -217,7 +221,10 @@ async def _dryrun(args: argparse.Namespace) -> int:
                     "whole_content": body_text,
                 }
                 handle.write(json.dumps(row, ensure_ascii=False) + "\n")
-    sys.stdout.write(text + "\n")
+        Path(args.out).write_text(
+            json.dumps(report, indent=2, default=str) + "\n", encoding="utf-8"
+        )
+    sys.stdout.write(json.dumps(report, indent=2, default=str) + "\n")
     return 0
 
 

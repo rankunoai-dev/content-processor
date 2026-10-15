@@ -15,6 +15,7 @@ from fastapi.testclient import TestClient
 from fixtures.server import app
 from src.modules.content_processor.enums import BlockKind
 from src.modules.content_processor.governor.block_classifier import classify_response
+from src.modules.content_processor.governor.gates import detect_gates
 
 ROOT = Path(__file__).resolve().parents[3]
 MANIFEST = json.loads((ROOT / "fixtures" / "manifest.json").read_text(encoding="utf-8"))
@@ -47,6 +48,10 @@ def test_fixture_classifies_as_declared(client: TestClient, fixture: dict[str, o
         assert verdict.vendor == fixture["expect_vendor"], (path, verdict)
     if "expect_retry_after_s" in fixture:
         assert int(response.headers["retry-after"]) == fixture["expect_retry_after_s"]
+    if "expect_gate" in fixture:
+        kinds = [g.kind for g in detect_gates(response.content)]
+        expected = fixture["expect_gate"]
+        assert kinds == ([expected] if expected else []), (path, kinds)
 
 
 def test_truncated_fixture_declares_more_bytes_than_sent(client: TestClient):

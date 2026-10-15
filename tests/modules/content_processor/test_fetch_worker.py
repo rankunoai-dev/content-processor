@@ -109,6 +109,13 @@ class InMemoryLedger:
         self.followups = getattr(self, "followups", []) + list(tasks)
         return len(tasks)
 
+    def record_gap(self, gap) -> None:
+        self.gaps = getattr(self, "gaps", {})
+        self.gaps[gap.gap_id] = gap
+
+    def get_gaps(self, resource_id: str):
+        return [g for g in getattr(self, "gaps", {}).values() if g.resource_id == resource_id]
+
     def record_summary(self, resource_id: str, key: str, value) -> None:
         self.summaries = getattr(self, "summaries", {})
         self.summaries.setdefault(resource_id, {})[key] = value

@@ -22,6 +22,7 @@ from psycopg.rows import dict_row
 from src.core.logger import get_logger
 from src.modules.content_processor.contracts import (
     ContentBlock,
+    Gap,
     Resource,
     RunEvent,
     RunScope,
@@ -347,6 +348,30 @@ class TaskLedger:
                 {"resource_id": resource_id, "key": key, "value": json.dumps(value, default=str)},
             )
         self._conn.commit()
+
+    def record_gap(self, gap: Gap) -> None:
+        """Insert or update a gap row."""
+        with self._conn.cursor() as cur:
+            cur.execute(
+                sql.SQL_UPSERT_GAP,
+                {
+                    "gap_id": gap.gap_id,
+                    "run_id": gap.run_id,
+                    "resource_id": gap.resource_id,
+                    "gap_type": gap.gap_type.value,
+                    "status": gap.status.value,
+                    "record": gap.model_dump_json(),
+                },
+            )
+        self._conn.commit()
+
+    def get_gaps(self, resource_id: str) -> list[Gap]:
+        """Gaps for one resource."""
+        with self._conn.cursor() as cur:
+            cur.execute(sql.SQL_GET_GAPS, {"resource_id": resource_id})
+            rows = cur.fetchall()
+        self._conn.commit()
+        return [Gap.model_validate(row["record"]) for row in rows]
 
     def resource_counts(self, run_id: str) -> dict[str, int]:
         """Resource counts by status for one run."""

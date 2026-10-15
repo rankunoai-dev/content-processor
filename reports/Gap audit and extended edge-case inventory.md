@@ -249,6 +249,10 @@ Format matches the prior inventories: each row is a **fixture requirement**, not
 | 213 | Language per block; mixed-language pages | `lang` attributes + detector | Stored per block | Declared |
 | 214 | Visual-theme evidence (palette, fonts, logo, layout grid) | Computed-style sampling | Separate `design_evidence` channel | Declared |
 
+### C13 — Marketplace and B2B gated content (215–222)
+
+Added 2026-10-16; the full rows live in `docs/FEASIBILITY_AND_GATED_CONTENT.md` section 5: lead-generation form walls (215), delivery pincode modals (216), unavailable products with HTTP 200 (217), sponsored interleaving (218), price-changing variant selectors (219), reviews and Q&A behind load-more and login (220), prices as images or obfuscated fonts (221), marketplace identity explosion (222).
+
 ---
 
 ## Part D — Corrected taxonomies

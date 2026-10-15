@@ -11,7 +11,7 @@ from datetime import datetime
 from typing import Any, Protocol
 
 from src.core.schemas import StrictModel
-from src.modules.content_processor.contracts import ContentBlock, Resource, RunEvent, Task
+from src.modules.content_processor.contracts import ContentBlock, Gap, Resource, RunEvent, Task
 from src.modules.content_processor.enums import TaskKind, TaskState
 from src.modules.content_processor.governor.escalation import HostAccessState
 
@@ -79,6 +79,14 @@ class LedgerPort(Protocol):
 
     def record_summary(self, resource_id: str, key: str, value: dict[str, Any]) -> None:
         """Attach a named summary (e.g. render reconciliation) to a resource."""
+        ...
+
+    def record_gap(self, gap: Gap) -> None:
+        """Insert or update a gap (keyed by gap_id)."""
+        ...
+
+    def get_gaps(self, resource_id: str) -> list[Gap]:
+        """Gaps recorded for a resource."""
         ...
 
     def append_event(self, event: RunEvent) -> int:

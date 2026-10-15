@@ -30,11 +30,13 @@ __all__ = [
     "SQL_SAVE_HOST",
     "SQL_SET_ROBOTS",
     "SQL_GET_BLOCKS",
+    "SQL_GET_GAPS",
     "SQL_GET_RESOURCE",
     "SQL_RECORD_SUMMARY",
     "SQL_TASK_COUNTS",
     "SQL_TENANT_OF_RUN",
     "SQL_UPSERT_BLOCK",
+    "SQL_UPSERT_GAP",
     "SQL_UPSERT_RESOURCE",
 ]
 
@@ -243,6 +245,16 @@ WHERE resource_id = %(resource_id)s
 
 SQL_TENANT_OF_RUN = """
 SELECT tenant_id FROM runs WHERE run_id = %(run_id)s
+"""
+
+SQL_UPSERT_GAP = """
+INSERT INTO gaps (gap_id, run_id, resource_id, gap_type, status, record)
+VALUES (%(gap_id)s, %(run_id)s, %(resource_id)s, %(gap_type)s, %(status)s, %(record)s::jsonb)
+ON CONFLICT (gap_id) DO UPDATE SET status = EXCLUDED.status, record = EXCLUDED.record
+"""
+
+SQL_GET_GAPS = """
+SELECT record FROM gaps WHERE resource_id = %(resource_id)s ORDER BY created_at, gap_id
 """
 
 SQL_RESOURCE_COUNTS = """

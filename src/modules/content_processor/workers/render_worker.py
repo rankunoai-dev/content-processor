@@ -25,6 +25,8 @@ from src.modules.content_processor.enums import (
 )
 from src.modules.content_processor.governor.block_classifier import classify_response
 from src.modules.content_processor.governor.escalation import ActionKind
+from src.modules.content_processor.governor.gates import detect_gates
+from src.modules.content_processor.verify.gaps import gap_for_gate
 from src.modules.content_processor.verify.reconcile import reconcile_source_vs_rendered
 from src.modules.content_processor.workers.ports import LedgerPort
 
@@ -223,6 +225,15 @@ class RenderWorker:
 
         host_state.record_success()
         self._ledger.save_host_state(tenant, host_state)
+        gates = detect_gates(result.dom_html, result.inner_text)
+        gate_status: EntityStatus | None = None
+        gate_reasons: list[str] = []
+        for finding in gates:
+            gap, implied = gap_for_gate(self._run_id, resource_id, finding, evidence_ids)
+            self._ledger.record_gap(gap)
+            gate_reasons.append(gap.reason)
+            if gate_status is None or _worse(implied, gate_status):
+                gate_status = implied
         reasons = ["rendered"]
         if recon.fully_verified:
             status = EntityStatus.VERIFIED_EXTRACTED
@@ -242,6 +253,9 @@ class RenderWorker:
             reasons.append("placeholder_content_suspected")
         if block.kind is BlockKind.SOFT_404:
             reasons.append("soft_404_suspected")
+        if gate_status is not None:
+            status = gate_status if _worse(gate_status, status) else status
+            reasons.extend(gate_reasons)
         reasons.append("discovery_open")
         self._set_status(task, resource, status, ";".join(reasons), evidence_ids)
         self._ledger.complete(task.id or 0, self._worker_id)
@@ -289,6 +303,20 @@ class RenderWorker:
                 at=datetime.now(UTC),
             )
         )
+
+
+_SEVERITY = (
+    EntityStatus.VERIFIED_EXTRACTED,
+    EntityStatus.EXTRACTED_UNVERIFIED,
+    EntityStatus.PARTIAL,
+    EntityStatus.BLOCKED,
+)
+
+
+def _worse(a: EntityStatus, b: EntityStatus) -> bool:
+    """True when status `a` is further from verified than `b`."""
+    rank = {s: i for i, s in enumerate(_SEVERITY)}
+    return rank.get(a, 0) > rank.get(b, 0)
 
 
 def retry_at(seconds: float) -> datetime:

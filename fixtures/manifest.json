@@ -2,25 +2,197 @@
   "schema_version": "1.0",
   "notes": "Expected classifier verdicts and badges for the local fixture server. Every entry is a release-gate assertion: a wrong verdict fails Stage 0.",
   "fixtures": [
-    {"path": "/pages/static_ok", "case": "01", "expect_block": "NONE", "expect_badge": "VERIFIED_WITHIN_SCOPE", "must_contain": ["Eligibility applies only to annual plans."]},
-    {"path": "/pages/icon_font", "case": "113", "expect_block": "NONE", "trap": "false_positive", "must_not_contain": ["arrow_forward", "menu"], "must_contain": ["Open the statement"]},
-    {"path": "/pages/template_hidden", "case": "10/38", "expect_block": "NONE", "trap": "false_positive", "must_not_contain_in_main": ["TEMPLATE-ONLY STRING", "SOURCE-ONLY STRING"], "must_contain": ["Visible paragraph."]},
-    {"path": "/pages/soft_hyphen", "case": "118", "expect_block": "NONE", "must_contain_normalized": ["Versicherungsbedingungen"]},
-    {"path": "/pages/third_party_widget", "case": "122", "expect_block": "NONE", "layer_expectations": {"third_party_chrome": ["Chat with us now!"]}, "must_contain": ["Main article body."]},
-    {"path": "/pages/honeypot", "case": "180", "expect_block": "NONE", "must_not_follow": ["/trap/do-not-click"], "must_contain": ["Public content."]},
-    {"path": "/pages/details_collapsed", "case": "116", "expect_block": "NONE", "layer_expectations": {"collapsed_published": ["Collapsed but published answer."]}},
-    {"path": "/pages/delayed_hydration", "case": "04/26", "expect_block": "NONE", "needs_render": true, "must_contain_after_render": ["Hydrated content arrived."], "must_not_contain_in_source": ["Hydrated content arrived."]},
-    {"path": "/challenge-200", "case": "79", "expect_block": "JS_CHALLENGE", "expect_vendor": "cloudflare", "expect_badge": "BLOCKED"},
-    {"path": "/challenge-403", "case": "177", "expect_block": "FINGERPRINT", "expect_vendor": "akamai", "expect_badge": "BLOCKED"},
-    {"path": "/soft-404", "case": "80", "expect_block": "SOFT_404", "expect_badge": "NEEDS_REVIEW"},
-    {"path": "/pdf-but-html", "case": "106", "requested_mime": "application/pdf", "expect_block": "WRONG_PAYLOAD", "expect_badge": "BLOCKED"},
-    {"path": "/rate-limited", "case": "77", "expect_block": "RATE", "expect_retry_after_s": 7},
-    {"path": "/pay-per-crawl", "case": "183", "expect_block": "PAY_PER_CRAWL", "expect_badge": "EXCLUDED"},
-    {"path": "/meta-refresh", "case": "97", "expect_block": "NONE", "expect_redirect_kind": "meta"},
-    {"path": "/truncated", "case": "104", "expect_block": "NONE", "expect_integrity": "truncated"},
-    {"path": "/gated", "case": "81", "expect_block": "AUTH_WALL", "expect_badge": "BLOCKED"}
+    {
+      "path": "/pages/static_ok",
+      "case": "01",
+      "expect_block": "NONE",
+      "expect_badge": "VERIFIED_WITHIN_SCOPE",
+      "must_contain": [
+        "Eligibility applies only to annual plans."
+      ]
+    },
+    {
+      "path": "/pages/icon_font",
+      "case": "113",
+      "expect_block": "NONE",
+      "trap": "false_positive",
+      "must_not_contain": [
+        "arrow_forward",
+        "menu"
+      ],
+      "must_contain": [
+        "Open the statement"
+      ]
+    },
+    {
+      "path": "/pages/template_hidden",
+      "case": "10/38",
+      "expect_block": "NONE",
+      "trap": "false_positive",
+      "must_not_contain_in_main": [
+        "TEMPLATE-ONLY STRING",
+        "SOURCE-ONLY STRING"
+      ],
+      "must_contain": [
+        "Visible paragraph."
+      ]
+    },
+    {
+      "path": "/pages/soft_hyphen",
+      "case": "118",
+      "expect_block": "NONE",
+      "must_contain_normalized": [
+        "Versicherungsbedingungen"
+      ]
+    },
+    {
+      "path": "/pages/third_party_widget",
+      "case": "122",
+      "expect_block": "NONE",
+      "layer_expectations": {
+        "third_party_chrome": [
+          "Chat with us now!"
+        ]
+      },
+      "must_contain": [
+        "Main article body."
+      ]
+    },
+    {
+      "path": "/pages/honeypot",
+      "case": "180",
+      "expect_block": "NONE",
+      "must_not_follow": [
+        "/trap/do-not-click"
+      ],
+      "must_contain": [
+        "Public content."
+      ]
+    },
+    {
+      "path": "/pages/details_collapsed",
+      "case": "116",
+      "expect_block": "NONE",
+      "layer_expectations": {
+        "collapsed_published": [
+          "Collapsed but published answer."
+        ]
+      }
+    },
+    {
+      "path": "/pages/delayed_hydration",
+      "case": "04/26",
+      "expect_block": "NONE",
+      "needs_render": true,
+      "must_contain_after_render": [
+        "Hydrated content arrived."
+      ],
+      "must_not_contain_in_source": [
+        "Hydrated content arrived."
+      ]
+    },
+    {
+      "path": "/challenge-200",
+      "case": "79",
+      "expect_block": "JS_CHALLENGE",
+      "expect_vendor": "cloudflare",
+      "expect_badge": "BLOCKED"
+    },
+    {
+      "path": "/challenge-403",
+      "case": "177",
+      "expect_block": "FINGERPRINT",
+      "expect_vendor": "akamai",
+      "expect_badge": "BLOCKED"
+    },
+    {
+      "path": "/soft-404",
+      "case": "80",
+      "expect_block": "SOFT_404",
+      "expect_badge": "NEEDS_REVIEW"
+    },
+    {
+      "path": "/pdf-but-html",
+      "case": "106",
+      "requested_mime": "application/pdf",
+      "expect_block": "WRONG_PAYLOAD",
+      "expect_badge": "BLOCKED"
+    },
+    {
+      "path": "/rate-limited",
+      "case": "77",
+      "expect_block": "RATE",
+      "expect_retry_after_s": 7
+    },
+    {
+      "path": "/pay-per-crawl",
+      "case": "183",
+      "expect_block": "PAY_PER_CRAWL",
+      "expect_badge": "EXCLUDED"
+    },
+    {
+      "path": "/meta-refresh",
+      "case": "97",
+      "expect_block": "NONE",
+      "expect_redirect_kind": "meta"
+    },
+    {
+      "path": "/truncated",
+      "case": "104",
+      "expect_block": "NONE",
+      "expect_integrity": "truncated"
+    },
+    {
+      "path": "/gated",
+      "case": "81",
+      "expect_block": "AUTH_WALL",
+      "expect_badge": "BLOCKED"
+    },
+    {
+      "path": "/pages/gated_whitepaper",
+      "case": "215",
+      "expect_block": "NONE",
+      "expect_gate": "lead_gen_form_wall",
+      "expect_badge": "PARTIAL",
+      "must_contain": [
+        "Our annual report analyses sourcing trends"
+      ]
+    },
+    {
+      "path": "/pages/pincode_modal",
+      "case": "216",
+      "expect_block": "NONE",
+      "expect_gate": "geo_pincode_modal",
+      "expect_badge": "PARTIAL"
+    },
+    {
+      "path": "/pages/product_unavailable",
+      "case": "217",
+      "expect_block": "NONE",
+      "expect_gate": "product_unavailable",
+      "expect_badge": "NEEDS_REVIEW"
+    },
+    {
+      "path": "/pages/age_gate",
+      "case": "142",
+      "expect_block": "NONE",
+      "expect_gate": "age_or_audience_gate",
+      "expect_badge": "BLOCKED"
+    },
+    {
+      "path": "/pages/newsletter_only",
+      "case": "215-trap",
+      "expect_block": "NONE",
+      "expect_gate": null,
+      "trap": "false_positive"
+    }
   ],
   "seeds": [
-    {"file": "seeds/johnhancock_2026-10-15.txt", "host": "www.johnhancock.com", "authorization": "public_third_party", "notes": "34 URLs, single host. Contains /errors (soft-404 candidate), two near-duplicate news slugs differing in hyphenation (distinct schedule keys, grouped downstream), podcast pages (audio), fund notices (likely PDF links at depth 1), /jhvnewsletter (likely redirect)."}
+    {
+      "file": "seeds/johnhancock_2026-10-15.txt",
+      "host": "www.johnhancock.com",
+      "authorization": "public_third_party",
+      "notes": "34 URLs, single host. Contains /errors (soft-404 candidate), two near-duplicate news slugs differing in hyphenation (distinct schedule keys, grouped downstream), podcast pages (audio), fund notices (likely PDF links at depth 1), /jhvnewsletter (likely redirect)."
+    }
   ]
 }
