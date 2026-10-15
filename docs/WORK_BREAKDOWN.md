@@ -77,7 +77,8 @@ Gate at `f3f32fb`: ruff clean, mypy strict clean on the tracked code, 268 tests 
 ### 1.6 Live evidence
 
 - John Hancock seed: 34 of 34 acquired at T1, rendered and verified at T3, $0, no blocks; two live "Lorem ipsum" pages flagged.
-- Fixture run: challenge pages blocked with vendor, paid-tier approval event raised without spend, gated pages produce typed gaps and review-queue rows (no-render run confirmed; the full render run on the gated fixtures did not report back and must be re-run).
+- Fixture run: challenge pages blocked with vendor, paid-tier approval event raised without spend.
+- Gated fixtures (2026-10-16, source channel): lead-gen wall, age gate, pincode modal and unavailable product each produced the expected typed gap; the newsletter trap produced none; the review queue listed 9 URLs (4 gated, 3 blocked, 1 excluded, 1 rate-limited). The render pass in the same run rendered 0 pages, see K13.
 
 ---
 
@@ -98,6 +99,8 @@ These are bugs or holes in code that is already there, not new features.
 | K9 | Run-level budgets (runtime, requests, bytes, evidence) are declared in scope but not enforced | A runaway run is only bounded by task attempts | L5 |
 | K10 | Cost ledger not wired to any route (no paid route exists yet) | Must exist before T4/T5 is ever enabled | L1 |
 | K11 | Dry run `--max-tasks` applies to fetch and render separately; render pass can stall waiting on held tasks | Fixed with a 60 s cap, but the loop model is per-kind and serial | L5 |
+| K13 | The `/rate-limited` fixture shares host `127.0.0.1` with all other fixtures; three 429s open the host circuit for 15 min and the render pass gives up after its 60 s wait, so 0 pages render in a full fixture run | Correct governor behaviour on a real host, but it hides render results in the fixture suite. Fix: serve rate-limit and challenge fixtures on a second host alias (e.g. `localhost`) so they get their own circuit | L1 + L4 |
+| K14 | Gate gaps found by the fetch worker do not change the resource status (stays `EXTRACTED_UNVERIFIED`); only the render worker applies the implied status | `--no-render` runs under-report gated pages in the badge (the gap is still recorded) | L4 |
 | K12 | Truncated-body fixture cannot be exercised through the ASGI transport (Starlette normalises Content-Length) | Case 104 only unit-tested via a mock transport | L1 |
 
 ---
@@ -250,7 +253,7 @@ Five files are touched by almost every lane. Only L0 edits them; other lanes req
 2. Move the three untracked adapters onto branch `lane/L3-docs` so `main` stays green; L3 finishes them there.
 3. Point `CP_DATABASE_URL` at the WSL2 Postgres and run the 9 skipped tests (K1).
 4. Create `docs/CONTRACT_REQUESTS.md` and `docs/LANE_LOG.md`.
-5. Re-run the gated-fixture dry run with rendering and record the result here.
+5. Fix K13 first, then re-run the gated-fixture dry run with rendering and record the result here.
 
 ## 6. Suggested first wave (four sessions in parallel after section 5)
 
