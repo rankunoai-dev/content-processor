@@ -1,0 +1,238 @@
+"""SQL statements for the task ledger (ADR-0001), kept apart from execution.
+
+Parameters use psycopg's `%(name)s` style. Statements that consume a host slot
+lock the `host_policy` row inside the same transaction so two workers can never
+both take the last slot (ARCHITECTURE.md §7).
+"""
+
+from __future__ import annotations
+
+from src.modules.content_processor.enums import TaskKind
+
+__all__ = [
+    "HOST_SLOT_KINDS",
+    "SQL_APPEND_EVENT",
+    "SQL_CANCEL_RUN",
+    "SQL_CHECKPOINT",
+    "SQL_COMPLETE",
+    "SQL_ENQUEUE",
+    "SQL_ENSURE_HOST",
+    "SQL_FAIL",
+    "SQL_HEARTBEAT",
+    "SQL_INSERT_RUN",
+    "SQL_LEASE_PLAIN",
+    "SQL_LEASE_WITH_SLOT",
+    "SQL_LOAD_HOST",
+    "SQL_REAP",
+    "SQL_RELEASE_SLOT",
+    "SQL_RESOURCE_COUNTS",
+    "SQL_SAVE_HOST",
+    "SQL_SET_ROBOTS",
+    "SQL_TASK_COUNTS",
+    "SQL_UPSERT_RESOURCE",
+]
+
+HOST_SLOT_KINDS: frozenset[TaskKind] = frozenset({TaskKind.FETCH, TaskKind.RENDER, TaskKind.UNLOCK})
+
+SQL_INSERT_RUN = """
+INSERT INTO runs (run_id, tenant_id, scope_hash, scope, profile, tool_versions, cost_ceiling_usd)
+VALUES (%(run_id)s, %(tenant_id)s, %(scope_hash)s, %(scope)s::jsonb, %(profile)s,
+        %(tool_versions)s::jsonb, %(cost_ceiling_usd)s)
+ON CONFLICT (run_id) DO NOTHING
+"""
+
+SQL_ENSURE_HOST = """
+INSERT INTO host_policy (tenant_id, host, tier_ceiling, max_concurrency)
+VALUES (%(tenant_id)s, %(host)s, %(tier_ceiling)s, %(max_concurrency)s)
+ON CONFLICT (tenant_id, host) DO NOTHING
+"""
+
+SQL_ENQUEUE = """
+INSERT INTO tasks (run_id, tenant_id, kind, idempotency_key, host, priority, max_attempts,
+                   not_before, payload)
+VALUES (%(run_id)s, %(tenant_id)s, %(kind)s, %(idempotency_key)s, %(host)s, %(priority)s,
+        %(max_attempts)s, COALESCE(%(not_before)s, now()), %(payload)s::jsonb)
+ON CONFLICT (idempotency_key) DO NOTHING
+RETURNING id
+"""
+
+# Lease a task that does not need a host slot (extraction, OCR, verification...).
+SQL_LEASE_PLAIN = """
+WITH candidate AS (
+    SELECT t.id
+    FROM tasks t
+    JOIN runs r ON r.run_id = t.run_id
+    WHERE t.state = 'PENDING'
+      AND t.not_before <= now()
+      AND t.kind = ANY(%(kinds)s)
+      AND NOT r.cancel_requested
+    ORDER BY t.priority, t.id
+    FOR UPDATE OF t SKIP LOCKED
+    LIMIT 1
+)
+UPDATE tasks AS t
+SET state = 'LEASED', lease_owner = %(worker)s, attempts = t.attempts + 1,
+    lease_expires_at = now() + make_interval(secs => %(ttl_s)s), heartbeat_at = now()
+FROM candidate
+WHERE t.id = candidate.id
+RETURNING t.*
+"""
+
+# Lease a task that consumes a host slot. The host row is locked with the task
+# row; a locked host is skipped, so concurrency per host can never be exceeded.
+SQL_LEASE_WITH_SLOT = """
+WITH candidate AS (
+    SELECT t.id AS task_id, h.tenant_id, h.host
+    FROM tasks t
+    JOIN runs r ON r.run_id = t.run_id
+    JOIN host_policy h ON h.tenant_id = t.tenant_id AND h.host = t.host
+    WHERE t.state = 'PENDING'
+      AND t.not_before <= now()
+      AND t.kind = ANY(%(kinds)s)
+      AND NOT r.cancel_requested
+      AND NOT h.legal_hold
+      AND h.circuit_state <> 'OPEN'
+      AND h.in_flight < h.max_concurrency
+      AND h.next_allowed_at <= now()
+      AND (h.retry_after_until IS NULL OR h.retry_after_until <= now())
+    ORDER BY t.priority, t.id
+    FOR UPDATE OF t, h SKIP LOCKED
+    LIMIT 1
+), slot AS (
+    UPDATE host_policy h
+    SET in_flight = h.in_flight + 1,
+        next_allowed_at = now() + make_interval(secs => h.base_delay_ms / 1000.0),
+        updated_at = now()
+    FROM candidate c
+    WHERE h.tenant_id = c.tenant_id AND h.host = c.host
+    RETURNING h.host
+)
+UPDATE tasks AS t
+SET state = 'LEASED', lease_owner = %(worker)s, attempts = t.attempts + 1,
+    lease_expires_at = now() + make_interval(secs => %(ttl_s)s), heartbeat_at = now(),
+    holds_host_slot = TRUE
+FROM candidate c
+WHERE t.id = c.task_id
+RETURNING t.*
+"""
+
+SQL_HEARTBEAT = """
+UPDATE tasks
+SET heartbeat_at = now(), lease_expires_at = now() + make_interval(secs => %(ttl_s)s)
+WHERE id = %(id)s AND lease_owner = %(worker)s AND state = 'LEASED'
+"""
+
+SQL_CHECKPOINT = """
+UPDATE tasks
+SET checkpoint = %(checkpoint)s::jsonb, heartbeat_at = now(),
+    lease_expires_at = now() + make_interval(secs => %(ttl_s)s)
+WHERE id = %(id)s AND lease_owner = %(worker)s AND state = 'LEASED'
+"""
+
+SQL_RELEASE_SLOT = """
+UPDATE host_policy h
+SET in_flight = GREATEST(0, h.in_flight - 1), updated_at = now()
+FROM tasks t
+WHERE t.id = %(id)s AND t.holds_host_slot
+  AND h.tenant_id = t.tenant_id AND h.host = t.host
+"""
+
+SQL_COMPLETE = """
+UPDATE tasks
+SET state = 'DONE', finished_at = now(), lease_expires_at = NULL
+WHERE id = %(id)s AND lease_owner = %(worker)s AND state = 'LEASED'
+RETURNING id, holds_host_slot
+"""
+
+SQL_FAIL = """
+UPDATE tasks
+SET state = CASE WHEN %(retry)s AND attempts < max_attempts THEN 'PENDING' ELSE 'FAILED' END,
+    last_error = %(error)s,
+    not_before = CASE WHEN %(retry)s THEN COALESCE(%(not_before)s, now()) ELSE not_before END,
+    lease_owner = NULL, lease_expires_at = NULL,
+    finished_at = CASE WHEN %(retry)s AND attempts < max_attempts THEN NULL ELSE now() END
+WHERE id = %(id)s AND lease_owner = %(worker)s AND state = 'LEASED'
+RETURNING id, state, holds_host_slot
+"""
+
+# Reaper: expired leases go back to PENDING, or to QUARANTINED at max_attempts.
+SQL_REAP = """
+WITH expired AS (
+    SELECT id FROM tasks
+    WHERE state = 'LEASED' AND lease_expires_at < now()
+    FOR UPDATE SKIP LOCKED
+), released AS (
+    UPDATE host_policy h
+    SET in_flight = GREATEST(0, h.in_flight - 1), updated_at = now()
+    FROM tasks t JOIN expired e ON e.id = t.id
+    WHERE t.holds_host_slot AND h.tenant_id = t.tenant_id AND h.host = t.host
+    RETURNING t.id
+)
+UPDATE tasks AS t
+SET state = CASE WHEN t.attempts >= t.max_attempts THEN 'QUARANTINED' ELSE 'PENDING' END,
+    last_error = COALESCE(t.last_error, 'lease_expired'),
+    lease_owner = NULL, lease_expires_at = NULL, holds_host_slot = FALSE,
+    finished_at = CASE WHEN t.attempts >= t.max_attempts THEN now() ELSE NULL END
+FROM expired e
+WHERE t.id = e.id
+RETURNING t.id, t.state, t.run_id, t.kind, t.host, t.attempts
+"""
+
+SQL_CANCEL_RUN = """
+UPDATE runs SET cancel_requested = TRUE, state = 'CANCELLING' WHERE run_id = %(run_id)s
+"""
+
+SQL_APPEND_EVENT = """
+INSERT INTO events (run_id, entity_type, entity_id, old_state, new_state, inventory_revision,
+                    reason, attempt, evidence_ids)
+VALUES (%(run_id)s, %(entity_type)s, %(entity_id)s, %(old_state)s, %(new_state)s,
+        %(inventory_revision)s, %(reason)s, %(attempt)s, %(evidence_ids)s::jsonb)
+RETURNING seq
+"""
+
+SQL_TASK_COUNTS = """
+SELECT state, count(*) AS n FROM tasks WHERE run_id = %(run_id)s GROUP BY state
+"""
+
+SQL_UPSERT_RESOURCE = """
+INSERT INTO resources (resource_id, run_id, schedule_key, requested_url, final_url, host,
+                       mandatory, status, status_reason, payload_sha256, acquired_at_tier, record)
+VALUES (%(resource_id)s, %(run_id)s, %(schedule_key)s, %(requested_url)s, %(final_url)s, %(host)s,
+        %(mandatory)s, %(status)s, %(status_reason)s, %(payload_sha256)s, %(acquired_at_tier)s,
+        %(record)s::jsonb)
+ON CONFLICT (run_id, schedule_key) DO UPDATE
+SET final_url = EXCLUDED.final_url, status = EXCLUDED.status,
+    status_reason = EXCLUDED.status_reason, payload_sha256 = EXCLUDED.payload_sha256,
+    acquired_at_tier = EXCLUDED.acquired_at_tier, record = EXCLUDED.record, updated_at = now()
+"""
+
+SQL_RESOURCE_COUNTS = """
+SELECT status, count(*) AS n FROM resources WHERE run_id = %(run_id)s GROUP BY status
+"""
+
+SQL_LOAD_HOST = """
+SELECT host, access_tier, tier_ceiling, circuit_state, circuit_opened_at, consecutive_failures,
+       clean_streak, block_score, session_generation, robots_cache, robots_fetched_at,
+       crawl_delay_ms
+FROM host_policy WHERE tenant_id = %(tenant_id)s AND host = %(host)s
+"""
+
+SQL_SAVE_HOST = """
+UPDATE host_policy
+SET access_tier = %(access_tier)s, circuit_state = %(circuit_state)s,
+    circuit_opened_at = %(circuit_opened_at)s, consecutive_failures = %(consecutive_failures)s,
+    clean_streak = %(clean_streak)s, block_score = %(block_score)s,
+    session_generation = %(session_generation)s,
+    retry_after_until = COALESCE(%(retry_after_until)s, retry_after_until),
+    updated_at = now()
+WHERE tenant_id = %(tenant_id)s AND host = %(host)s
+"""
+
+SQL_SET_ROBOTS = """
+UPDATE host_policy
+SET robots_cache = %(robots_cache)s, robots_fetched_at = %(fetched_at)s,
+    crawl_delay_ms = COALESCE(%(crawl_delay_ms)s, crawl_delay_ms),
+    base_delay_ms = GREATEST(base_delay_ms, COALESCE(%(crawl_delay_ms)s, 0)),
+    updated_at = now()
+WHERE tenant_id = %(tenant_id)s AND host = %(host)s
+"""

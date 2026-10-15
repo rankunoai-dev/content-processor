@@ -1,0 +1,61 @@
+{
+  "tenant_id": "rankuno-dev",
+  "profile": "development",
+  "mode": "SUPPLIED_URLS_PLUS_EMBEDDED",
+  "input_urls": [
+    "https://www.johnhancock.com/individual/help-center/individual-annuities/forms/how-to-use-esignature-Withdrawal-Request-Form-PARTIAL-WITHDRAWAL-client",
+    "https://www.johnhancock.com/errors",
+    "https://www.johnhancock.com/individual/help-center/individual-annuities/forms/how-to-use-esignature-Systematic-Withdrawal-Program-form-IRA-and-Non-Qualified-client",
+    "https://www.johnhancock.com/individual/help-center/individual-annuities/forms/how-to-use-esignature-Defer-maturity-date-form-rep",
+    "https://www.johnhancock.com/individual/help-center/individual-annuities/forms/how-to-use-esignature-tax-withholding-election-periodic-payments-form-client",
+    "https://www.johnhancock.com/individual/insights/longer-healthier-better-podcasts/inside-your-hearts-performance-engine-with-dr-sawalla-guseh",
+    "https://www.johnhancock.com/individual/help-center/individual-annuities/forms/how-to-use-esignature-GRIP-Rider-Annual-Step-up-Election-Form-client",
+    "https://www.johnhancock.com/about-us/news/john-hancock-investment-management/2024/10/john-hancock-premium-dividend-fund-notice-to-shareholders-sources-of-distribution-under-section-19-a",
+    "https://www.johnhancock.com/individual/help-center/individual-annuities/forms/how-to-use-esignature-New-York-Transfer-Disclosure-Form-rep",
+    "https://www.johnhancock.com/individual/help-center/individual-annuities/forms/how-to-use-esignature-inherited-beneficiary-account-rmd-client",
+    "https://www.johnhancock.com/individual/help-center/individual-annuities/forms/how-to-use-esignature-Withdrawal-Request-Form-FULL-TERMINATION-rep",
+    "https://www.johnhancock.com/individual/help-center/individual-annuities/forms/how-to-use-esignature-Change-of-Beneficiary-form-client",
+    "https://www.johnhancock.com/individual/help-center/individual-annuities/forms/how-to-use-esignature-Electronic-fund-transfer-client",
+    "https://www.johnhancock.com/individual/insights/longer-healthier-better-podcasts/nutrition-and-weight-management-with-dr-christina-economos",
+    "https://www.johnhancock.com/about-us/news/john-hancock-investment-management/2025/10/john-hancock-closed-end-funds-declare-monthly-distributions",
+    "https://www.johnhancock.com/individual/help-center/individual-annuities/forms/how-to-use-esignature-Transfer-authorization-agreement-form-rep",
+    "https://www.johnhancock.com/individual/help-center/individual-annuities/forms/how-to-use-esignature-Non-ERISA-Loan-Request-Form-client",
+    "https://www.johnhancock.com/individual/help-center/individual-annuities/forms/how-to-use-esignature-Income-Made-Easy-form-IRA-and-Non-Qualified-rep",
+    "https://www.johnhancock.com/individual/help-center/individual-annuities/forms/how-to-use-esignature-Required-minimum-distribution-request-form-rep",
+    "https://www.johnhancock.com/individual/insights/longer-healthier-better-podcasts/optimizing-human-performance-with-kristen-holmes",
+    "https://www.johnhancock.com/individual/help-center/individual-annuities/forms/how-to-use-esignature-change-of-financial-representative-of-record-client",
+    "https://www.johnhancock.com/individual/help-center/individual-annuities/forms/how-to-use-esignature-ACHEFTFM",
+    "https://www.johnhancock.com/about-us/news/john-hancock-investment-management/2024/04/john-hancock-premium-dividend-fund-notice-to-shareholders-sources-of-distribution-under-section-19-a",
+    "https://www.johnhancock.com/individual/help-center/individual-annuities/forms/how-to-use-esignature-Qualified-Charitable-Distribution-QCD-form-rep",
+    "https://www.johnhancock.com/individual/insights/longer-healthier-better-podcasts/addressing-food-insecurity-with-josh-trautwein",
+    "https://www.johnhancock.com/about-us/news/john-hancock-investment-management/2025/04/john-hancock-premium-dividend-fund-notice-to-shareholders-sources-of-distribution-under-section-19-a",
+    "https://www.johnhancock.com/individual/help-center/individual-annuities/forms/how-to-use-esignature-New-York-Transfer-Disclosure-Form-client",
+    "https://www.johnhancock.com/individual/insights/longer-healthier-better-podcasts/celebrating-a-decade-of-vitality-with-lindsay-hanson",
+    "https://www.johnhancock.com/individual/help-center/individual-annuities/forms/how-to-use-esignature-Withdrawal-Request-Form-FULL-TERMINATION-client",
+    "https://www.johnhancock.com/jhvnewsletter",
+    "https://www.johnhancock.com/individual/help-center/individual-annuities/forms/how-to-use-esignature-Qualified-Charitable-Distribution-QCD-form-client",
+    "https://www.johnhancock.com/about-us/news/john-hancock/2026/06/john-hancock-governor-healey-and-mayor-wu-call-on-community-to-light-the-commonwealth-red-white-and-blue-for-americas-250th",
+    "https://www.johnhancock.com/about-us/news/john-hancock/2026/06/john-hancock--governor-healey--and-mayor-wu-call-on-community-to-light-the-commonwealth-red--white--and-blue-for-america-s-250th",
+    "https://www.johnhancock.com/about-us/news/john-hancock/2023/05/john-hancock-announces-collaboration-with-oura"
+  ],
+  "hosts_in_scope": [
+    "johnhancock.com"
+  ],
+  "authorization": {
+    "kind": "PUBLIC_THIRD_PARTY",
+    "reference": "public",
+    "approved_by": "gaurav.doshi@rankuno.com",
+    "approved_at": "2026-10-15T00:00:00Z",
+    "hosts": [
+      "johnhancock.com"
+    ]
+  },
+  "access_tier_ceiling": "T3_FIDELITY_BROWSER",
+  "locale": "en-US",
+  "timezone": "America/New_York",
+  "geography": "US",
+  "budgets": {
+    "cost_ceiling_usd": 0.0,
+    "max_runtime_s": 7200
+  }
+}
