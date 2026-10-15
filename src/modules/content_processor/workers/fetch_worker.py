@@ -1,16 +1,27 @@
-"""Fetch worker (Stage 1a): T1 acquisition with honest outcomes.
+"""Fetch worker (Stage 1a): HTTP acquisition (T1, T2) with honest outcomes.
 
 Per task: robots policy, egress check, fetch, evidence write, block
 classification, host governor update, resource upsert, events, then the task
 is completed or re-queued. The worker never raises out of `process()`; any
 unexpected exception becomes a retried task and, at max attempts, a FAILED
 resource with the error preserved.
+
+Tiers: each task runs on the highest configured HTTP fetcher at or below the
+host's current tier. When a block escalates the host to a tier that has a
+fetcher here (T2), the URL is re-queued for that tier instead of ending
+BLOCKED; tiers without an HTTP fetcher (T3 browser, paid tiers) keep the
+existing outcome.
+
+Follow-ups (A-1): an extracted page's embedded assets and linked downloads are
+queued one level deeper with the media type the page promised, so the block
+classifier can fail a wrong payload closed (K15).
 """
 
 from __future__ import annotations
 
 import asyncio
 import hashlib
+from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from email.utils import parsedate_to_datetime
 from typing import Any
@@ -18,7 +29,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 from src.core.logger import get_logger
 from src.integrations.evidence_store import EvidenceStore
-from src.integrations.http_client import FetchResult, HttpFetcher
+from src.integrations.http_client import Fetcher, FetchResult
 from src.modules.content_processor.adapters.html_source import extract_html_source
 from src.modules.content_processor.contracts import (
     BlockVerdict,
@@ -36,12 +47,20 @@ from src.modules.content_processor.enums import (
     RedirectKind,
     RobotsPolicy,
     TaskKind,
+    tier_rank,
 )
 from src.modules.content_processor.governor.block_classifier import classify_response
-from src.modules.content_processor.governor.escalation import ActionKind
+from src.modules.content_processor.governor.escalation import Action, ActionKind, HostAccessState
 from src.modules.content_processor.governor.gates import detect_gates
 from src.modules.content_processor.governor.robots import evaluate_robots
 from src.modules.content_processor.ledger.keys import task_key
+from src.modules.content_processor.scope.followups import (
+    FollowupCandidate,
+    anchor_hints,
+    expected_mime_for_name,
+    mime_allowed,
+    plan_followups,
+)
 from src.modules.content_processor.verify.gaps import gap_for_gate
 from src.modules.content_processor.workers.ports import LedgerPort, RobotsCache
 
@@ -81,26 +100,48 @@ def _resource_id(run_id: str, schedule_key: str) -> str:
     return "res-" + hashlib.sha256(f"{run_id}\x1f{schedule_key}".encode()).hexdigest()[:16]
 
 
+Expectation = tuple[str, str | None]
+"""(expected media type, where the expectation came from; None = default)."""
+
+
 class FetchWorker:
-    """Leases FETCH tasks and acquires them at tier T1."""
+    """Leases FETCH tasks and acquires them at the host's HTTP tier."""
 
     def __init__(
         self,
         *,
         ledger: LedgerPort,
-        fetcher: HttpFetcher,
+        fetcher: Fetcher,
         evidence: EvidenceStore,
         scope: RunScope,
         run_id: str,
         worker_id: str,
+        escalation_fetchers: Sequence[Fetcher] = (),
     ) -> None:
-        """Bind the worker to one run."""
+        """Bind the worker to one run.
+
+        Args:
+            ledger: Ledger port.
+            fetcher: Base fetcher (T1); used whenever no higher one applies.
+            evidence: Evidence store.
+            scope: Run scope.
+            run_id: Run id.
+            worker_id: Lease owner name.
+            escalation_fetchers: Higher HTTP tiers (e.g. an `ImpersonatedFetcher`
+                for T2). A host escalated to one of these tiers is fetched with it.
+        """
         self._ledger = ledger
         self._fetcher = fetcher
+        self._fetchers: dict[AccessTier, Fetcher] = {AccessTier(fetcher.tier_name): fetcher}
+        for extra in escalation_fetchers:
+            self._fetchers[AccessTier(extra.tier_name)] = extra
         self._evidence = evidence
         self._scope = scope
         self._run_id = run_id
         self._worker_id = worker_id
+        # Per-process caches. Durable versions need contract changes (CR-004).
+        self._expected_by_key: dict[str, Expectation] = {}
+        self._payload_owner: dict[str, str] = {}
 
     # -- loop ---------------------------------------------------------------
 
@@ -163,8 +204,23 @@ class FetchWorker:
         resource = self._base_resource(task)
         tenant = self._scope.tenant_id
         host_state = self._ledger.load_host_state(tenant, host)
+        fetcher = self._fetcher_for(host_state.tier)
+        depth = int(task.payload.get("depth", 0))
+        self._remember_expectation(task)
+        if depth > 0:
+            self._ledger.record_summary(
+                resource.resource_id,
+                "discovered_from",
+                {
+                    "parent_resource_id": task.payload.get("parent_resource_id"),
+                    "edge_kind": task.payload.get("edge_kind"),
+                    "depth": depth,
+                    "expected_mime": task.payload.get("expected_mime"),
+                    "expected_mime_source": task.payload.get("expected_mime_source"),
+                },
+            )
 
-        robots = await self._robots_for(host, requested_url)
+        robots = await self._robots_for(host, requested_url, fetcher)
         verdict = evaluate_robots(
             url=requested_url,
             user_agent_token=BOT_PRODUCT_NAME,
@@ -185,7 +241,7 @@ class FetchWorker:
             return
 
         self._ledger.heartbeat(task.id or 0, self._worker_id)
-        result = await self._fetcher.fetch(requested_url)
+        result = await fetcher.fetch(requested_url)
         resource.final_url = result.final_url
         resource.redirect_chain = [
             RedirectHop(
@@ -215,41 +271,58 @@ class FetchWorker:
         evidence_ref = self._evidence.put(result.body, result.sniffed_mime)
         self._fill_acquisition(resource, result)
         resource.payload_sha256 = evidence_ref.sha256
+        expected = self._expectation(task, result)
         block = classify_response(
             status=result.http_status or 0,
             headers=result.headers,
             body_prefix=result.body[:65536],
-            requested_mime_family=self._expected_mime(requested_url),
+            requested_mime_family=expected[0],
             final_url=result.final_url,
         )
         resource.block_verdict = block
         resource.acquired_at = datetime.now(UTC)
         # The tier that produced these bytes. The host may already *want* a higher
         # tier; until a fetcher for it exists, that is a pending escalation, not a fact.
-        resource.acquired_at_tier = AccessTier(self._fetcher.tier_name)
+        resource.acquired_at_tier = AccessTier(fetcher.tier_name)
 
         if block.kind is BlockKind.NONE:
-            if result.truncated or result.limit_hit:
-                reason = "limit_hit" if result.limit_hit else "truncated_body"
-                host_state.record_success()
-                self._ledger.save_host_state(tenant, host_state)
-                self._upsert(task, resource, EntityStatus.PARTIAL, reason)
-            else:
-                host_state.record_success()
-                self._ledger.save_host_state(tenant, host_state)
-                if result.sniffed_mime == "text/html":
-                    self._extract_source(task, resource, result, evidence_ref.sha256)
-                else:
-                    self._upsert(
-                        task, resource, EntityStatus.IN_PROGRESS, "acquired:awaiting_extraction"
-                    )
+            host_state.record_success()
+            self._ledger.save_host_state(tenant, host_state)
+            self._accept(task, resource, result, evidence_ref.sha256, depth)
             self._ledger.complete(task.id or 0, self._worker_id)
             return
 
-        self._handle_block(task, resource, block, result, host_state)
+        self._handle_block(task, resource, block, result, host_state, fetcher, expected)
+
+    def _accept(
+        self, task: Task, resource: Resource, result: FetchResult, sha256: str, depth: int
+    ) -> None:
+        """A clean payload: decide partial, policy, duplicate, extract or hand off."""
+        owner = self._payload_owner.setdefault(sha256, resource.resource_id)
+        if result.truncated or result.limit_hit:
+            reason = "limit_hit" if result.limit_hit else "truncated_body"
+            self._upsert(task, resource, EntityStatus.PARTIAL, reason)
+        elif depth > 0 and not mime_allowed(result.sniffed_mime, self._scope.allowed_mime_families):
+            resource.scope_decision = "excluded_by_policy"
+            self._upsert(
+                task,
+                resource,
+                EntityStatus.EXCLUDED_BY_POLICY,
+                f"mime_not_allowed:{result.sniffed_mime}",
+            )
+        elif depth > 0 and owner != resource.resource_id:
+            # Same bytes already acquired under another URL in this run: keep the
+            # record and the edge, do the extraction work once (A-1).
+            self._upsert(
+                task, resource, EntityStatus.EXTRACTED_UNVERIFIED, f"duplicate_payload_of:{owner}"
+            )
+        elif result.sniffed_mime == "text/html":
+            self._extract_source(task, resource, result, sha256, depth)
+        else:
+            self._upsert(task, resource, EntityStatus.IN_PROGRESS, "acquired:awaiting_extraction")
 
     def _extract_source(
-        self, task: Task, resource: Resource, result: FetchResult, sha256: str
+        self, task: Task, resource: Resource, result: FetchResult, sha256: str, depth: int
     ) -> None:
         """Run the source channel on an acquired HTML payload (Stage 1b)."""
         extraction = extract_html_source(
@@ -273,22 +346,63 @@ class FetchWorker:
             self._ledger.record_gap(gap)
             reasons.append(f"gate:{finding.kind}")
         self._upsert(task, resource, EntityStatus.EXTRACTED_UNVERIFIED, ";".join(reasons))
-        self._ledger.enqueue_followups(
-            [
-                Task(
-                    run_id=self._run_id,
-                    kind=TaskKind.RENDER,
-                    idempotency_key=task_key(self._run_id, TaskKind.RENDER, resource.schedule_key),
-                    host=task.host,
-                    priority=task.priority,
-                    max_attempts=2,
-                    payload={
-                        "resource_id": resource.resource_id,
-                        "requested_url": result.final_url,
-                        "schedule_key": resource.schedule_key,
-                    },
-                )
-            ]
+        plan = plan_followups(
+            scope=self._scope,
+            parent_url=result.final_url,
+            parent_depth=depth,
+            links=extraction.links,
+            assets=extraction.assets,
+            hints=anchor_hints(result.body, result.final_url),
+        )
+        if plan.followups or plan.skipped:
+            self._ledger.record_summary(resource.resource_id, "followups", plan.summary())
+        render = Task(
+            run_id=self._run_id,
+            kind=TaskKind.RENDER,
+            idempotency_key=task_key(self._run_id, TaskKind.RENDER, resource.schedule_key),
+            host=task.host,
+            priority=task.priority,
+            max_attempts=2,
+            payload={
+                "resource_id": resource.resource_id,
+                "requested_url": result.final_url,
+                "schedule_key": resource.schedule_key,
+            },
+        )
+        children = [self._followup_task(task, resource, c, depth) for c in plan.followups]
+        self._ledger.enqueue_followups([render, *children])
+
+    def _followup_task(
+        self, parent_task: Task, parent: Resource, child: FollowupCandidate, depth: int
+    ) -> Task:
+        """A FETCH one level down that carries what the parent promised."""
+        parts = [child.schedule_key]
+        if self._expectation_is_informative(child.url, child.expected_mime):
+            # The parent knows something the URL does not (K15). A plain key would
+            # collapse onto a supplied URL's task and lose it, so key on it too.
+            parts.append(f"expect={child.expected_mime}")
+            self._expected_by_key.setdefault(
+                child.schedule_key,
+                (child.expected_mime or "text/html", child.expected_mime_source),
+            )
+        return Task(
+            run_id=self._run_id,
+            kind=TaskKind.FETCH,
+            idempotency_key=task_key(self._run_id, TaskKind.FETCH, *parts),
+            host=child.host,
+            priority=child.priority,
+            max_attempts=parent_task.max_attempts,
+            payload={
+                "schedule_key": child.schedule_key,
+                "requested_url": child.url,
+                "aliases": [],
+                "mandatory": False,
+                "depth": depth + 1,
+                "parent_resource_id": parent.resource_id,
+                "edge_kind": child.edge_kind,
+                "expected_mime": child.expected_mime,
+                "expected_mime_source": child.expected_mime_source,
+            },
         )
 
     def _handle_block(
@@ -297,7 +411,9 @@ class FetchWorker:
         resource: Resource,
         block: BlockVerdict,
         result: FetchResult,
-        host_state: Any,
+        host_state: HostAccessState,
+        fetcher: Fetcher,
+        expected: Expectation,
     ) -> None:
         tenant = self._scope.tenant_id
         if block.kind is BlockKind.RATE:
@@ -317,14 +433,23 @@ class FetchWorker:
         self._ledger.save_host_state(tenant, host_state)
         tier_note = (
             f"{block.kind.value.lower()}:{block.vendor or 'unknown'}"
-            f":fetched_at={self._fetcher.tier_name}:host_tier={host_state.tier.value}"
+            f":fetched_at={fetcher.tier_name}:host_tier={host_state.tier.value}"
         )
         if action.kind is ActionKind.EXCLUDED:
             self._upsert(task, resource, EntityStatus.EXCLUDED_BY_POLICY, tier_note)
         elif block.kind is BlockKind.SOFT_404:
             self._upsert(task, resource, EntityStatus.EXTRACTED_UNVERIFIED, "soft_404_suspected")
         elif block.kind is BlockKind.WRONG_PAYLOAD:
-            self._upsert(task, resource, EntityStatus.BLOCKED, "wrong_payload:" + tier_note)
+            mime, source = expected
+            self._upsert(
+                task,
+                resource,
+                EntityStatus.BLOCKED,
+                f"{tier_note}:expected={mime}:from={source or 'default'}",
+            )
+        elif action.kind is ActionKind.ESCALATE and action.tier in self._fetchers:
+            self._requeue_at_tier(task, resource, action, tier_note)
+            self._event("host", task.host, None, host_state.tier.value, action.reason)
         else:
             self._upsert(task, resource, EntityStatus.BLOCKED, tier_note)
             if action.kind is ActionKind.NEEDS_APPROVAL and action.proposed_tier is not None:
@@ -339,15 +464,80 @@ class FetchWorker:
                 self._event("host", task.host, None, host_state.tier.value, action.reason)
         self._ledger.complete(task.id or 0, self._worker_id)
 
+    def _requeue_at_tier(self, task: Task, resource: Resource, action: Action, note: str) -> None:
+        """The host moved to a tier this worker can fetch at: try the URL again there (A-2)."""
+        tier = action.tier
+        self._ledger.enqueue_followups(
+            [
+                Task(
+                    run_id=self._run_id,
+                    kind=TaskKind.FETCH,
+                    idempotency_key=task_key(
+                        self._run_id, TaskKind.FETCH, resource.schedule_key, f"tier={tier.value}"
+                    ),
+                    host=task.host,
+                    priority=task.priority,
+                    max_attempts=task.max_attempts,
+                    not_before=action.not_before,
+                    payload={**task.payload, "escalated_to": tier.value},
+                )
+            ]
+        )
+        self._upsert(
+            task, resource, EntityStatus.RETRY_SCHEDULED, f"escalated_to:{tier.value}:{note}"
+        )
+
+    # -- tiers and expectations ---------------------------------------------
+
+    def _fetcher_for(self, host_tier: AccessTier) -> Fetcher:
+        """Highest configured HTTP fetcher at or below the host's tier."""
+        usable = [t for t in self._fetchers if tier_rank(t) <= tier_rank(host_tier)]
+        if not usable:
+            return self._fetcher
+        return self._fetchers[max(usable, key=tier_rank)]
+
+    @staticmethod
+    def _expectation_is_informative(url: str, mime: str | None) -> bool:
+        """True when a parent's expected type says more than the URL and the default."""
+        return mime is not None and mime != "text/html" and mime != expected_mime_for_name(url)
+
+    def _remember_expectation(self, task: Task) -> None:
+        mime = task.payload.get("expected_mime")
+        url = str(task.payload["requested_url"])
+        if isinstance(mime, str) and self._expectation_is_informative(url, mime):
+            source = task.payload.get("expected_mime_source")
+            self._expected_by_key.setdefault(
+                str(task.payload["schedule_key"]),
+                (mime, str(source) if source is not None else None),
+            )
+
+    def _expectation(self, task: Task, result: FetchResult) -> Expectation:
+        """What these bytes must be: parent's promise, then names, then HTML (K15)."""
+        payload_mime = task.payload.get("expected_mime")
+        if isinstance(payload_mime, str) and payload_mime:
+            source = task.payload.get("expected_mime_source")
+            return payload_mime, str(source) if source is not None else None
+        remembered = self._expected_by_key.get(str(task.payload["schedule_key"]))
+        if remembered is not None:
+            return remembered
+        if result.content_disposition_name:
+            by_name = expected_mime_for_name(result.content_disposition_name)
+            if by_name is not None:
+                return by_name, "content_disposition"
+        by_url = expected_mime_for_name(str(task.payload["requested_url"]))
+        if by_url is not None:
+            return by_url, "url_extension"
+        return "text/html", None
+
     # -- helpers ------------------------------------------------------------
 
-    async def _robots_for(self, host: str, url: str) -> RobotsCache:
+    async def _robots_for(self, host: str, url: str, fetcher: Fetcher) -> RobotsCache:
         cached = self._ledger.get_robots(self._scope.tenant_id, host)
         if cached is not None:
             return cached
         scheme = urlsplit(url).scheme or "https"
         robots_url = urlunsplit((scheme, urlsplit(url).netloc, "/robots.txt", "", ""))
-        result = await self._fetcher.fetch(robots_url)
+        result = await fetcher.fetch(robots_url)
         status = result.http_status if result.transport_error is None else None
         body = (
             result.body.decode("utf-8", errors="replace")
@@ -359,14 +549,6 @@ class FetchWorker:
             # Only definitive answers are cached; transient failures are retried.
             self._ledger.set_robots(self._scope.tenant_id, host, cache)
         return cache
-
-    def _expected_mime(self, url: str) -> str:
-        path = urlsplit(url).path.lower()
-        if path.endswith(".pdf"):
-            return "application/pdf"
-        if path.endswith((".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg")):
-            return "image/*"
-        return "text/html"
 
     def _base_resource(self, task: Task) -> Resource:
         schedule_key = str(task.payload["schedule_key"])
