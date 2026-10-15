@@ -221,16 +221,16 @@ content-processor/
 ├── pyproject.toml · .env.example · scripts/verify.ps1          # Rankuno SDLC tooling (ruff, mypy strict, pytest ≥85% coverage)
 ├── src/
 │   ├── core/                                                   # Vendored Rankuno core (StrictModel, BaseTool, CostLedger, guardrails, logger)
-│   ├── integrations/ (http_client, sniff, evidence_store)      # T1 fetcher with typed redirect chains + integrity signals; magic-byte sniffing; content-addressed evidence
+│   ├── integrations/ (http_client, browser_client, sniff, evidence_store)  # T1 fetcher; T3 Playwright renderer (fresh context per page, egress-routed subrequests, quiet-period settle, computed-visibility annotation, screenshot, captured XHR); sniffing; evidence store
 │   └── modules/content_processor/                              # Stage 0 scaffold + Stage 1a fetch path
 │       ├── enums.py · contracts.py                             # Two-level status taxonomy, RunScope with policy validators, ledger contracts
 │       ├── scope/  (normalize, ssrf, frontier)                 # Schedule keys, egress classification, deduplicated fetch plan
 │       ├── governor/ (block_classifier, escalation, robots)    # Vendor block signatures, per-host circuit breaker + tier escalation (NEEDS_APPROVAL for paid tiers), RFC 9309 robots
-│       ├── verify/status.py                                    # Badge derivation by precedence; status vector
+│       ├── verify/ (status.py, reconcile.py)                   # Badge derivation by precedence; source-vs-rendered reconciliation (verified only when text is visible in the render)
 │       ├── ledger/ (schema.sql, sql.py, tasks.py, memory.py)   # Postgres task ledger (SKIP LOCKED leases, host slots, reaper, events) + in-memory ledger for dry runs
 │       ├── adapters/html_source.py                             # Source channel: HTML → layered ContentBlocks (traps: icon fonts, templates, hidden, widgets), links/assets, metadata, placeholder + needs-render hints
 │       ├── export/content.py                                   # Whole-content text per URL (interface I1 / report R1), layers and roles explicit
-│       ├── workers/ (ports.py, fetch_worker.py)                # LedgerPort protocol; fetch loop: robots → egress → fetch → evidence → classify → governor → source extraction → resource + events
+│       ├── workers/ (ports.py, fetch_worker.py, render_worker.py)  # LedgerPort protocol; fetch loop (robots → egress → fetch → evidence → classify → governor → source extraction → RENDER follow-up); render loop (T3 render → evidence → classify → rendered extraction → reconcile → status)
 │       ├── planner.py                                          # Frontier → FETCH tasks with idempotency keys
 │       └── cli.py                                              # plan · start · fetch · status (Postgres) · dryrun (memory ledger, no database)
 ├── fixtures/                                                   # Local adversarial fixture server (server.py), manifest.json, pages/, seeds/, scopes/
@@ -275,7 +275,7 @@ python -m src.modules.content_processor.cli fetch  --scope fixtures/scopes/johnh
 python -m src.modules.content_processor.cli status --run <run_id>
 ```
 
-A dry run uses the in-memory ledger: same politeness, host slots, circuit breaker and escalation rules, but nothing survives the process. When a host blocks at the T3 ceiling the report's `host_events` carries `paid_tier_available:<tier>`; that is the signal to ask the operator before any paid tier is enabled for that host.
+A dry run uses the in-memory ledger: same politeness, host slots, circuit breaker and escalation rules, but nothing survives the process. It fetches at T1, extracts the source channel, then renders every HTML page at T3 (pass `--no-render` to skip) and reconciles the two channels; the report carries a `render` summary per URL and the `.content.jsonl` file beside it holds the whole-content text (report R1). Live browser tests run by default when a Chromium is installed (`pytest -m "not browser"` skips them). When a host blocks at the T3 ceiling the report's `host_events` carries `paid_tier_available:<tier>`; that is the signal to ask the operator before any paid tier is enabled for that host.
 
 ### Key Reference Documents
 

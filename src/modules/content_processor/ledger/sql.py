@@ -29,7 +29,11 @@ __all__ = [
     "SQL_RESOURCE_COUNTS",
     "SQL_SAVE_HOST",
     "SQL_SET_ROBOTS",
+    "SQL_GET_BLOCKS",
+    "SQL_GET_RESOURCE",
+    "SQL_RECORD_SUMMARY",
     "SQL_TASK_COUNTS",
+    "SQL_TENANT_OF_RUN",
     "SQL_UPSERT_BLOCK",
     "SQL_UPSERT_RESOURCE",
 ]
@@ -219,6 +223,26 @@ VALUES (%(extraction_id)s, %(run_id)s, %(region_id)s, %(block_key)s, %(method)s,
         %(record)s::jsonb)
 ON CONFLICT (run_id, region_id, method) DO UPDATE
 SET block_key = EXCLUDED.block_key, tool_version = EXCLUDED.tool_version, record = EXCLUDED.record
+"""
+
+SQL_GET_RESOURCE = """
+SELECT record FROM resources WHERE resource_id = %(resource_id)s
+"""
+
+SQL_GET_BLOCKS = """
+SELECT record FROM extractions e JOIN resources r ON r.run_id = e.run_id
+WHERE r.resource_id = %(resource_id)s AND e.region_id LIKE %(prefix)s
+ORDER BY e.extraction_id
+"""
+
+SQL_RECORD_SUMMARY = """
+UPDATE resources SET record = record || jsonb_build_object(%(key)s, %(value)s::jsonb),
+    updated_at = now()
+WHERE resource_id = %(resource_id)s
+"""
+
+SQL_TENANT_OF_RUN = """
+SELECT tenant_id FROM runs WHERE run_id = %(run_id)s
 """
 
 SQL_RESOURCE_COUNTS = """

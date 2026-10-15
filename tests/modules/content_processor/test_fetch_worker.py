@@ -99,6 +99,20 @@ class InMemoryLedger:
     def upsert_blocks(self, resource_id: str, blocks) -> None:
         self.blocks[resource_id] = list(blocks)
 
+    def get_resource(self, resource_id: str):
+        return next((r for r in self.resources.values() if r.resource_id == resource_id), None)
+
+    def get_blocks(self, resource_id: str):
+        return list(self.blocks.get(resource_id, []))
+
+    def enqueue_followups(self, tasks) -> int:
+        self.followups = getattr(self, "followups", []) + list(tasks)
+        return len(tasks)
+
+    def record_summary(self, resource_id: str, key: str, value) -> None:
+        self.summaries = getattr(self, "summaries", {})
+        self.summaries.setdefault(resource_id, {})[key] = value
+
     def append_event(self, event: RunEvent) -> int:
         self.events.append(event)
         return len(self.events)
@@ -167,6 +181,8 @@ async def test_clean_page_is_acquired_with_evidence(worker_env, tmp_path: Path):
     assert res.status_reason == "source_extracted"
     texts = [b.normalized_text for b in ledger.blocks[res.resource_id]]
     assert "Eligibility applies only to annual plans." in texts
+    assert [t.kind for t in ledger.followups] == [TaskKind.RENDER]
+    assert ledger.followups[0].payload["resource_id"] == res.resource_id
     assert res.payload_sha256 and LocalEvidenceStore(tmp_path, "t1").exists(res.payload_sha256)
     assert res.sniffed_mime == "text/html" and res.acquired_at_tier is AccessTier.T1_POLITE_HTTP
     assert res.block_verdict is not None and not res.block_verdict.is_block

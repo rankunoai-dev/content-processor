@@ -19,6 +19,7 @@ from pathlib import Path
 
 from src.core.config import get_settings
 from src.core.logger import get_logger
+from src.integrations.browser_client import BrowserRenderer, RenderLimits
 from src.integrations.evidence_store import LocalEvidenceStore
 from src.integrations.http_client import FetchLimits, HttpFetcher
 from src.modules.content_processor.contracts import RunScope
@@ -29,6 +30,7 @@ from src.modules.content_processor.planner import fetch_tasks_for
 from src.modules.content_processor.scope.frontier import build_frontier
 from src.modules.content_processor.scope.ssrf import IpClass, check_host
 from src.modules.content_processor.workers.fetch_worker import FetchWorker, user_agent_for
+from src.modules.content_processor.workers.render_worker import RenderWorker
 
 __all__ = ["main"]
 
@@ -163,12 +165,39 @@ async def _dryrun(args: argparse.Namespace) -> int:
         processed = await worker.run_until_idle(max_tasks=args.max_tasks, idle_polls=5, poll_s=0.5)
     finally:
         await fetcher.aclose()
+    rendered = 0
+    if not args.no_render:
+        renderer = BrowserRenderer(
+            user_agent=user_agent_for(scope),
+            host_checker=host_checker_for(scope),  # type: ignore[arg-type]
+            locale=scope.locale,
+            timezone=scope.timezone,
+            viewport=scope.viewport,
+            analytics_suppression=scope.analytics_suppression,
+            limits=RenderLimits(),
+        )
+        await renderer.start()
+        render_worker = RenderWorker(
+            ledger=ledger,
+            renderer=renderer,
+            evidence=evidence,
+            scope=scope,
+            run_id=run_id,
+            worker_id="dry-render-1",
+        )
+        try:
+            rendered = await render_worker.run_until_idle(
+                max_tasks=args.max_tasks, idle_polls=5, poll_s=0.5
+            )
+        finally:
+            await renderer.stop()
     report = {
         "run_id": run_id,
         "mode": "dryrun_memory_ledger",
         "scheduled": len(plan.entries),
         "excluded_at_plan": [x.model_dump() for x in plan.excluded],
         "processed": processed,
+        "rendered": rendered,
         **ledger.report(),
     }
     text = json.dumps(report, indent=2, default=str)
@@ -243,6 +272,7 @@ def main(argv: list[str] | None = None) -> int:
     p_dry.add_argument("--scope", required=True)
     p_dry.add_argument("--max-tasks", type=int, default=None)
     p_dry.add_argument("--out", default=None)
+    p_dry.add_argument("--no-render", action="store_true", help="skip the T3 render pass")
     p_dry.set_defaults(func=cmd_dryrun)
 
     p_status = sub.add_parser("status", help="counts for a run")

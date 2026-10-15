@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from datetime import datetime
-from typing import Protocol
+from typing import Any, Protocol
 
 from src.core.schemas import StrictModel
 from src.modules.content_processor.contracts import ContentBlock, Resource, RunEvent, Task
@@ -63,6 +63,22 @@ class LedgerPort(Protocol):
 
     def upsert_blocks(self, resource_id: str, blocks: Sequence[ContentBlock]) -> None:
         """Insert or update extracted blocks for a resource (keyed by region and method)."""
+        ...
+
+    def get_resource(self, resource_id: str) -> Resource | None:
+        """Load one resource record."""
+        ...
+
+    def get_blocks(self, resource_id: str) -> list[ContentBlock]:
+        """All blocks of a resource across states and methods."""
+        ...
+
+    def enqueue_followups(self, tasks: Sequence[Task]) -> int:
+        """Enqueue tasks discovered while processing (idempotent)."""
+        ...
+
+    def record_summary(self, resource_id: str, key: str, value: dict[str, Any]) -> None:
+        """Attach a named summary (e.g. render reconciliation) to a resource."""
         ...
 
     def append_event(self, event: RunEvent) -> int:

@@ -40,6 +40,7 @@ from src.modules.content_processor.enums import (
 from src.modules.content_processor.governor.block_classifier import classify_response
 from src.modules.content_processor.governor.escalation import ActionKind
 from src.modules.content_processor.governor.robots import evaluate_robots
+from src.modules.content_processor.ledger.keys import task_key
 from src.modules.content_processor.workers.ports import LedgerPort, RobotsCache
 
 __all__ = ["FetchWorker", "user_agent_for"]
@@ -264,6 +265,23 @@ class FetchWorker:
             reasons.append("needs_render")
         reasons.extend(extraction.warnings)
         self._upsert(task, resource, EntityStatus.EXTRACTED_UNVERIFIED, ";".join(reasons))
+        self._ledger.enqueue_followups(
+            [
+                Task(
+                    run_id=self._run_id,
+                    kind=TaskKind.RENDER,
+                    idempotency_key=task_key(self._run_id, TaskKind.RENDER, resource.schedule_key),
+                    host=task.host,
+                    priority=task.priority,
+                    max_attempts=2,
+                    payload={
+                        "resource_id": resource.resource_id,
+                        "requested_url": result.final_url,
+                        "schedule_key": resource.schedule_key,
+                    },
+                )
+            ]
+        )
 
     def _handle_block(
         self,

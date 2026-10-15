@@ -45,6 +45,7 @@ class MemoryLedger:
         self._max_concurrency = max_concurrency
         self.resources: dict[str, Resource] = {}
         self.blocks: dict[str, list[ContentBlock]] = {}
+        self.summaries: dict[str, dict[str, dict[str, Any]]] = {}
         self.events: list[RunEvent] = []
         self.hosts: dict[str, HostAccessState] = {}
         self.robots: dict[str, RobotsCache] = {}
@@ -161,6 +162,25 @@ class MemoryLedger:
         """Keep the latest record per schedule key."""
         self.resources[resource.schedule_key] = resource.model_copy(deep=True)
 
+    def get_resource(self, resource_id: str) -> Resource | None:
+        """Find a resource by id."""
+        for res in self.resources.values():
+            if res.resource_id == resource_id:
+                return res.model_copy(deep=True)
+        return None
+
+    def get_blocks(self, resource_id: str) -> list[ContentBlock]:
+        """Blocks of a resource."""
+        return [b.model_copy(deep=True) for b in self.blocks.get(resource_id, [])]
+
+    def enqueue_followups(self, tasks: Sequence[Task]) -> int:
+        """Same as enqueue."""
+        return self.enqueue(tasks)
+
+    def record_summary(self, resource_id: str, key: str, value: dict[str, Any]) -> None:
+        """Keep the latest summary per key."""
+        self.summaries.setdefault(resource_id, {})[key] = value
+
     def upsert_blocks(self, resource_id: str, blocks: Sequence[ContentBlock]) -> None:
         """Replace the block set of a resource (same region keys overwrite)."""
         self.blocks[resource_id] = [b.model_copy(deep=True) for b in blocks]
@@ -240,6 +260,7 @@ class MemoryLedger:
                     "tier": r.acquired_at_tier.value if r.acquired_at_tier else None,
                     "sha256": r.payload_sha256,
                     "blocks_by_layer": _layer_counts(self.blocks.get(r.resource_id, [])),
+                    "render": self.summaries.get(r.resource_id, {}).get("render"),
                 }
                 for r in self.resources.values()
             ],

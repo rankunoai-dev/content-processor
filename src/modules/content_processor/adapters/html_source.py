@@ -350,7 +350,11 @@ class _Walker:
         if layer in (ContentLayer.RENDERED_VISIBLE, ContentLayer.COLLAPSED_PUBLISHED):
             hidden_attr = attrs.get("hidden")
             style = attrs.get("style") or ""
-            if hidden_attr is not None and hidden_attr.lower() == "until-found":
+            if attrs.get("data-cp-hidden") == "1":
+                layer, label = ContentLayer.HIDDEN, "computed_hidden"
+            elif attrs.get("data-cp-icon") == "1" and tag in ("i", "span", "em", "b"):
+                layer, label = ContentLayer.ICON_ARTIFACT, "computed_icon_font"
+            elif hidden_attr is not None and hidden_attr.lower() == "until-found":
                 layer, label = ContentLayer.COLLAPSED_PUBLISHED, "hidden=until-found"
             elif hidden_attr is not None or _HIDDEN_STYLE.search(style):
                 layer, label = ContentLayer.HIDDEN, "hidden_attr_or_style"

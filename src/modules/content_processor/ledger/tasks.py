@@ -304,6 +304,50 @@ class TaskLedger:
                 )
         self._conn.commit()
 
+    def get_resource(self, resource_id: str) -> Resource | None:
+        """Load one resource record."""
+        with self._conn.cursor() as cur:
+            cur.execute(sql.SQL_GET_RESOURCE, {"resource_id": resource_id})
+            row = cur.fetchone()
+        self._conn.commit()
+        if row is None:
+            return None
+        record = row["record"]
+        known = set(Resource.model_fields)
+        return Resource.model_validate({k: v for k, v in record.items() if k in known})
+
+    def get_blocks(self, resource_id: str) -> list[ContentBlock]:
+        """All blocks of a resource."""
+        with self._conn.cursor() as cur:
+            cur.execute(
+                sql.SQL_GET_BLOCKS, {"resource_id": resource_id, "prefix": f"{resource_id}:%"}
+            )
+            rows = cur.fetchall()
+        self._conn.commit()
+        return [ContentBlock.model_validate(row["record"]) for row in rows]
+
+    def enqueue_followups(self, tasks: Sequence[Task]) -> int:
+        """Enqueue discovered tasks; the tenant is read from the run row."""
+        batch = list(tasks)
+        if not batch:
+            return 0
+        with self._conn.cursor() as cur:
+            cur.execute(sql.SQL_TENANT_OF_RUN, {"run_id": batch[0].run_id})
+            row = cur.fetchone()
+        self._conn.commit()
+        if row is None:
+            return 0
+        return self.enqueue(str(row["tenant_id"]), batch)
+
+    def record_summary(self, resource_id: str, key: str, value: dict[str, Any]) -> None:
+        """Merge a named summary into the resource record."""
+        with self._conn.cursor() as cur:
+            cur.execute(
+                sql.SQL_RECORD_SUMMARY,
+                {"resource_id": resource_id, "key": key, "value": json.dumps(value, default=str)},
+            )
+        self._conn.commit()
+
     def resource_counts(self, run_id: str) -> dict[str, int]:
         """Resource counts by status for one run."""
         with self._conn.cursor() as cur:

@@ -74,6 +74,7 @@ asyncio_mode = "auto"
 markers = [
     "integration: needs CP_DATABASE_URL (Postgres); skipped otherwise",
     "chaos: forced-failure tests against the ledger; needs CP_DATABASE_URL",
+    "browser: launches a real browser against the local fixture server",
 ]
 
 [tool.coverage.run]
