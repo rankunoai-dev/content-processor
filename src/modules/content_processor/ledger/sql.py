@@ -23,6 +23,7 @@ __all__ = [
     "SQL_LEASE_PLAIN",
     "SQL_LEASE_WITH_SLOT",
     "SQL_LOAD_HOST",
+    "SQL_PENDING_COUNT",
     "SQL_REAP",
     "SQL_RELEASE_SLOT",
     "SQL_RESOURCE_COUNTS",
@@ -188,6 +189,11 @@ INSERT INTO events (run_id, entity_type, entity_id, old_state, new_state, invent
 VALUES (%(run_id)s, %(entity_type)s, %(entity_id)s, %(old_state)s, %(new_state)s,
         %(inventory_revision)s, %(reason)s, %(attempt)s, %(evidence_ids)s::jsonb)
 RETURNING seq
+"""
+
+SQL_PENDING_COUNT = """
+SELECT count(*) AS n FROM tasks
+WHERE kind = ANY(%(kinds)s) AND state IN ('PENDING', 'LEASED')
 """
 
 SQL_TASK_COUNTS = """

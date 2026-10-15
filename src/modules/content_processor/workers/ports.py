@@ -37,6 +37,10 @@ class LedgerPort(Protocol):
         """Extend the lease."""
         ...
 
+    def pending_count(self, kinds: Sequence[TaskKind]) -> int:
+        """Tasks of these kinds not yet terminal (pending or leased), ready or not."""
+        ...
+
     def complete(self, task_id: int, worker: str) -> bool:
         """Mark done."""
         ...

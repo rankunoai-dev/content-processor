@@ -100,6 +100,14 @@ class MemoryLedger:
             return task
         return None
 
+    def pending_count(self, kinds: Sequence[TaskKind]) -> int:
+        """Non-terminal tasks of the given kinds."""
+        return sum(
+            1
+            for t in self._tasks.values()
+            if t.kind in kinds and t.state in (TaskState.PENDING, TaskState.LEASED)
+        )
+
     def heartbeat(self, task_id: int, worker: str) -> bool:
         """Always alive in-process."""
         return self._tasks[task_id].lease_owner == worker

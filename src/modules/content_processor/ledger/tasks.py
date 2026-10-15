@@ -169,6 +169,14 @@ class TaskLedger:
         self._conn.commit()
         return _row_to_task(row) if row else None
 
+    def pending_count(self, kinds: Sequence[TaskKind]) -> int:
+        """Non-terminal tasks of the given kinds across all runs."""
+        with self._conn.cursor() as cur:
+            cur.execute(sql.SQL_PENDING_COUNT, {"kinds": [k.value for k in kinds]})
+            row = cur.fetchone()
+        self._conn.commit()
+        return int(row["n"]) if row else 0
+
     def heartbeat(self, task_id: int, worker: str) -> bool:
         """Extend the lease. False means the lease was lost (reaped or cancelled)."""
         with self._conn.cursor() as cur:

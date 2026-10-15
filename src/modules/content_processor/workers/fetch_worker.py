@@ -28,6 +28,7 @@ from src.modules.content_processor.contracts import (
     Task,
 )
 from src.modules.content_processor.enums import (
+    AccessTier,
     AuthorizationKind,
     BlockKind,
     EntityStatus,
@@ -100,20 +101,37 @@ class FetchWorker:
     # -- loop ---------------------------------------------------------------
 
     async def run_until_idle(
-        self, *, max_tasks: int | None = None, idle_polls: int = 3, poll_s: float = 1.0
+        self,
+        *,
+        max_tasks: int | None = None,
+        idle_polls: int = 3,
+        poll_s: float = 1.0,
+        max_wait_s: float = 300.0,
     ) -> int:
-        """Process tasks until the queue stays empty for `idle_polls` polls."""
+        """Process tasks until none remain, or none become ready within `max_wait_s`.
+
+        A task held back by Retry-After, a host delay or an open circuit is
+        pending-but-not-ready; the loop keeps polling for it up to `max_wait_s`
+        instead of mistaking the hold for an empty queue.
+        """
         processed = 0
         idle = 0
+        waited = 0.0
         while max_tasks is None or processed < max_tasks:
             task = self._ledger.lease(self._worker_id, [TaskKind.FETCH])
             if task is None:
-                idle += 1
-                if idle >= idle_polls:
+                if self._ledger.pending_count([TaskKind.FETCH]) == 0:
+                    idle += 1
+                    if idle >= idle_polls:
+                        break
+                elif waited >= max_wait_s:
+                    _logger.warning("fetch_loop_gave_up_waiting", extra={"waited_s": waited})
                     break
+                waited += poll_s
                 await asyncio.sleep(poll_s)
                 continue
             idle = 0
+            waited = 0.0
             await self.process(task)
             processed += 1
         return processed
@@ -202,7 +220,9 @@ class FetchWorker:
         )
         resource.block_verdict = block
         resource.acquired_at = datetime.now(UTC)
-        resource.acquired_at_tier = host_state.tier
+        # The tier that produced these bytes. The host may already *want* a higher
+        # tier; until a fetcher for it exists, that is a pending escalation, not a fact.
+        resource.acquired_at_tier = AccessTier(self._fetcher.tier_name)
 
         if block.kind is BlockKind.NONE:
             if result.truncated or result.limit_hit:
@@ -246,7 +266,8 @@ class FetchWorker:
         action = host_state.record_block(block.kind)
         self._ledger.save_host_state(tenant, host_state)
         tier_note = (
-            f"{block.kind.value.lower()}:{block.vendor or 'unknown'}:tier={host_state.tier.value}"
+            f"{block.kind.value.lower()}:{block.vendor or 'unknown'}"
+            f":fetched_at={self._fetcher.tier_name}:host_tier={host_state.tier.value}"
         )
         if action.kind is ActionKind.EXCLUDED:
             self._upsert(task, resource, EntityStatus.EXCLUDED_BY_POLICY, tier_note)

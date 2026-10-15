@@ -15,7 +15,11 @@
 #>
 [CmdletBinding()]
 param(
-    [switch]$Fix
+    [switch]$Fix,
+    # Inner-loop mode: lint only changed files, run only tests affected by the
+    # code changed since the last run (pytest-testmon), no coverage floor.
+    # Run the full gate (no -Fast) before reporting a slice complete.
+    [switch]$Fast
 )
 
 $ErrorActionPreference = 'Continue'
@@ -23,7 +27,8 @@ $RepoRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $RepoRoot
 
 $python = Join-Path $RepoRoot '.venv\Scripts\python.exe'
-if (-not (Test-Path $python)) {
+if (-not (Test-Path $python)) { $python = 'python' }
+if (-not (Get-Command $python -ErrorAction SilentlyContinue)) {
     Write-Error 'No .venv found. Run .\scripts\bootstrap.ps1 first.'
 }
 
@@ -49,10 +54,21 @@ if ($Fix) {
     & $python -m ruff check . --fix
 }
 
-Invoke-Gate 'Format'      @('-m', 'ruff', 'format', '--check', '.')
-Invoke-Gate 'Lint'        @('-m', 'ruff', 'check', '.')
-Invoke-Gate 'Type check'  @('-m', 'mypy', 'src')
-Invoke-Gate 'Tests'       @('-m', 'pytest', '--cov=src', '--cov-report=term-missing')
+if ($Fast) {
+    $changed = @(git diff --name-only HEAD -- '*.py'; git ls-files --others --exclude-standard -- '*.py') |
+        Where-Object { $_ -and (Test-Path $_) } | Sort-Object -Unique
+    if ($changed) {
+        Invoke-Gate 'Format (changed)' (@('-m', 'ruff', 'format', '--check') + $changed)
+        Invoke-Gate 'Lint (changed)'   (@('-m', 'ruff', 'check') + $changed)
+    }
+    Invoke-Gate 'Type check'  @('-m', 'mypy', 'src')
+    Invoke-Gate 'Tests (affected only)' @('-m', 'pytest', '--testmon', '-n', 'auto', '--no-cov')
+} else {
+    Invoke-Gate 'Format'      @('-m', 'ruff', 'format', '--check', '.')
+    Invoke-Gate 'Lint'        @('-m', 'ruff', 'check', '.')
+    Invoke-Gate 'Type check'  @('-m', 'mypy', 'src')
+    Invoke-Gate 'Tests'       @('-m', 'pytest', '--cov=src', '--cov-report=term-missing', '-n', 'auto')
+}
 
 Write-Host ''
 if ($failures.Count -gt 0) {

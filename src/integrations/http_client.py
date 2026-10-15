@@ -109,6 +109,9 @@ def _canonical_hint(body: bytes, base_url: str) -> str | None:
 class HttpFetcher:
     """Async T1 fetcher. One instance per worker; reuse connections."""
 
+    tier_name = "T1_POLITE_HTTP"
+    """Access tier this fetcher implements; recorded on every acquired resource."""
+
     def __init__(
         self,
         *,

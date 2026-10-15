@@ -221,14 +221,18 @@ content-processor/
 ├── pyproject.toml · .env.example · scripts/verify.ps1          # Rankuno SDLC tooling (ruff, mypy strict, pytest ≥85% coverage)
 ├── src/
 │   ├── core/                                                   # Vendored Rankuno core (StrictModel, BaseTool, CostLedger, guardrails, logger)
-│   └── modules/content_processor/                              # Stage 0 scaffold
+│   ├── integrations/ (http_client, sniff, evidence_store)      # T1 fetcher with typed redirect chains + integrity signals; magic-byte sniffing; content-addressed evidence
+│   └── modules/content_processor/                              # Stage 0 scaffold + Stage 1a fetch path
 │       ├── enums.py · contracts.py                             # Two-level status taxonomy, RunScope with policy validators, ledger contracts
 │       ├── scope/  (normalize, ssrf, frontier)                 # Schedule keys, egress classification, deduplicated fetch plan
-│       ├── governor/ (block_classifier, escalation)            # Vendor block signatures, per-host circuit breaker + tier escalation
+│       ├── governor/ (block_classifier, escalation, robots)    # Vendor block signatures, per-host circuit breaker + tier escalation (NEEDS_APPROVAL for paid tiers), RFC 9309 robots
 │       ├── verify/status.py                                    # Badge derivation by precedence; status vector
-│       ├── ledger/ (schema.sql, sql.py, tasks.py, keys.py)     # Postgres task ledger: SKIP LOCKED leases, host slots, reaper, events
-│       └── planner.py                                          # Frontier → FETCH tasks with idempotency keys
-├── fixtures/                                                   # Local adversarial fixture server (server.py), manifest.json, pages/, seeds/
+│       ├── ledger/ (schema.sql, sql.py, tasks.py, memory.py)   # Postgres task ledger (SKIP LOCKED leases, host slots, reaper, events) + in-memory ledger for dry runs
+│       ├── workers/ (ports.py, fetch_worker.py)                # LedgerPort protocol; fetch loop: robots → egress → fetch → evidence → classify → governor → resource + events
+│       ├── planner.py                                          # Frontier → FETCH tasks with idempotency keys
+│       └── cli.py                                              # plan · start · fetch · status (Postgres) · dryrun (memory ledger, no database)
+├── fixtures/                                                   # Local adversarial fixture server (server.py), manifest.json, pages/, seeds/, scopes/
+├── exports/                                                    # Dry-run reports (git-ignored)
 ├── tests/                                                      # Mirrors src/; ledger integration + chaos tests need CP_DATABASE_URL
 ├── docs/
 │   ├── ARCHITECTURE.md                                         # SDLC Step 2: system architecture for 5,000+ URL runs (topology, task ledger, host governor, contracts, capacity, failure modes, staged plan)
@@ -248,6 +252,28 @@ content-processor/
         ├── media.md                                            # Deep dive into PDF structures, mixed pages, OCR, and Office formats
         └── verification.md                                     # Manifest schemas, audit loop, status vectors, and operational security
 ```
+
+### Running the engine (Stage 1a)
+
+```powershell
+# Quality gate (ruff format/check, mypy strict, pytest ≥85% coverage)
+python -m ruff format . ; python -m ruff check . ; python -m mypy src fixtures ; python -m pytest --cov=src
+
+# Local adversarial fixtures: start the server, then dry-run the fixture scope (no database)
+python -m uvicorn fixtures.server:app --port 8765
+python -m src.modules.content_processor.cli dryrun --scope fixtures/scopes/local_fixtures.json --out exports/dryrun-fixtures.json
+
+# A real host at tier T1 only, $0, polite (robots respected, 1 request/s, Retry-After honoured)
+python -m src.modules.content_processor.cli plan   --scope fixtures/scopes/johnhancock.json
+python -m src.modules.content_processor.cli dryrun --scope fixtures/scopes/johnhancock.json --out exports/dryrun-johnhancock.json
+
+# Durable runs need CP_DATABASE_URL in .env (Postgres); the ledger integration + chaos tests run only then
+python -m src.modules.content_processor.cli start  --scope fixtures/scopes/johnhancock.json
+python -m src.modules.content_processor.cli fetch  --scope fixtures/scopes/johnhancock.json --run <run_id>
+python -m src.modules.content_processor.cli status --run <run_id>
+```
+
+A dry run uses the in-memory ledger: same politeness, host slots, circuit breaker and escalation rules, but nothing survives the process. When a host blocks at the T3 ceiling the report's `host_events` carries `paid_tier_available:<tier>`; that is the signal to ask the operator before any paid tier is enabled for that host.
 
 ### Key Reference Documents
 

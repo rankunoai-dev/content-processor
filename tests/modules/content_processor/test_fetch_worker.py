@@ -74,6 +74,13 @@ class InMemoryLedger:
     def heartbeat(self, task_id: int, worker: str) -> bool:
         return True
 
+    def pending_count(self, kinds: Sequence[TaskKind]) -> int:
+        return sum(
+            1
+            for t in self.tasks.values()
+            if t.kind in kinds and t.state in (TaskState.PENDING, TaskState.LEASED)
+        )
+
     def complete(self, task_id: int, worker: str) -> bool:
         self.tasks[task_id].state = TaskState.DONE
         return True
@@ -145,7 +152,7 @@ async def worker_env(tmp_path: Path):
 
 async def _run(ledger: InMemoryLedger, worker: FetchWorker, url: str) -> Resource:
     ledger.add(url)
-    await worker.run_until_idle(idle_polls=1, poll_s=0)
+    await worker.run_until_idle(idle_polls=1, poll_s=0, max_wait_s=0)
     return ledger.resources[url]
 
 
@@ -175,7 +182,8 @@ async def test_challenge_page_is_blocked_and_host_escalates_to_browser(worker_en
     res = await _run(ledger, worker, "http://testserver/challenge-200")
     assert res.status is EntityStatus.BLOCKED
     assert res.block_verdict is not None and res.block_verdict.vendor == "cloudflare"
-    assert res.status_reason.startswith("js_challenge:cloudflare")
+    assert res.status_reason.startswith("js_challenge:cloudflare:fetched_at=T1_POLITE_HTTP")
+    assert res.acquired_at_tier is AccessTier.T1_POLITE_HTTP
     assert ledger.hosts[HOST].tier is AccessTier.T3_FIDELITY_BROWSER
     assert any(
         e.entity_type == "host" and e.reason.startswith("escalate_on") for e in ledger.events
@@ -188,7 +196,7 @@ async def test_paid_tier_needed_emits_approval_event_not_spend(worker_env):
         host=HOST, ceiling=AccessTier.T3_FIDELITY_BROWSER, tier=AccessTier.T3_FIDELITY_BROWSER
     )
     ledger.add("http://testserver/challenge-200")
-    await worker.run_until_idle(idle_polls=1, poll_s=0)
+    await worker.run_until_idle(idle_polls=1, poll_s=0, max_wait_s=0)
     # JS challenge at T3 wants T4+ which is paid: ask, do not escalate.
     assert ledger.hosts[HOST].tier is AccessTier.T3_FIDELITY_BROWSER
     approvals = [
@@ -200,7 +208,7 @@ async def test_paid_tier_needed_emits_approval_event_not_spend(worker_env):
 async def test_rate_limit_requeues_with_retry_after(worker_env):
     ledger, worker = worker_env
     task = ledger.add("http://testserver/rate-limited")
-    await worker.run_until_idle(idle_polls=1, poll_s=0, max_tasks=1)
+    await worker.run_until_idle(idle_polls=1, poll_s=0, max_tasks=1, max_wait_s=0)
     t = ledger.tasks[task.id or 0]
     assert t.state is TaskState.PENDING and t.last_error == "rate_limited"
     assert t.not_before is not None and (t.not_before - datetime.now(UTC)).total_seconds() > 5
@@ -249,7 +257,7 @@ async def test_transport_failure_retries_then_fails(tmp_path: Path):
     )
     task = ledger.add("http://testserver/x")
     try:
-        await worker.run_until_idle(idle_polls=1, poll_s=0)
+        await worker.run_until_idle(idle_polls=1, poll_s=0.01, max_wait_s=30)
     finally:
         await fetcher.aclose()
     t = ledger.tasks[task.id or 0]
