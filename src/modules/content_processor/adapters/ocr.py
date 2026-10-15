@@ -24,16 +24,54 @@ from src.core.logger import get_logger
 from src.core.schemas import StrictModel
 
 __all__ = [
+    "OCR_CONFIDENCE_FLOOR",
     "OcrResult",
+    "OcrRoute",
     "OcrSpan",
     "SCRIPT_TO_PACKS",
     "detect_script_from_text",
+    "installed_packs",
     "is_ocr_available",
+    "route_ocr",
     "run_ocr",
     "select_ocr_packs",
 ]
 
 _logger = get_logger("content_processor.ocr")
+
+# Mean word confidence below this triggers the second-opinion path (ADR-0003).
+# Provisional: ARCHITECTURE.md 6.1 says to set it from Stage 0 fixtures, not guess.
+OCR_CONFIDENCE_FLOOR = 0.60
+
+# Tesseract OSD script names -> the SCRIPT_TO_PACKS keys.
+_OSD_SCRIPTS: dict[str, str] = {
+    "Latin": "LATIN",
+    "Devanagari": "DEVANAGARI",
+    "Arabic": "ARABIC",
+    "Han": "CJK",
+    "Hangul": "CJK",
+    "Japanese": "CJK",
+    "Korean": "CJK",
+    "Cyrillic": "CYRILLIC",
+    "Greek": "GREEK",
+    "Hebrew": "HEBREW",
+    "Thai": "THAI",
+    "Bengali": "BENGALI",
+    "Gurmukhi": "GURMUKHI",
+    "Gujarati": "GUJARATI",
+    "Tamil": "TAMIL",
+    "Telugu": "TELUGU",
+    "Kannada": "KANNADA",
+    "Malayalam": "MALAYALAM",
+    "Oriya": "ORIYA",
+}
+# Unicode character-name prefixes that belong to one of the keys above.
+_UNICODE_SCRIPT_ALIASES: dict[str, str] = {
+    "HIRAGANA": "CJK",
+    "KATAKANA": "CJK",
+    "HANGUL": "CJK",
+    "BOPOMOFO": "CJK",
+}
 
 SCRIPT_TO_PACKS: dict[str, tuple[str, ...]] = {
     "LATIN": ("eng",),
@@ -97,6 +135,7 @@ def detect_script_from_text(sample: str) -> str:
             try:
                 name = unicodedata.name(ch)
                 script = name.split()[0]
+                script = _UNICODE_SCRIPT_ALIASES.get(script, script)
                 script_counts[script] += 1
             except ValueError:
                 continue
@@ -116,10 +155,10 @@ def select_ocr_packs(
     normalized_script = (script or "LATIN").upper()
     packs_for_script = SCRIPT_TO_PACKS.get(normalized_script)
 
+    # An unknown script yields no candidates: it must surface as an UNSUPPORTED gap,
+    # never be read as English.
     if packs_for_script:
         candidates.extend(packs_for_script)
-    else:
-        candidates.append("eng")
 
     # If Latin and locale hints an alternate Latin-based language (e.g. deu, fra, spa)
     if normalized_script == "LATIN" and locale:
@@ -133,8 +172,7 @@ def select_ocr_packs(
         allowed_set = set(allowed_packs)
         candidates = [p for p in candidates if p in allowed_set]
 
-    # Return up to 3 packs
-    return candidates[:3] or (["eng"] if allowed_packs is None or "eng" in allowed_packs else [])
+    return candidates[:3]
 
 
 def _tesseract() -> Any:
@@ -151,6 +189,79 @@ def is_ocr_available() -> bool:
         return True
     except Exception:
         return False
+
+
+def installed_packs() -> list[str] | None:
+    """Language packs the local Tesseract can load, or None when the engine is unavailable."""
+    if not is_ocr_available():
+        return None
+    try:
+        langs = _tesseract().get_languages(config="")
+    except Exception:  # noqa: BLE001 - treat any probe failure as "unknown"
+        return None
+    return [str(lang) for lang in langs if lang != "osd"]
+
+
+def detect_script_osd(image_bytes: bytes, *, osd_runner: Any = None) -> str | None:
+    """Detect the dominant script of a crop with Tesseract OSD; None when unavailable."""
+    try:
+        if osd_runner is not None:
+            raw = osd_runner(image_bytes)
+        else:
+            if not is_ocr_available():
+                return None
+            raw = _tesseract().image_to_osd(Image.open(io.BytesIO(image_bytes)))
+    except Exception:  # noqa: BLE001 - OSD fails on tiny or blank crops; fall back to hints
+        return None
+    text = str(raw)
+    for line in text.splitlines():
+        if line.startswith("Script:"):
+            return _OSD_SCRIPTS.get(line.split(":", 1)[1].strip())
+    return _OSD_SCRIPTS.get(text.strip())
+
+
+class OcrRoute(StrictModel):
+    """Per-region routing decision: which script, which packs, and how it was decided."""
+
+    script: str
+    packs: list[str] = Field(default_factory=list)
+    source: str
+    unsupported_reason: str | None = None
+
+
+def route_ocr(
+    image_bytes: bytes,
+    *,
+    script_hint: str | None = None,
+    locale: str | None = None,
+    allowed_packs: Sequence[str] | None = None,
+    available_packs: Sequence[str] | None = None,
+    osd_runner: Any = None,
+) -> OcrRoute:
+    """Decide script and packs for one region crop (ARCHITECTURE.md 6.1).
+
+    Script comes from OSD on the crop when the engine can do it, else from the
+    caller's hint (script of nearby native text), else Latin. Packs are limited
+    to the scope's allowed set and to what is installed. When a non-Latin script
+    has no usable pack the route carries `unsupported_reason="ocr_lang:<SCRIPT>"`
+    instead of silently reading it as English.
+    """
+    osd = detect_script_osd(image_bytes, osd_runner=osd_runner)
+    if osd is not None:
+        script, source = osd, "osd"
+    elif script_hint:
+        script, source = script_hint.upper(), "hint"
+    else:
+        script, source = "LATIN", "default"
+
+    allowed = None if allowed_packs is None else set(allowed_packs)
+    if available_packs is not None:
+        allowed = set(available_packs) if allowed is None else allowed & set(available_packs)
+    packs = select_ocr_packs(
+        script, locale=locale, allowed_packs=sorted(allowed) if allowed is not None else None
+    )
+    reason = None if packs else f"ocr_lang:{script}"
+    return OcrRoute(script=script, packs=packs, source=source, unsupported_reason=reason)
 
 
 def run_ocr(

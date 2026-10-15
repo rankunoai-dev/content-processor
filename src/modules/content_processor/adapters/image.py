@@ -21,7 +21,12 @@ from pydantic import Field
 from src.core.logger import get_logger
 from src.core.schemas import StrictModel
 from src.modules.content_processor.adapters.html_source import normalize_text
-from src.modules.content_processor.adapters.ocr import run_ocr, select_ocr_packs
+from src.modules.content_processor.adapters.ocr import (
+    OCR_CONFIDENCE_FLOOR,
+    installed_packs,
+    route_ocr,
+    run_ocr,
+)
 from src.modules.content_processor.contracts import ContentBlock, Gap, Provenance
 from src.modules.content_processor.enums import ContentLayer, EntityStatus, GapType
 
@@ -55,6 +60,9 @@ def extract_image(
     media_type: str = "image/png",
     ocr_languages: Sequence[str] | None = None,
     ocr_runner: Any = None,
+    locale: str | None = None,
+    script_hint: str | None = None,
+    osd_runner: Any = None,
 ) -> ImageExtraction:
     """Analyze image metadata and extract text via multilingual OCR."""
     try:
@@ -146,8 +154,39 @@ def extract_image(
             warnings=["icon_or_tracker_dimension"],
         )
 
-    # Select OCR packs
-    packs = select_ocr_packs(allowed_packs=ocr_languages)
+    # Route the region: script from OSD or hint, packs limited to scope and installed set.
+    route = route_ocr(
+        image_bytes,
+        script_hint=script_hint,
+        locale=locale,
+        allowed_packs=ocr_languages,
+        available_packs=installed_packs() if ocr_runner is None else None,
+        osd_runner=osd_runner,
+    )
+    if route.unsupported_reason is not None:
+        gaps.append(
+            Gap(
+                gap_id=f"gap-{hashlib.sha256(f'{resource_id}|{route.unsupported_reason}'.encode()).hexdigest()[:12]}",
+                run_id=run_id,
+                resource_id=resource_id,
+                gap_type=GapType.UNSUPPORTED_FORMAT,
+                status=EntityStatus.UNSUPPORTED,
+                reason=f"{route.unsupported_reason};image_content_unextracted",
+                evidence_ids=[evidence_id],
+            )
+        )
+        return ImageExtraction(
+            blocks=blocks,
+            gaps=gaps,
+            metadata=metadata,
+            width=width,
+            height=height,
+            image_format=img_format,
+            is_visual_only=False,
+            status=EntityStatus.UNSUPPORTED,
+            warnings=[route.unsupported_reason],
+        )
+    packs = route.packs
 
     # Execute OCR
     ocr_res = run_ocr(image_bytes, packs=packs, ocr_runner=ocr_runner)
@@ -179,6 +218,23 @@ def extract_image(
         )
 
     if ocr_res.text.strip():
+        status = EntityStatus.VERIFIED_EXTRACTED
+        if ocr_res.confidence < OCR_CONFIDENCE_FLOOR:
+            # Trigger only (ADR-0003): record the weak reading and ask for a second opinion.
+            status = EntityStatus.EXTRACTED_UNVERIFIED
+            warnings.append("ocr_low_confidence:second_opinion_recommended")
+            gaps.append(
+                Gap(
+                    gap_id=f"gap-{hashlib.sha256(f'{resource_id}|ocr_low_conf'.encode()).hexdigest()[:12]}",
+                    run_id=run_id,
+                    resource_id=resource_id,
+                    gap_type=GapType.LOW_CONFIDENCE,
+                    status=EntityStatus.EXTRACTED_UNVERIFIED,
+                    reason=f"ocr_confidence={ocr_res.confidence:.2f}<{OCR_CONFIDENCE_FLOOR}",
+                    evidence_ids=[evidence_id],
+                    retry_eligible=True,
+                )
+            )
         # Text found in image
         norm_ocr, ops_ocr = normalize_text(ocr_res.text)
         txt_hash = hashlib.sha256(f"{resource_id}|image|ocr|{norm_ocr}".encode()).hexdigest()
@@ -199,7 +255,7 @@ def extract_image(
                 method="tesseract/ocr",
                 tool_version=TOOL_VERSION,
                 confidence=ocr_res.confidence,
-                status=EntityStatus.VERIFIED_EXTRACTED,
+                status=status,
                 evidence_ids=[evidence_id],
                 provenance=Provenance(
                     ocr_params={"packs": ocr_res.packs_used},
@@ -209,13 +265,13 @@ def extract_image(
         )
         return ImageExtraction(
             blocks=blocks,
-            gaps=[],
+            gaps=gaps,
             metadata=metadata,
             width=width,
             height=height,
             image_format=img_format,
             is_visual_only=False,
-            status=EntityStatus.VERIFIED_EXTRACTED,
+            status=status,
             warnings=warnings,
         )
 

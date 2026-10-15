@@ -23,7 +23,12 @@ from src.core.logger import get_logger
 from src.integrations.evidence_store import EvidenceStore
 from src.modules.content_processor.adapters.html_source import normalize_text
 from src.modules.content_processor.adapters.image import ImageExtraction, extract_image
-from src.modules.content_processor.adapters.ocr import run_ocr, select_ocr_packs
+from src.modules.content_processor.adapters.ocr import (
+    OCR_CONFIDENCE_FLOOR,
+    installed_packs,
+    route_ocr,
+    run_ocr,
+)
 from src.modules.content_processor.adapters.pdf import PdfExtraction, extract_pdf
 from src.modules.content_processor.contracts import (
     ContentBlock,
@@ -109,6 +114,8 @@ class DocWorker:
         max_payload_bytes: int = 100 * 1024 * 1024,
         isolate: bool = True,
         ocr_runner: Any = None,
+        osd_runner: Any = None,
+        locale: str | None = None,
     ) -> None:
         """Bind the worker to one run. `isolate=False` runs adapters in-process (tests)."""
         self._ledger = ledger
@@ -120,6 +127,8 @@ class DocWorker:
         self._max_payload_bytes = max_payload_bytes
         self._isolate = isolate
         self._ocr_runner = ocr_runner
+        self._osd_runner = osd_runner
+        self._locale = locale
 
     # -- loop ---------------------------------------------------------------
 
@@ -211,6 +220,7 @@ class DocWorker:
             media_type=resource.sniffed_mime or "image/png",
             ocr_languages=self._ocr_languages,
             ocr_runner=self._ocr_runner if not self._isolate else None,
+            locale=self._locale,
         )
         self._ledger.upsert_blocks(resource.resource_id, extraction.blocks)
         for gap in extraction.gaps:
@@ -253,9 +263,29 @@ class DocWorker:
             status = EntityStatus.PARTIAL
         order = max((b.reading_order for b in blocks), default=0) + 1
         ocr_missing = False
+        available = installed_packs() if self._ocr_runner is None else None
         for idx, region in enumerate(regions):
-            packs = select_ocr_packs(allowed_packs=self._ocr_languages)
-            result = run_ocr(region.image_bytes, packs=packs, ocr_runner=self._ocr_runner)
+            route = route_ocr(
+                region.image_bytes,
+                script_hint=region.script_hint,
+                locale=self._locale,
+                allowed_packs=self._ocr_languages,
+                available_packs=available,
+                osd_runner=self._osd_runner,
+            )
+            if route.unsupported_reason is not None:
+                # Crop is kept as evidence in the PDF itself; the gap names the script.
+                self._gap(
+                    resource,
+                    GapType.UNSUPPORTED_FORMAT,
+                    EntityStatus.UNSUPPORTED,
+                    f"{route.unsupported_reason};region=p{region.page_index}",
+                    evidence_id,
+                )
+                reasons.append(route.unsupported_reason)
+                status = EntityStatus.PARTIAL
+                continue
+            result = run_ocr(region.image_bytes, packs=route.packs, ocr_runner=self._ocr_runner)
             if not result.engine_available:
                 ocr_missing = True
                 break
@@ -263,6 +293,16 @@ class DocWorker:
                 if result.error:
                     reasons.append(f"region_ocr_error:p{region.page_index}")
                 continue
+            if result.confidence < OCR_CONFIDENCE_FLOOR:
+                self._gap(
+                    resource,
+                    GapType.LOW_CONFIDENCE,
+                    EntityStatus.EXTRACTED_UNVERIFIED,
+                    f"ocr_confidence={result.confidence:.2f};region=p{region.page_index}",
+                    evidence_id,
+                    retry_eligible=True,
+                )
+                reasons.append("ocr_low_confidence:second_opinion_recommended")
             norm, ops = normalize_text(result.text)
             key = f"{resource.resource_id}|pdf|p{region.page_index}|ocr{idx}"
             blocks.append(
@@ -295,6 +335,13 @@ class DocWorker:
             )
             order += 1
 
+        if (
+            status is EntityStatus.PARTIAL
+            and extraction.is_scanned
+            and not any(b.method == "tesseract/ocr" for b in blocks)
+        ):
+            status = EntityStatus.UNSUPPORTED  # nothing readable came out of a scanned file
+
         if ocr_missing:
             self._gap(
                 resource,
@@ -325,6 +372,8 @@ class DocWorker:
         status: EntityStatus,
         reason: str,
         evidence_id: str,
+        *,
+        retry_eligible: bool = False,
     ) -> None:
         self._ledger.record_gap(
             Gap(
@@ -335,6 +384,7 @@ class DocWorker:
                 status=status,
                 reason=reason,
                 evidence_ids=[evidence_id],
+                retry_eligible=retry_eligible,
             )
         )
 

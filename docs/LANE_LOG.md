@@ -65,3 +65,16 @@ git worktree add ../content-processor-lane4 -b lane/L4-verify
   - L1: `fetch_worker` leaves non-HTML payloads at `IN_PROGRESS acquired:awaiting_extraction`; it must enqueue `EXTRACT_DOC` / `EXTRACT_IMAGE` with the payload above.
   - Operator: Tesseract is not installed on this machine (C-1), so OCR is only tested through an injected runner. Install it with the core language packs to exercise the real engine.
 - **Not done yet:** C-1 startup detection, C-5/C-6/C-7, C-9, C-10, `fixtures/docs/`.
+
+## [2026-10-16] Lane L3 (Documents and OCR), session 2: C-5, C-6, C-7
+
+- **Branch / worktree:** `lane/L3-docs` at `../content-processor-lane3`, still based on `main` 029205e (CR-001 had not landed when this session ran; rebase pending)
+- **What landed:**
+  - C-5: new `adapters/pdf_extras.py`. Form field values become labelled blocks (`email: a@b.com`, method `pymupdf/forms`); non-painted annotation comments become `collapsed_published` blocks; embedded files are returned in `PdfExtraction.attachments` (name, size, bytes up to 25 MB) for L1 to schedule as child resources; switched-off optional-content layers and invisible (render mode 3) text are reported as warnings, and invisible text lands in the `hidden` layer instead of the body. Invisible text no longer counts as native text, so a PDF whose only text is a ghost OCR layer is still treated as scanned.
+  - C-6: a table that starts in the top 20% of a page, has the same column count, and follows a table that ended in the bottom 20% of the previous page is merged into one block (repeated header row dropped; warning `table_continued:pA-pB`). Also fixed: table blocks used to repeat the header row.
+  - C-7: `ocr.route_ocr()` decides script and packs per region (OSD on the crop, else script of nearby native text, else Latin plus locale), limited to scope `ocr_languages` and installed packs. `select_ocr_packs` no longer falls back to English for non-Latin or unknown scripts; the result is an UNSUPPORTED gap `ocr_lang:<SCRIPT>`. OCR below confidence 0.60 raises a retry-eligible LOW_CONFIDENCE gap (second-opinion trigger only; the second engine is not wired).
+  - `PdfImageRegion.script_hint`, `DocWorker(osd_runner=, locale=)`, `extract_image(locale=, script_hint=, osd_runner=)`.
+- **Gate:** ruff clean, `mypy --strict src fixtures` clean, tests pass, coverage 87%.
+- **Available to other lanes:** `PdfExtraction.attachments` (child-resource candidates), new gap reasons `ocr_lang:<SCRIPT>` and `ocr_confidence=<x>`.
+- **Open contract requests:** CR-001 (landing on main per L0).
+- **Known limits:** the 0.60 confidence floor is provisional (needs fixture calibration); table cells still also appear as native text blocks (pre-existing, for L4 to dedupe); real Tesseract and OSD are untested here because Tesseract is not installed on this machine.

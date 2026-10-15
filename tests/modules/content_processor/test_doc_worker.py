@@ -233,3 +233,25 @@ def test_isolated_pdf_extraction_end_to_end(tmp_path: Path) -> None:
     env.worker.process(env.submit(_text_pdf(), "application/pdf", TaskKind.EXTRACT_DOC))
     assert env.resource.status is EntityStatus.EXTRACTED_UNVERIFIED
     assert env.ledger.get_blocks(RES)
+
+
+def _low_conf_ocr(_img: bytes, *, packs: Any = None, psm: int = 6) -> OcrResult:
+    return OcrResult(text="smudged words", confidence=0.31, packs_used=list(packs or ["eng"]))
+
+
+def test_low_confidence_ocr_raises_retry_eligible_gap(tmp_path: Path) -> None:
+    env = Env(tmp_path, ocr_runner=_low_conf_ocr)
+    env.worker.process(env.submit(_scanned_pdf(), "application/pdf", TaskKind.EXTRACT_DOC))
+    gaps = env.ledger.get_gaps(RES)
+    assert [g.gap_type for g in gaps] == [GapType.LOW_CONFIDENCE]
+    assert gaps[0].retry_eligible is True
+    assert env.resource.status is EntityStatus.EXTRACTED_UNVERIFIED
+
+
+def test_scope_without_latin_pack_flags_scanned_region_unsupported(tmp_path: Path) -> None:
+    env = Env(tmp_path, ocr_runner=_fake_ocr("never used"), ocr_languages=["hin"])
+    env.worker.process(env.submit(_scanned_pdf(), "application/pdf", TaskKind.EXTRACT_DOC))
+    gaps = env.ledger.get_gaps(RES)
+    assert [g.gap_type for g in gaps] == [GapType.UNSUPPORTED_FORMAT]
+    assert "ocr_lang:LATIN" in gaps[0].reason
+    assert env.resource.status is EntityStatus.UNSUPPORTED
