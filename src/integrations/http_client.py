@@ -1,8 +1,12 @@
-"""T1 polite HTTP acquisition (playbook section 2, tier T1).
+"""HTTP acquisition: the shared fetch chain and the T1 polite fetcher (playbook §2).
 
 One `fetch()` call produces one `FetchResult` with the whole typed redirect
 chain, the raw body (capped), integrity signals and the sniffed media type.
 Every hop is checked against the egress policy before a connection is made.
+
+`ChainFetcher` owns that chain; a tier only supplies how one GET is opened.
+`HttpFetcher` (T1, httpx) and `ImpersonatedFetcher` (T2, curl_cffi, in
+`impersonated_client.py`) both satisfy the `Fetcher` protocol workers depend on.
 """
 
 from __future__ import annotations
@@ -10,8 +14,11 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import time
-from collections.abc import Callable
-from typing import Literal
+from abc import ABC, abstractmethod
+from collections.abc import AsyncGenerator, AsyncIterator, Callable
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
+from dataclasses import dataclass
+from typing import Literal, Protocol
 from urllib.parse import urljoin, urlsplit
 
 import httpx
@@ -22,7 +29,16 @@ from src.core.logger import get_logger
 from src.core.schemas import StrictModel
 from src.integrations.sniff import parse_content_disposition_name, sniff_media_type
 
-__all__ = ["FetchLimits", "FetchResult", "Hop", "HostChecker", "HttpFetcher"]
+__all__ = [
+    "ChainFetcher",
+    "FetchLimits",
+    "FetchResult",
+    "Fetcher",
+    "HostChecker",
+    "Hop",
+    "HttpFetcher",
+    "RawResponse",
+]
 
 _logger = get_logger("integrations.http_client")
 
@@ -106,45 +122,60 @@ def _canonical_hint(body: bytes, base_url: str) -> str | None:
     return None
 
 
-class HttpFetcher:
-    """Async T1 fetcher. One instance per worker; reuse connections."""
+class Fetcher(Protocol):
+    """What a worker needs from an acquisition tier."""
 
-    tier_name = "T1_POLITE_HTTP"
-    """Access tier this fetcher implements; recorded on every acquired resource."""
+    tier_name: str
+    """Access tier value this fetcher implements; recorded on every acquired resource."""
 
-    def __init__(
-        self,
-        *,
-        host_checker: HostChecker,
-        user_agent: str,
-        accept_language: str = "en-US,en;q=0.9",
-        limits: FetchLimits | None = None,
-        transport: httpx.AsyncBaseTransport | None = None,
-    ) -> None:
-        """Build the client with a fixed header profile (case 107)."""
-        self._check = host_checker
-        self._limits = limits or FetchLimits()
-        timeout = httpx.Timeout(
-            connect=self._limits.connect_timeout_s,
-            read=self._limits.read_timeout_s,
-            write=self._limits.read_timeout_s,
-            pool=self._limits.connect_timeout_s,
-        )
-        self._client = httpx.AsyncClient(
-            follow_redirects=False,
-            timeout=timeout,
-            transport=transport,
-            headers={
-                "User-Agent": user_agent,
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                "Accept-Language": accept_language,
-                "Accept-Encoding": "gzip, deflate, br",
-            },
-        )
+    async def fetch(self, url: str) -> FetchResult:
+        """Acquire `url` and report everything observed; transport errors are data."""
+        ...
 
     async def aclose(self) -> None:
+        """Release pooled connections."""
+        ...
+
+
+@dataclass
+class RawResponse:
+    """One opened GET, before its body is read."""
+
+    status: int
+    headers: dict[str, str]
+    """Lower-cased names; repeated headers joined with ', '."""
+    chunks: AsyncIterator[bytes]
+
+
+class ChainFetcher(ABC):
+    """Redirects, egress per hop, body cap, meta refresh and canonical hints.
+
+    Subclasses implement `_open` (one GET, no redirect following) and say which
+    exceptions are transport failures and which mean a body ended early.
+    """
+
+    tier_name: str = ""
+
+    def __init__(self, *, host_checker: HostChecker, limits: FetchLimits | None = None) -> None:
+        """Bind the egress checker and the caps shared by every tier."""
+        self._check = host_checker
+        self._limits = limits or FetchLimits()
+
+    @abstractmethod
+    def _open(self, url: str) -> AbstractAsyncContextManager[RawResponse]:
+        """Open one GET for `url` without following redirects."""
+
+    @abstractmethod
+    def _is_transport_error(self, exc: Exception) -> bool:
+        """True when `exc` is a network or protocol failure of this client."""
+
+    @abstractmethod
+    def _is_truncation(self, exc: Exception) -> bool:
+        """True when `exc`, raised while reading a body, means the body ended early."""
+
+    @abstractmethod
+    async def aclose(self) -> None:
         """Close pooled connections."""
-        await self._client.aclose()
 
     async def fetch(self, url: str) -> FetchResult:
         """Acquire `url`, following HTTP and meta redirects within limits."""
@@ -168,9 +199,9 @@ class HttpFetcher:
                     requested_url=url, final_url=current, hops=hops, egress_denied=reason
                 )
             try:
-                async with self._client.stream("GET", current) as response:
-                    status = response.status_code
-                    headers = {k.lower(): v for k, v in response.headers.items()}
+                async with self._open(current) as response:
+                    status = response.status
+                    headers = response.headers
                     location = headers.get("location")
                     if status in _REDIRECT_STATUSES and location:
                         target = urljoin(current, location)
@@ -179,8 +210,10 @@ class HttpFetcher:
                         )
                         current = target
                         continue
-                    body, limit_hit, truncated = await self._read_body(response)
-            except httpx.HTTPError as exc:
+                    body, limit_hit, truncated = await self._read_body(response, current)
+            except Exception as exc:
+                if not self._is_transport_error(exc):
+                    raise
                 return FetchResult(
                     requested_url=url,
                     final_url=current,
@@ -206,21 +239,23 @@ class HttpFetcher:
             requested_url=url, final_url=current, hops=hops, transport_error="too_many_hops"
         )
 
-    async def _read_body(self, response: httpx.Response) -> tuple[bytes, bool, bool]:
+    async def _read_body(self, response: RawResponse, url: str) -> tuple[bytes, bool, bool]:
         chunks: list[bytes] = []
         received = 0
         limit_hit = False
         truncated = False
         try:
-            async for chunk in response.aiter_bytes():
+            async for chunk in response.chunks:
                 received += len(chunk)
                 if received > self._limits.max_bytes:
                     chunks.append(chunk[: self._limits.max_bytes - (received - len(chunk))])
                     limit_hit = True
                     break
                 chunks.append(chunk)
-        except httpx.RemoteProtocolError as exc:
-            _logger.warning("body_truncated", extra={"url": str(response.url), "error": str(exc)})
+        except Exception as exc:
+            if not self._is_truncation(exc):
+                raise
+            _logger.warning("body_truncated", extra={"url": url, "error": str(exc)})
             truncated = True
         return b"".join(chunks), limit_hit, truncated
 
@@ -260,3 +295,57 @@ class HttpFetcher:
             limit_hit=limit_hit,
             sha256=hashlib.sha256(body).hexdigest(),
         )
+
+
+class HttpFetcher(ChainFetcher):
+    """Async T1 fetcher (httpx). One instance per worker; reuse connections."""
+
+    tier_name = "T1_POLITE_HTTP"
+
+    def __init__(
+        self,
+        *,
+        host_checker: HostChecker,
+        user_agent: str,
+        accept_language: str = "en-US,en;q=0.9",
+        limits: FetchLimits | None = None,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ) -> None:
+        """Build the client with a fixed header profile (case 107)."""
+        super().__init__(host_checker=host_checker, limits=limits)
+        timeout = httpx.Timeout(
+            connect=self._limits.connect_timeout_s,
+            read=self._limits.read_timeout_s,
+            write=self._limits.read_timeout_s,
+            pool=self._limits.connect_timeout_s,
+        )
+        self._client = httpx.AsyncClient(
+            follow_redirects=False,
+            timeout=timeout,
+            transport=transport,
+            headers={
+                "User-Agent": user_agent,
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "Accept-Language": accept_language,
+                "Accept-Encoding": "gzip, deflate, br",
+            },
+        )
+
+    async def aclose(self) -> None:
+        """Close pooled connections."""
+        await self._client.aclose()
+
+    @asynccontextmanager
+    async def _open(self, url: str) -> AsyncGenerator[RawResponse, None]:
+        async with self._client.stream("GET", url) as response:
+            yield RawResponse(
+                status=response.status_code,
+                headers={k.lower(): v for k, v in response.headers.items()},
+                chunks=response.aiter_bytes(),
+            )
+
+    def _is_transport_error(self, exc: Exception) -> bool:
+        return isinstance(exc, httpx.HTTPError)
+
+    def _is_truncation(self, exc: Exception) -> bool:
+        return isinstance(exc, httpx.RemoteProtocolError)

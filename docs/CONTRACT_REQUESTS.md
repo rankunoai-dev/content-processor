@@ -41,3 +41,12 @@ Only Lane L0 edits `contracts.py`, `enums.py`, `workers/ports.py`, `ledger/schem
 - **Change:** `State` and `Region` contracts plus `upsert_state`, `upsert_region`, `get_states`, `get_regions` port methods.
 - **Why:** B-1, V-1, L0-6
 - **Status:** OPEN
+
+### CR-004: Persist the expected media type and look up payloads by hash
+- **Lane:** L1
+- **File(s):** contracts.py, ports.py, ledger/sql.py, ledger/tasks.py, ledger/memory.py, schema
+- **Change:**
+  - `Resource.expected_mime: str | None = None` and `Resource.expected_mime_source: str | None = None` (values used today: `link_type`, `link_text`, `url_extension`, `embed_kind`, `content_disposition`), with matching nullable columns on `resources`.
+  - `find_resource_by_payload(run_id: str, payload_sha256: str) -> Resource | None` on `LedgerPort`, in both ledgers (index on `(run_id, payload_sha256)`).
+- **Why:** K15 and A-1. `FetchWorker` keeps both in per-process dictionaries today. That is enough for one worker (dry runs, tests), but with several workers a supplied URL fetched by another process never learns that a page promised a PDF, and identical payloads are deduplicated only within one process. With these in place L1 swaps the two dictionaries for ledger reads; nothing else changes.
+- **Status:** OPEN

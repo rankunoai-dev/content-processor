@@ -10,6 +10,7 @@ Run: `python -m uvicorn fixtures.server:app --port 8765`
 from __future__ import annotations
 
 import asyncio
+import base64
 from pathlib import Path
 
 from fastapi import FastAPI, Request, Response
@@ -116,3 +117,96 @@ def login() -> Response:
 def gated() -> Response:
     """Redirects to the login page."""
     return Response(status_code=302, headers={"Location": "/login?next=/gated"})
+
+
+# -- Lane L1: depth-1 follow-ups (A-1), expected type from the link (K15), T2 (A-2) --
+
+_TINY_PDF = (
+    b"%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n"
+    b"2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n"
+    b"3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 200]>>endobj\n"
+    b"trailer<</Root 1 0 R>>\n%%EOF\n"
+)
+_TINY_PNG = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4//8/AAX+Av4N70a4AAAAAElFTkSuQmCC"
+)
+
+
+@app.get("/downloads")
+def downloads() -> Response:
+    """A page whose embedded assets and linked downloads are followed to depth 1.
+
+    Expected follow-ups: the typed PDF link (served as HTML: must fail closed as
+    WRONG_PAYLOAD, K15), the brochure PDF and its byte-identical mirror (one
+    payload, deduped by hash), the untyped `download` link, the logo image, the
+    hot-link-blocked image (HTML for an image: WRONG_PAYLOAD) and the frame.
+    Expected skips: hidden trap link, out-of-scope CDN image, video, zip,
+    stylesheet and script; the plain page link is not a download.
+    """
+    return HTMLResponse(
+        """<!doctype html><html><head><title>Downloads</title>
+<link rel="stylesheet" href="/files/site.css"><script src="/files/app.js"></script></head>
+<body><main><h1>Downloads</h1>
+<p>Product documents for the current year.</p>
+<ul>
+<li><a href="/pdf-but-html" type="application/pdf">Annual report</a></li>
+<li><a href="/files/brochure.pdf">Brochure</a></li>
+<li><a href="/files/brochure-copy.pdf">Brochure (mirror)</a></li>
+<li><a href="/files/report" download>Policy wording</a></li>
+<li><a href="/files/archive.zip">All documents (zip)</a></li>
+<li><a href="/pages/static_ok">Back to the overview</a></li>
+<li><a href="/trap/terms.pdf" style="display:none">Terms</a></li>
+</ul>
+<img src="/files/logo.png" alt="Logo">
+<img src="/files/logo.png" alt="Logo again">
+<img src="/files/hotlink.png" alt="Chart">
+<img src="https://cdn.example.net/banner.png" alt="Banner">
+<video src="/files/intro.mp4"></video>
+<iframe src="/pages/static_ok" title="Overview"></iframe>
+</main></body></html>"""
+    )
+
+
+@app.get("/files/brochure.pdf")
+def brochure_pdf() -> Response:
+    """A real (tiny) PDF."""
+    return Response(content=_TINY_PDF, media_type="application/pdf")
+
+
+@app.get("/files/brochure-copy.pdf")
+def brochure_copy_pdf() -> Response:
+    """The same bytes at another URL: deduplicated by content hash."""
+    return Response(content=_TINY_PDF, media_type="application/pdf")
+
+
+@app.get("/files/report")
+def report_download() -> Response:
+    """An extension-less download that really is a PDF."""
+    return Response(
+        content=_TINY_PDF,
+        media_type="application/pdf",
+        headers={"Content-Disposition": 'attachment; filename="policy-wording.pdf"'},
+    )
+
+
+@app.get("/files/logo.png")
+def logo_png() -> Response:
+    """A real 1x1 PNG."""
+    return Response(content=_TINY_PNG, media_type="image/png")
+
+
+@app.get("/files/hotlink.png")
+def hotlink_png() -> Response:
+    """An image URL that answers with an HTML page (hot-link protection)."""
+    return HTMLResponse("<html><body><p>Hot-linking is not allowed.</p></body></html>")
+
+
+@app.get("/fingerprint-wall")
+def fingerprint_wall(request: Request) -> Response:
+    """Blocks clients without browser client hints (T1); a Chrome impersonation passes (T2)."""
+    if "sec-ch-ua" not in request.headers:
+        return HTMLResponse(
+            "<html><body><h1>Blocked</h1><p>Unusual traffic from your network.</p></body></html>",
+            status_code=403,
+        )
+    return FileResponse(PAGES / "static_ok.html", media_type="text/html; charset=utf-8")
