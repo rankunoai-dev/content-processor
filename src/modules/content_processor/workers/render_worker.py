@@ -234,6 +234,10 @@ class RenderWorker:
             reasons.append(f"hydrated_blocks={recon.rendered_only_keys}")
         if recon.source_only_keys:
             reasons.append(f"source_only_not_rendered={recon.source_only_keys}")
+        if recon.moved_keys:
+            reasons.append(f"moved_blocks={recon.moved_keys}")
+        if recon.collapsed_pending:
+            reasons.append(f"collapsed_pending={recon.collapsed_pending}")
         if rendered.placeholder_suspected:
             reasons.append("placeholder_content_suspected")
         if block.kind is BlockKind.SOFT_404:

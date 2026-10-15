@@ -27,11 +27,10 @@ def test_reconcile_marks_verified_hydrated_and_source_only():
     assert result.fully_verified
     assert result.rendered_only_keys == 1  # hydrated paragraph
     assert result.source_only_keys == 1  # the "Loading..." shell text
+    assert result.moved_keys == 0
     hidden = [b for b in updated if b.layer.value == "hidden"]
     assert hidden and hidden[0].normalized_text == "Hidden by CSS"
-    assert (
-        hidden[0].status is EntityStatus.EXTRACTED_UNVERIFIED
-    )  # hidden blocks are not verified as visible
+    assert hidden[0].status is EntityStatus.EXTRACTED_UNVERIFIED
 
 
 def test_reconcile_flags_unverified_when_text_is_not_visible():
@@ -42,16 +41,45 @@ def test_reconcile_flags_unverified_when_text_is_not_visible():
     unverified = {
         b.normalized_text
         for b in updated
-        if b.status is EntityStatus.EXTRACTED_UNVERIFIED
-        and b.layer.value != "hidden"
-        and b.layer.value != "metadata"
+        if b.status is EntityStatus.EXTRACTED_UNVERIFIED and b.layer.value == "rendered_visible"
     }
     assert {"Server paragraph.", "Hydrated content arrived."} <= unverified
 
 
-def test_reconcile_is_whitespace_and_case_tolerant():
+def test_reconcile_is_whitespace_case_and_soft_hyphen_tolerant():
     ren = _blocks(
         b"<html><body><main><p>Annual  Plans Only</p></main></body></html>", "run|rendered"
     )
     _, result = reconcile_source_vs_rendered([], ren, "annual plans only")
     assert result.fully_verified
+    ren = _blocks(
+        "<html><body><main><p>Versicherungs­bedingungen</p></main></body></html>".encode(),
+        "run|rendered",
+    )
+    _, result = reconcile_source_vs_rendered([], ren, "Versicherungs­bedingungen")
+    assert result.fully_verified, "soft hyphens in innerText must not defeat the match"
+
+
+def test_collapsed_details_are_pending_not_unverified():
+    html = (
+        b"<html><body><main><details><summary>Q?</summary><p>Collapsed answer.</p></details>"
+        b"</main></body></html>"
+    )
+    ren = _blocks(html, "run|rendered")
+    updated, result = reconcile_source_vs_rendered([], ren, "Q?")
+    assert result.fully_verified
+    assert result.collapsed_pending == 1
+    collapsed = next(b for b in updated if b.normalized_text == "Collapsed answer.")
+    assert collapsed.status is EntityStatus.EXTRACTED_UNVERIFIED
+
+
+def test_moved_text_is_not_double_counted():
+    src = _blocks(b"<html><body><main><p>Same words</p></main></body></html>", "run|source")
+    ren = _blocks(
+        b"<html><body><main><h2>New heading</h2><p>Same words</p></main></body></html>",
+        "run|rendered",
+    )
+    _, result = reconcile_source_vs_rendered(src, ren, "New heading\nSame words")
+    assert result.moved_keys == 1
+    assert result.source_only_keys == 0
+    assert result.rendered_only_keys == 1  # only the new heading is genuinely new
