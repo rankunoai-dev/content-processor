@@ -79,6 +79,7 @@ Gate at `f3f32fb`: ruff clean, mypy strict clean on the tracked code, 268 tests 
 - John Hancock seed: 34 of 34 acquired at T1, rendered and verified at T3, $0, no blocks; two live "Lorem ipsum" pages flagged.
 - Fixture run: challenge pages blocked with vendor, paid-tier approval event raised without spend.
 - Gated fixtures (2026-10-16, source channel): lead-gen wall, age gate, pincode modal and unavailable product each produced the expected typed gap; the newsletter trap produced none; the review queue listed 9 URLs (4 gated, 3 blocked, 1 excluded, 1 rate-limited). The render pass in the same run rendered 0 pages, see K13.
+- After the K13 fix (two fixture hosts): 15 pages rendered; content host circuit closed, access host circuit open as designed; lead-gen and age gates now BLOCKED, pincode PARTIAL, unavailable product EXTRACTED_UNVERIFIED, newsletter trap VERIFIED with no gap. One false verified result found, see K15.
 
 ---
 
@@ -96,11 +97,12 @@ These are bugs or holes in code that is already there, not new features.
 | K6 | Discovered links and assets are recorded but never enqueued (no embedded-asset or depth-1 download following) | PDFs and images linked from pages are not acquired | L1 |
 | K7 | Crawl-delay is parsed only in the in-memory ledger; the Postgres `set_robots` passes `None` | Durable runs ignore crawl-delay | L0 |
 | K8 | Reaper reclaims leases but emits no events and does not mark the owning resource `FAILED(poison)` | Quarantined URLs vanish from the status stream | L0 |
-| K9 | Run-level budgets (runtime, requests, bytes, evidence) are declared in scope but not enforced | A runaway run is only bounded by task attempts | L5 |
+| K9 | Run-level budgets (runtime, requests, bytes, evidence) are declared in scope but not enforced | A runaway run is only bounded by task attempts | L6 |
 | K10 | Cost ledger not wired to any route (no paid route exists yet) | Must exist before T4/T5 is ever enabled | L1 |
-| K11 | Dry run `--max-tasks` applies to fetch and render separately; render pass can stall waiting on held tasks | Fixed with a 60 s cap, but the loop model is per-kind and serial | L5 |
+| K11 | Dry run `--max-tasks` applies to fetch and render separately; render pass can stall waiting on held tasks | Fixed with a 60 s cap, but the loop model is per-kind and serial | L6 |
 | K13 | The `/rate-limited` fixture shares host `127.0.0.1` with all other fixtures; three 429s open the host circuit for 15 min and the render pass gives up after its 60 s wait, so 0 pages render in a full fixture run | Correct governor behaviour on a real host, but it hides render results in the fixture suite. Fix: serve rate-limit and challenge fixtures on a second host alias (e.g. `localhost`) so they get their own circuit | L1 + L4 |
 | K14 | Gate gaps found by the fetch worker do not change the resource status (stays `EXTRACTED_UNVERIFIED`); only the render worker applies the implied status | `--no-render` runs under-report gated pages in the badge (the gap is still recorded) | L4 |
+| K15 | `/pdf-but-html` (an HTML login prompt served where a PDF is expected) ends `VERIFIED_EXTRACTED`. The fetch worker infers the expected type only from the URL extension, and this URL has none, so the wrong-payload check never fires | A known adversarial trap passes as verified: violates the release gate (V-7). Fix: carry the expected MIME from the discovering link (`<a href=… type=…>`, link text, Content-Disposition) or the manifest, and fail closed when the parent said PDF | L1 + L4 |
 | K12 | Truncated-body fixture cannot be exercised through the ASGI transport (Starlette normalises Content-Length) | Case 104 only unit-tested via a mock transport | L1 |
 
 ---
@@ -220,8 +222,8 @@ Each lane owns directories. A session may **read** anything but **write** only i
 | **L2 Browser state explorer** | B-1…B-16, K5 | new `explore/` package, `integrations/browser_client.py`, `workers/render_worker.py`, `fixtures/pages/` (new files only) | L0 for states and regions tables | Yes (B-1 framework against the in-memory ledger) |
 | **L3 Documents and OCR** | C-1…C-10, K3 | `adapters/pdf.py`, `adapters/ocr.py`, `adapters/image.py`, new `adapters/office.py`, new `workers/doc_worker.py`, `fixtures/docs/` | L0 for EXTRACT_* task payloads | Yes (C-1, C-2, C-4) |
 | **L4 Verification brain** | V-1…V-8, K4 | `verify/`, `governor/gates.py`, `fixtures/manifest.json`, `tests/.../test_fixture_manifest.py` | Reads outputs of L1–L3 | Yes (V-1, V-2, V-4 on existing data) |
-| **L5 Platform and ops** | P-1…P-10, K9, K11 | new `api/`, new `scheduler/`, `cli.py`, `integrations/evidence_store.py`, `deploy/`, `scripts/` | L0 schema stable | After L0-1, L0-2 |
-| **L6 Outputs and Stage 4** | O-1…O-7, G-1, G-3 | `export/`, new `analysis/`, new `ui/` | V-1 for UrlRecord | O-1 now; rest after V-1 |
+| **L6 Platform and ops** (second wave) | P-1…P-10, K9, K11 | new `api/`, new `scheduler/`, `cli.py`, `integrations/evidence_store.py`, `deploy/`, `scripts/` | L0 schema stable | After L0-1, L0-2 |
+| **L5 Outputs and Stage 4** | O-1…O-7, G-1, G-3 | `export/`, new `analysis/`, new `ui/` | V-1 for UrlRecord | O-1 now; rest after V-1 |
 | **L7 Gated persona** | G-2 | new `integrations/forms/`, new `integrations/mailbox.py` | Your written sign-off | No, blocked on sign-off |
 
 ### 4.2 Shared files and how changes to them land
@@ -233,7 +235,7 @@ Five files are touched by almost every lane. Only L0 edits them; other lanes req
 | `contracts.py`, `enums.py` | Additive only (new optional fields, new enum members). A lane that needs a change writes a short request in `docs/CONTRACT_REQUESTS.md`; L0 lands it in one commit and announces it. No renames, no removals, no new required fields without a default. |
 | `workers/ports.py` | New methods only. L0 implements them in both ledgers in the same commit so nothing else breaks. |
 | `ledger/schema.sql` | One source of truth. New tables or columns go through a numbered migration owned by L0. |
-| `cli.py` | Owned by L5. Other lanes add a subcommand by writing a `register(subparsers)` function in their own module; L5 wires it. |
+| `cli.py` | Owned by L6. Other lanes add a subcommand by writing a `register(subparsers)` function in their own module; L6 wires it. |
 | `pyproject.toml` | L0 only. Dependency requests go in `docs/CONTRACT_REQUESTS.md`. |
 
 ### 4.3 Session rules that keep the build green
@@ -247,7 +249,7 @@ Five files are touched by almost every lane. Only L0 edits them; other lanes req
 
 ---
 
-## 5. Before any lane starts (one short L0 session)
+## 5. Before any lane starts (one short L0 session) — done 2026-10-16 except item 3, see LANE_LOG.md
 
 1. Decide the fate of `migrations/001_initial.sql`. Recommendation: delete it, keep `ledger/schema.sql` (the code and tests use it), and make it migration `001`.
 2. Move the three untracked adapters onto branch `lane/L3-docs` so `main` stays green; L3 finishes them there.
@@ -264,4 +266,4 @@ Five files are touched by almost every lane. Only L0 edits them; other lanes req
 | 3 | L3 | C-1 Tesseract install, C-2 typed adapters, C-4 mixed PDF fixture | A native-header plus scanned-body PDF yields both regions; the gate is green with the adapters tracked |
 | 4 | L4 | V-1 UrlRecord assembly, V-2 R1–R3 and R10 | Every URL in a dry run has a UrlRecord with denominators; the adversarial suite has zero false verified results |
 
-L5 and L6 join in the second wave once L0's schema is settled and V-1 exists.
+L5 (analysis and reports) and L6 (platform) join in the second wave once V-1 exists and L0's schema is settled.

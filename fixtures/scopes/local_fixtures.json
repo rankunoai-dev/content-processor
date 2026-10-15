@@ -11,15 +11,15 @@
     "http://127.0.0.1:8765/pages/honeypot",
     "http://127.0.0.1:8765/pages/details_collapsed",
     "http://127.0.0.1:8765/pages/delayed_hydration",
-    "http://127.0.0.1:8765/challenge-200",
-    "http://127.0.0.1:8765/challenge-403",
+    "http://localhost:8765/challenge-200",
+    "http://localhost:8765/challenge-403",
     "http://127.0.0.1:8765/soft-404",
     "http://127.0.0.1:8765/pdf-but-html",
-    "http://127.0.0.1:8765/rate-limited",
-    "http://127.0.0.1:8765/pay-per-crawl",
+    "http://localhost:8765/rate-limited",
+    "http://localhost:8765/pay-per-crawl",
     "http://127.0.0.1:8765/meta-refresh",
     "http://127.0.0.1:8765/truncated",
-    "http://127.0.0.1:8765/gated",
+    "http://localhost:8765/gated",
     "http://127.0.0.1:8765/private/secret",
     "http://127.0.0.1:8765/pages/gated_whitepaper",
     "http://127.0.0.1:8765/pages/pincode_modal",
@@ -28,7 +28,8 @@
     "http://127.0.0.1:8765/pages/newsletter_only"
   ],
   "hosts_in_scope": [
-    "127.0.0.1"
+    "127.0.0.1",
+    "localhost"
   ],
   "authorization": {
     "kind": "PUBLIC_THIRD_PARTY",
@@ -36,7 +37,8 @@
     "approved_by": "gaurav.doshi@rankuno.com",
     "approved_at": "2026-10-15T00:00:00Z",
     "hosts": [
-      "127.0.0.1"
+      "127.0.0.1",
+      "localhost"
     ]
   },
   "access_tier_ceiling": "T3_FIDELITY_BROWSER",
