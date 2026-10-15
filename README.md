@@ -228,7 +228,9 @@ content-processor/
 │       ├── governor/ (block_classifier, escalation, robots)    # Vendor block signatures, per-host circuit breaker + tier escalation (NEEDS_APPROVAL for paid tiers), RFC 9309 robots
 │       ├── verify/status.py                                    # Badge derivation by precedence; status vector
 │       ├── ledger/ (schema.sql, sql.py, tasks.py, memory.py)   # Postgres task ledger (SKIP LOCKED leases, host slots, reaper, events) + in-memory ledger for dry runs
-│       ├── workers/ (ports.py, fetch_worker.py)                # LedgerPort protocol; fetch loop: robots → egress → fetch → evidence → classify → governor → resource + events
+│       ├── adapters/html_source.py                             # Source channel: HTML → layered ContentBlocks (traps: icon fonts, templates, hidden, widgets), links/assets, metadata, placeholder + needs-render hints
+│       ├── export/content.py                                   # Whole-content text per URL (interface I1 / report R1), layers and roles explicit
+│       ├── workers/ (ports.py, fetch_worker.py)                # LedgerPort protocol; fetch loop: robots → egress → fetch → evidence → classify → governor → source extraction → resource + events
 │       ├── planner.py                                          # Frontier → FETCH tasks with idempotency keys
 │       └── cli.py                                              # plan · start · fetch · status (Postgres) · dryrun (memory ledger, no database)
 ├── fixtures/                                                   # Local adversarial fixture server (server.py), manifest.json, pages/, seeds/, scopes/
