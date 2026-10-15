@@ -225,11 +225,12 @@ content-processor/
 │   └── modules/content_processor/                              # Stage 0 scaffold + Stage 1a fetch path
 │       ├── enums.py · contracts.py                             # Two-level status taxonomy, RunScope with policy validators, ledger contracts
 │       ├── scope/  (normalize, ssrf, frontier)                 # Schedule keys, egress classification, deduplicated fetch plan
-│       ├── governor/ (block_classifier, escalation, robots)    # Vendor block signatures, per-host circuit breaker + tier escalation (NEEDS_APPROVAL for paid tiers), RFC 9309 robots
+│       ├── governor/ (block_classifier, escalation, robots, gates)  # Vendor block signatures; per-host circuit breaker + tier escalation (NEEDS_APPROVAL for paid tiers); RFC 9309 robots; DOM-level gates (lead-gen walls, pincode modals, unavailable products, login and age gates)
 │       ├── verify/ (status.py, reconcile.py)                   # Badge derivation by precedence; source-vs-rendered reconciliation (verified only when text is visible in the render)
 │       ├── ledger/ (schema.sql, sql.py, tasks.py, memory.py)   # Postgres task ledger (SKIP LOCKED leases, host slots, reaper, events) + in-memory ledger for dry runs
 │       ├── adapters/html_source.py                             # Source channel: HTML → layered ContentBlocks (traps: icon fonts, templates, hidden, widgets), links/assets, metadata, placeholder + needs-render hints
-│       ├── export/content.py                                   # Whole-content text per URL (interface I1 / report R1), layers and roles explicit
+│       ├── export/ (content.py, review_queue.py)               # Whole-content text per URL (interface I1 / report R1); HITL review-queue JSONL for gated and blocked URLs
+│       ├── verify/gaps.py                                      # Gate finding → typed Gap with evidence; implied resource status
 │       ├── workers/ (ports.py, fetch_worker.py, render_worker.py)  # LedgerPort protocol; fetch loop (robots → egress → fetch → evidence → classify → governor → source extraction → RENDER follow-up); render loop (T3 render → evidence → classify → rendered extraction → reconcile → status)
 │       ├── planner.py                                          # Frontier → FETCH tasks with idempotency keys
 │       └── cli.py                                              # plan · start · fetch · status (Postgres) · dryrun (memory ledger, no database)
@@ -240,6 +241,7 @@ content-processor/
 │   ├── ARCHITECTURE.md                                         # SDLC Step 2: system architecture for 5,000+ URL runs (topology, task ledger, host governor, contracts, capacity, failure modes, staged plan)
 │   ├── ACCESS_RESILIENCE_PLAYBOOK.md                           # Access tiers T0–T6, block classifier, escalation state machine, Bright Data credit caps, legal gate
 │   ├── STAGE4_ANALYSIS_AND_INTERFACES.md                       # Backlog: theming, similarity, contradiction mechanisms + the four review interfaces and reports (R1–R4)
+│   ├── FEASIBILITY_AND_GATED_CONTENT.md                        # Honest feasibility on Amazon/Flipkart/GEP-class targets, dismissal-reason table, gated-content policy (gap · persona · HITL queue), cases 215–222
 │   └── adr/                                                    # 0001 task ledger · 0002 browser worker · 0003 extraction routes · 0004 access ladder · 0005 status taxonomy
 ├── reports/
 │   ├── Content extraction completeness investigation.md        # Primary architectural investigation & 83-case matrix
