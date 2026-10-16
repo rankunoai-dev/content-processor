@@ -174,3 +174,24 @@ git worktree add ../content-processor-lane4 -b lane/L4-verify
   - `pytest --cov=src`: 399 passed, 9 skipped (Postgres). Total coverage: 90.06% (threshold ≥ 85.0%).
 - **Open contract requests:** CR-002, CR-003, CR-004, CR-005, CR-006 filed in `docs/CONTRACT_REQUESTS.md`.
 - **Next steps:** Wave 2 (L5 Outputs & Analysis, L6 Platform & Ops CLI wiring, landing CR-002..CR-006).
+
+---
+
+## [2026-10-16] Lane L0 (Integrator), session 5: landed CR-002 through CR-006 on main
+
+- **Branch:** `main`
+- **What landed:**
+  - **CR-006:** `GapType.SOFT_404_SUSPECTED = "SOFT_404_SUSPECTED"` in `enums.py`, wired into `_REVIEW_GAPS` in `verify/status.py`, and rule `R10:soft_404` in `verify/rules.py` emits the typed gap.
+  - **CR-004:** Added `Resource.expected_mime` and `Resource.expected_mime_source` in `contracts.py`, schema columns and indexes in `ledger/schema.sql`, `SQL_UPSERT_RESOURCE` update in `ledger/sql.py`, and `find_resource_by_payload` on `LedgerPort` in both `MemoryLedger` and `TaskLedger`.
+  - **CR-003:** Added `State` and `Region` models to `contracts.py`, schema indexes on `states` and `regions`, and port methods `upsert_state`, `upsert_region`, `get_states`, `get_regions` on `LedgerPort` in both `MemoryLedger` and `TaskLedger`.
+  - **CR-002:** Added port methods `record_edge` and `find_resource_by_schedule_key` on `LedgerPort` in both `MemoryLedger` and `TaskLedger`, with corresponding SQL statements and schema indexes.
+  - **CR-005:** Implemented durable read side for `RunReader` in `verify/record.py`: `list_resources`, `get_summaries`, `get_events`, and `outstanding_resource_ids` on `LedgerPort` in both `MemoryLedger` and `TaskLedger`.
+  - Added unit test suite `tests/modules/content_processor/test_task_ledger.py` covering all new `TaskLedger` methods with mock database connections, and expanded `test_memory_ledger.py`.
+- **Quality Gate:**
+  - `ruff format --check .`: 129 files clean.
+  - `ruff check .`: 0 errors.
+  - `mypy --strict src fixtures`: 0 errors across 63 source files.
+  - `pytest --cov=src`: 423 passed, 9 skipped (Postgres). Total coverage: 90.22% (threshold ≥ 85.0%).
+- **Open contract requests:** All open requests (CR-001 through CR-006) are now LANDED.
+- **Ready for Wave 2:** Lane 5 (Outputs & Stage 4 Analysis) and Lane 6 (Platform & CLI Wiring) can now branch cleanly from `main`.
+

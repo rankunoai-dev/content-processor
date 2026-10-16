@@ -324,7 +324,7 @@ def test_r10_block_page_stored_as_content():
 def test_r10_soft_404_soft_redirect_truncation_placeholder():
     soft = BlockVerdict(kind=BlockKind.SOFT_404, confidence=0.75)
     assert _types(rule_r10_payload(RUN, _res(block_verdict=soft))) == [
-        (GapType.LOW_CONFIDENCE, S.EXTRACTED_UNVERIFIED)
+        (GapType.SOFT_404_SUSPECTED, S.EXTRACTED_UNVERIFIED)
     ]
     redirected = _res(requested_url="http://h/deep/page", final_url="http://h/")
     assert _types(rule_r10_payload(RUN, redirected)) == [

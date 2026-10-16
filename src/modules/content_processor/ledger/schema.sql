@@ -82,10 +82,14 @@ CREATE TABLE IF NOT EXISTS resources (
     status_reason   TEXT,
     payload_sha256  TEXT,
     acquired_at_tier TEXT,
+    expected_mime   TEXT,
+    expected_mime_source TEXT,
     record          JSONB NOT NULL,
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE (run_id, schedule_key)
 );
+CREATE INDEX IF NOT EXISTS idx_resources_payload ON resources (run_id, payload_sha256);
+CREATE INDEX IF NOT EXISTS idx_resources_run ON resources (run_id);
 
 CREATE TABLE IF NOT EXISTS resource_edges (
     run_id      TEXT NOT NULL REFERENCES runs(run_id),
@@ -95,6 +99,8 @@ CREATE TABLE IF NOT EXISTS resource_edges (
     evidence_id TEXT,
     PRIMARY KEY (run_id, parent_id, child_id, edge_kind)
 );
+CREATE INDEX IF NOT EXISTS idx_edges_parent ON resource_edges (run_id, parent_id);
+CREATE INDEX IF NOT EXISTS idx_edges_child ON resource_edges (run_id, child_id);
 
 CREATE TABLE IF NOT EXISTS states (
     state_id        TEXT PRIMARY KEY,
@@ -106,6 +112,7 @@ CREATE TABLE IF NOT EXISTS states (
     record          JSONB NOT NULL,
     UNIQUE (run_id, resource_id, state_key)
 );
+CREATE INDEX IF NOT EXISTS idx_states_resource ON states (run_id, resource_id);
 
 CREATE TABLE IF NOT EXISTS regions (
     region_id    TEXT PRIMARY KEY,
@@ -117,6 +124,8 @@ CREATE TABLE IF NOT EXISTS regions (
     record       JSONB NOT NULL,
     UNIQUE (run_id, resource_id, state_id, region_key)
 );
+CREATE INDEX IF NOT EXISTS idx_regions_resource ON regions (run_id, resource_id);
+
 
 CREATE TABLE IF NOT EXISTS extractions (
     extraction_id TEXT PRIMARY KEY,

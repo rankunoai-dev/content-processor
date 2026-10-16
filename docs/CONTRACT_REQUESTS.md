@@ -33,14 +33,14 @@ Only Lane L0 edits `contracts.py`, `enums.py`, `workers/ports.py`, `ledger/schem
 - **File(s):** ports.py, ledger/sql.py, ledger/tasks.py, ledger/memory.py
 - **Change:** `record_edge(run_id, parent_id, child_id, edge_kind, evidence_id=None)` and `find_resource_by_schedule_key(run_id, schedule_key)`.
 - **Why:** A-1, L0-5
-- **Status:** OPEN
+- **Status:** LANDED
 
 ### CR-003: States and regions persistence
 - **Lane:** L2 and L4 (anticipated by L0)
 - **File(s):** contracts.py, ports.py, ledger/*
 - **Change:** `State` and `Region` contracts plus `upsert_state`, `upsert_region`, `get_states`, `get_regions` port methods.
 - **Why:** B-1, V-1, L0-6
-- **Status:** OPEN
+- **Status:** LANDED
 
 ### CR-004: Persist the expected media type and look up payloads by hash
 - **Lane:** L1
@@ -49,7 +49,7 @@ Only Lane L0 edits `contracts.py`, `enums.py`, `workers/ports.py`, `ledger/schem
   - `Resource.expected_mime: str | None = None` and `Resource.expected_mime_source: str | None = None` (values used today: `link_type`, `link_text`, `url_extension`, `embed_kind`, `content_disposition`), with matching nullable columns on `resources`.
   - `find_resource_by_payload(run_id: str, payload_sha256: str) -> Resource | None` on `LedgerPort`, in both ledgers (index on `(run_id, payload_sha256)`).
 - **Why:** K15 and A-1. `FetchWorker` keeps both in per-process dictionaries today. That is enough for one worker (dry runs, tests), but with several workers a supplied URL fetched by another process never learns that a page promised a PDF, and identical payloads are deduplicated only within one process. With these in place L1 swaps the two dictionaries for ledger reads; nothing else changes.
-- **Status:** OPEN
+- **Status:** LANDED
 
 ### CR-005: Read side of the ledger for UrlRecord assembly
 - **Lane:** L4
@@ -60,12 +60,12 @@ Only Lane L0 edits `contracts.py`, `enums.py`, `workers/ports.py`, `ledger/schem
   - `get_events(run_id: str, entity_id: str | None = None) -> list[RunEvent]` (ordered by `seq`)
   - `outstanding_resource_ids(run_id: str, kinds: Sequence[TaskKind]) -> set[str]` (resources with a PENDING or LEASED task of those kinds)
 - **Why:** V-1. `url_records_for_run` reads `MemoryLedger.resources`, `.summaries` and `.events` directly today, and the release-gate test reads the in-memory task queue to find outstanding work. The durable path cannot produce UrlRecords until these exist. Numbered after L1's CR-004 on `lane/L1-acquisition`.
-- **Status:** OPEN
+- **Status:** LANDED
 
 ### CR-006: Gap type for soft 404s
 - **Lane:** L4
 - **File(s):** enums.py
 - **Change:** `GapType.SOFT_404_SUSPECTED = "SOFT_404_SUSPECTED"`; L4 then adds it to the review gaps in `verify/status.py`.
 - **Why:** V-2 (R10). A soft 404 is recorded today as `LOW_CONFIDENCE` with reason `soft_404_suspected` so it routes to NEEDS_REVIEW; a dedicated type lets reports and the review queue filter it without parsing reasons.
-- **Status:** OPEN
+- **Status:** LANDED
 

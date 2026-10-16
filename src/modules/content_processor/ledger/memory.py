@@ -11,7 +11,15 @@ from collections.abc import Iterable, Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from src.modules.content_processor.contracts import ContentBlock, Gap, Resource, RunEvent, Task
+from src.modules.content_processor.contracts import (
+    ContentBlock,
+    Gap,
+    Region,
+    Resource,
+    RunEvent,
+    State,
+    Task,
+)
 from src.modules.content_processor.enums import AccessTier, TaskKind, TaskState
 from src.modules.content_processor.governor.escalation import CircuitState, HostAccessState
 from src.modules.content_processor.ledger.sql import HOST_SLOT_KINDS
@@ -48,6 +56,9 @@ class MemoryLedger:
         self.summaries: dict[str, dict[str, dict[str, Any]]] = {}
         self.gaps: dict[str, Gap] = {}
         self.events: list[RunEvent] = []
+        self.edges: dict[tuple[str, str, str, str], dict[str, Any]] = {}
+        self.states: dict[tuple[str, str, str], State] = {}
+        self.regions: dict[tuple[str, str, str | None, str], Region] = {}
         self.hosts: dict[str, HostAccessState] = {}
         self.robots: dict[str, RobotsCache] = {}
         self._in_flight: dict[str, int] = {}
@@ -226,6 +237,117 @@ class MemoryLedger:
                     and value.strip().replace(".", "", 1).isdigit()
                 ):
                     self._crawl_delay[host] = min(float(value.strip()), 30.0)
+
+    # -- CR-002: Edges and schedule key lookup ------------------------------
+
+    def record_edge(
+        self,
+        run_id: str,
+        parent_id: str,
+        child_id: str,
+        edge_kind: str,
+        evidence_id: str | None = None,
+    ) -> None:
+        """Record a directed edge between resources."""
+        key = (run_id, parent_id, child_id, edge_kind)
+        prev = self.edges.get(key)
+        ev = evidence_id if evidence_id is not None else (prev.get("evidence_id") if prev else None)
+        self.edges[key] = {
+            "run_id": run_id,
+            "parent_id": parent_id,
+            "child_id": child_id,
+            "edge_kind": edge_kind,
+            "evidence_id": ev,
+        }
+
+    def find_resource_by_schedule_key(self, run_id: str, schedule_key: str) -> Resource | None:
+        """Find a resource by run_id and schedule_key."""
+        res = self.resources.get(schedule_key)
+        if res is not None and res.run_id == run_id:
+            return res.model_copy(deep=True)
+        return None
+
+    # -- CR-004: Payload hash lookup ---------------------------------------
+
+    def find_resource_by_payload(self, run_id: str, payload_sha256: str) -> Resource | None:
+        """Find an already-acquired resource with this payload hash in this run."""
+        for res in self.resources.values():
+            if res.run_id == run_id and res.payload_sha256 == payload_sha256:
+                return res.model_copy(deep=True)
+        return None
+
+    # -- CR-003: States and regions persistence -----------------------------
+
+    def upsert_state(self, state: State) -> None:
+        """Insert or update a dynamic state."""
+        self.states[(state.run_id, state.resource_id, state.state_key)] = state.model_copy(
+            deep=True
+        )
+
+    def upsert_region(self, region: Region) -> None:
+        """Insert or update a region."""
+        self.regions[(region.run_id, region.resource_id, region.state_id, region.region_key)] = (
+            region.model_copy(deep=True)
+        )
+
+    def get_states(self, run_id: str, resource_id: str) -> list[State]:
+        """All dynamic states of a resource."""
+        states = [
+            s.model_copy(deep=True)
+            for s in self.states.values()
+            if s.run_id == run_id and s.resource_id == resource_id
+        ]
+        return sorted(states, key=lambda s: s.state_id)
+
+    def get_regions(self, run_id: str, resource_id: str) -> list[Region]:
+        """All regions of a resource."""
+        regions = [
+            r.model_copy(deep=True)
+            for r in self.regions.values()
+            if r.run_id == run_id and r.resource_id == resource_id
+        ]
+        return sorted(regions, key=lambda r: r.region_id)
+
+    # -- CR-005: Read side for UrlRecord assembly --------------------------
+
+    def list_resources(self, run_id: str) -> list[Resource]:
+        """All latest resource records for a run (one per schedule key)."""
+        res_list = [r.model_copy(deep=True) for r in self.resources.values() if r.run_id == run_id]
+        return sorted(res_list, key=lambda r: r.schedule_key)
+
+    def get_summaries(self, resource_id: str) -> dict[str, dict[str, Any]]:
+        """All named summaries recorded for a resource."""
+        return {k: dict(v) for k, v in self.summaries.get(resource_id, {}).items()}
+
+    def get_events(self, run_id: str, entity_id: str | None = None) -> list[RunEvent]:
+        """Append-only events for a run, optionally filtered by entity_id, ordered by seq."""
+        return [
+            e.model_copy(deep=True)
+            for e in self.events
+            if e.run_id == run_id and (entity_id is None or e.entity_id == entity_id)
+        ]
+
+    def outstanding_resource_ids(self, run_id: str, kinds: Sequence[TaskKind]) -> set[str]:
+        """Resource IDs with a PENDING or LEASED task of the given kinds."""
+        kind_set = set(kinds)
+        by_key = {
+            r.schedule_key: r.resource_id for r in self.resources.values() if r.run_id == run_id
+        }
+        outstanding: set[str] = set()
+        for t in self._tasks.values():
+            if (
+                t.run_id != run_id
+                or t.state not in (TaskState.PENDING, TaskState.LEASED)
+                or t.kind not in kind_set
+            ):
+                continue
+            res_id = t.payload.get("resource_id")
+            if res_id:
+                outstanding.add(str(res_id))
+            sched_key = t.payload.get("schedule_key")
+            if sched_key and str(sched_key) in by_key:
+                outstanding.add(by_key[str(sched_key)])
+        return outstanding
 
     # -- reporting ----------------------------------------------------------
 

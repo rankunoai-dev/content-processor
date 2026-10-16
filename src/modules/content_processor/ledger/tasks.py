@@ -23,9 +23,11 @@ from src.core.logger import get_logger
 from src.modules.content_processor.contracts import (
     ContentBlock,
     Gap,
+    Region,
     Resource,
     RunEvent,
     RunScope,
+    State,
     Task,
 )
 from src.modules.content_processor.enums import AccessTier, TaskKind, TaskState
@@ -282,6 +284,8 @@ class TaskLedger:
                     "acquired_at_tier": (
                         resource.acquired_at_tier.value if resource.acquired_at_tier else None
                     ),
+                    "expected_mime": resource.expected_mime,
+                    "expected_mime_source": resource.expected_mime_source,
                     "record": resource.model_dump_json(),
                 },
             )
@@ -477,6 +481,187 @@ class TaskLedger:
             cur.execute("SELECT pg_notify(%s, %s)", ("run_events", event.run_id))
         self._conn.commit()
         return int(row["seq"]) if row else -1
+
+    # -- CR-002: Edges and schedule key lookup ------------------------------
+
+    def record_edge(
+        self,
+        run_id: str,
+        parent_id: str,
+        child_id: str,
+        edge_kind: str,
+        evidence_id: str | None = None,
+    ) -> None:
+        """Record a directed edge between resources (embeds, links_to, frames, etc.)."""
+        with self._conn.cursor() as cur:
+            cur.execute(
+                sql.SQL_RECORD_EDGE,
+                {
+                    "run_id": run_id,
+                    "parent_id": parent_id,
+                    "child_id": child_id,
+                    "edge_kind": edge_kind,
+                    "evidence_id": evidence_id,
+                },
+            )
+        self._conn.commit()
+
+    def find_resource_by_schedule_key(self, run_id: str, schedule_key: str) -> Resource | None:
+        """Find a resource by run_id and schedule_key."""
+        with self._conn.cursor() as cur:
+            cur.execute(
+                sql.SQL_FIND_RESOURCE_BY_SCHEDULE_KEY,
+                {"run_id": run_id, "schedule_key": schedule_key},
+            )
+            row = cur.fetchone()
+        self._conn.commit()
+        if row is None:
+            return None
+        record = row["record"]
+        known = set(Resource.model_fields)
+        return Resource.model_validate({k: v for k, v in record.items() if k in known})
+
+    # -- CR-004: Payload hash lookup ---------------------------------------
+
+    def find_resource_by_payload(self, run_id: str, payload_sha256: str) -> Resource | None:
+        """Find an already-acquired resource with this payload hash in this run."""
+        with self._conn.cursor() as cur:
+            cur.execute(
+                sql.SQL_FIND_RESOURCE_BY_PAYLOAD,
+                {"run_id": run_id, "payload_sha256": payload_sha256},
+            )
+            row = cur.fetchone()
+        self._conn.commit()
+        if row is None:
+            return None
+        record = row["record"]
+        known = set(Resource.model_fields)
+        return Resource.model_validate({k: v for k, v in record.items() if k in known})
+
+    # -- CR-003: States and regions persistence -----------------------------
+
+    def upsert_state(self, state: State) -> None:
+        """Insert or update a dynamic state."""
+        with self._conn.cursor() as cur:
+            cur.execute(
+                sql.SQL_UPSERT_STATE,
+                {
+                    "state_id": state.state_id,
+                    "run_id": state.run_id,
+                    "resource_id": state.resource_id,
+                    "parent_state_id": state.parent_state_id,
+                    "state_key": state.state_key,
+                    "status": state.status.value,
+                    "record": state.model_dump_json(),
+                },
+            )
+        self._conn.commit()
+
+    def upsert_region(self, region: Region) -> None:
+        """Insert or update a region."""
+        with self._conn.cursor() as cur:
+            cur.execute(
+                sql.SQL_UPSERT_REGION,
+                {
+                    "region_id": region.region_id,
+                    "run_id": region.run_id,
+                    "resource_id": region.resource_id,
+                    "state_id": region.state_id,
+                    "region_key": region.region_key,
+                    "status": region.status.value,
+                    "record": region.model_dump_json(),
+                },
+            )
+        self._conn.commit()
+
+    def get_states(self, run_id: str, resource_id: str) -> list[State]:
+        """All dynamic states of a resource."""
+        with self._conn.cursor() as cur:
+            cur.execute(sql.SQL_GET_STATES, {"run_id": run_id, "resource_id": resource_id})
+            rows = cur.fetchall()
+        self._conn.commit()
+        return [State.model_validate(row["record"]) for row in rows]
+
+    def get_regions(self, run_id: str, resource_id: str) -> list[Region]:
+        """All regions of a resource."""
+        with self._conn.cursor() as cur:
+            cur.execute(sql.SQL_GET_REGIONS, {"run_id": run_id, "resource_id": resource_id})
+            rows = cur.fetchall()
+        self._conn.commit()
+        return [Region.model_validate(row["record"]) for row in rows]
+
+    # -- CR-005: Read side for UrlRecord assembly --------------------------
+
+    def list_resources(self, run_id: str) -> list[Resource]:
+        """All latest resource records for a run (one per schedule key)."""
+        with self._conn.cursor() as cur:
+            cur.execute(sql.SQL_LIST_RESOURCES, {"run_id": run_id})
+            rows = cur.fetchall()
+        self._conn.commit()
+        known = set(Resource.model_fields)
+        return [
+            Resource.model_validate({k: v for k, v in row["record"].items() if k in known})
+            for row in rows
+        ]
+
+    def get_summaries(self, resource_id: str) -> dict[str, dict[str, Any]]:
+        """All named summaries recorded for a resource."""
+        with self._conn.cursor() as cur:
+            cur.execute(sql.SQL_GET_RESOURCE, {"resource_id": resource_id})
+            row = cur.fetchone()
+        self._conn.commit()
+        if row is None:
+            return {}
+        record: dict[str, Any] = row["record"]
+        known = set(Resource.model_fields)
+        return {k: dict(v) for k, v in record.items() if k not in known and isinstance(v, dict)}
+
+    def get_events(self, run_id: str, entity_id: str | None = None) -> list[RunEvent]:
+        """Append-only events for a run, optionally filtered by entity_id, ordered by seq."""
+        with self._conn.cursor() as cur:
+            if entity_id is not None:
+                cur.execute(
+                    sql.SQL_GET_EVENTS_FOR_ENTITY,
+                    {"run_id": run_id, "entity_id": entity_id},
+                )
+            else:
+                cur.execute(sql.SQL_GET_EVENTS_FOR_RUN, {"run_id": run_id})
+            rows = cur.fetchall()
+        self._conn.commit()
+        events: list[RunEvent] = []
+        for r in rows:
+            evidence_ids = r["evidence_ids"]
+            if isinstance(evidence_ids, str):
+                evidence_ids = json.loads(evidence_ids)
+            events.append(
+                RunEvent(
+                    seq=r["seq"],
+                    run_id=r["run_id"],
+                    entity_type=r["entity_type"],
+                    entity_id=r["entity_id"],
+                    old_state=r["old_state"],
+                    new_state=r["new_state"],
+                    inventory_revision=r["inventory_revision"],
+                    reason=r["reason"],
+                    attempt=r["attempt"],
+                    evidence_ids=list(evidence_ids),
+                    at=r["at"],
+                )
+            )
+        return events
+
+    def outstanding_resource_ids(self, run_id: str, kinds: Sequence[TaskKind]) -> set[str]:
+        """Resource IDs with a PENDING or LEASED task of the given kinds."""
+        if not kinds:
+            return set()
+        with self._conn.cursor() as cur:
+            cur.execute(
+                sql.SQL_OUTSTANDING_RESOURCE_IDS,
+                {"run_id": run_id, "kinds": [k.value for k in kinds]},
+            )
+            rows = cur.fetchall()
+        self._conn.commit()
+        return {str(r["res_id"]) for r in rows if r.get("res_id")}
 
 
 def new_run_id() -> str:

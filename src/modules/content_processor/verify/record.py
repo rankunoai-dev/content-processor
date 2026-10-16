@@ -79,22 +79,18 @@ _ACQUISITION_GAPS = frozenset(
 class RunReader(Protocol):
     """Read side of a ledger that records can be assembled from.
 
-    `MemoryLedger` satisfies it today; the durable ledger needs CR-005.
-    `resources` is keyed by schedule key.
+    Implemented by `MemoryLedger` and `TaskLedger` (CR-005).
     """
 
-    @property
-    def resources(self) -> Mapping[str, Resource]:
-        """Latest resource per schedule key."""
+    def list_resources(self, run_id: str) -> list[Resource]:
+        """Latest resource rows for a run."""
         ...
 
-    @property
-    def summaries(self) -> Mapping[str, Mapping[str, Mapping[str, Any]]]:
+    def get_summaries(self, resource_id: str) -> dict[str, dict[str, Any]]:
         """Named summaries per resource id (render, explore, followups...)."""
         ...
 
-    @property
-    def events(self) -> Sequence[RunEvent]:
+    def get_events(self, run_id: str, entity_id: str | None = None) -> list[RunEvent]:
         """Append-only event history."""
         ...
 
@@ -492,7 +488,7 @@ def url_records_for_run(
             `assemble_url_record`.
     """
     expected = dict(expectations or {})
-    resources: dict[str, Resource] = dict(reader.resources)
+    resources: dict[str, Resource] = {r.schedule_key: r for r in reader.list_resources(run_id)}
     if plan is not None:
         for entry in plan.entries:
             resources.setdefault(
@@ -510,14 +506,14 @@ def url_records_for_run(
             )
     records: list[UrlRecord] = []
     for key, res in resources.items():
-        history = [e for e in reader.events if e.entity_id == res.resource_id]
+        history = reader.get_events(run_id, res.resource_id)
         records.append(
             assemble_url_record(
                 run_id=run_id,
                 target=res,
                 recorded_gaps=reader.get_gaps(res.resource_id),
                 blocks=reader.get_blocks(res.resource_id),
-                summaries=reader.summaries.get(res.resource_id, {}),
+                summaries=reader.get_summaries(res.resource_id),
                 frames=frames_for(res) if frames_for is not None else None,
                 expected_mime=expected.get(res.requested_url) or expected.get(key),
                 history=history,

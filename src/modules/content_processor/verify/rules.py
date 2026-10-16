@@ -420,13 +420,12 @@ def rule_r10_payload(
     if (verdict is not None and verdict.kind is BlockKind.SOFT_404) or (
         "soft_404_suspected" in tokens
     ):
-        # No SOFT_404 gap type yet (CR-006); LOW_CONFIDENCE routes it to review.
         gaps.append(
             _gap(
                 run_id,
                 resource,
                 "R10:soft_404",
-                GapType.LOW_CONFIDENCE,
+                GapType.SOFT_404_SUSPECTED,
                 EntityStatus.EXTRACTED_UNVERIFIED,
                 "soft_404_suspected",
             )

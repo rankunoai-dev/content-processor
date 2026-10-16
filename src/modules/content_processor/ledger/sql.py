@@ -30,14 +30,25 @@ __all__ = [
     "SQL_SAVE_HOST",
     "SQL_SET_ROBOTS",
     "SQL_GET_BLOCKS",
+    "SQL_GET_EVENTS_FOR_ENTITY",
+    "SQL_GET_EVENTS_FOR_RUN",
     "SQL_GET_GAPS",
+    "SQL_GET_REGIONS",
     "SQL_GET_RESOURCE",
+    "SQL_GET_STATES",
+    "SQL_LIST_RESOURCES",
+    "SQL_OUTSTANDING_RESOURCE_IDS",
+    "SQL_RECORD_EDGE",
     "SQL_RECORD_SUMMARY",
+    "SQL_FIND_RESOURCE_BY_PAYLOAD",
+    "SQL_FIND_RESOURCE_BY_SCHEDULE_KEY",
     "SQL_TASK_COUNTS",
     "SQL_TENANT_OF_RUN",
     "SQL_UPSERT_BLOCK",
     "SQL_UPSERT_GAP",
+    "SQL_UPSERT_REGION",
     "SQL_UPSERT_RESOURCE",
+    "SQL_UPSERT_STATE",
 ]
 
 HOST_SLOT_KINDS: frozenset[TaskKind] = frozenset({TaskKind.FETCH, TaskKind.RENDER, TaskKind.UNLOCK})
@@ -209,14 +220,18 @@ SELECT state, count(*) AS n FROM tasks WHERE run_id = %(run_id)s GROUP BY state
 
 SQL_UPSERT_RESOURCE = """
 INSERT INTO resources (resource_id, run_id, schedule_key, requested_url, final_url, host,
-                       mandatory, status, status_reason, payload_sha256, acquired_at_tier, record)
+                       mandatory, status, status_reason, payload_sha256, acquired_at_tier,
+                       expected_mime, expected_mime_source, record)
 VALUES (%(resource_id)s, %(run_id)s, %(schedule_key)s, %(requested_url)s, %(final_url)s, %(host)s,
         %(mandatory)s, %(status)s, %(status_reason)s, %(payload_sha256)s, %(acquired_at_tier)s,
-        %(record)s::jsonb)
+        %(expected_mime)s, %(expected_mime_source)s, %(record)s::jsonb)
 ON CONFLICT (run_id, schedule_key) DO UPDATE
 SET final_url = EXCLUDED.final_url, status = EXCLUDED.status,
     status_reason = EXCLUDED.status_reason, payload_sha256 = EXCLUDED.payload_sha256,
-    acquired_at_tier = EXCLUDED.acquired_at_tier, record = EXCLUDED.record, updated_at = now()
+    acquired_at_tier = EXCLUDED.acquired_at_tier,
+    expected_mime = EXCLUDED.expected_mime,
+    expected_mime_source = EXCLUDED.expected_mime_source,
+    record = EXCLUDED.record, updated_at = now()
 """
 
 SQL_UPSERT_BLOCK = """
@@ -286,4 +301,89 @@ SET robots_cache = %(robots_cache)s, robots_fetched_at = %(fetched_at)s,
     base_delay_ms = GREATEST(base_delay_ms, COALESCE(%(crawl_delay_ms)s, 0)),
     updated_at = now()
 WHERE tenant_id = %(tenant_id)s AND host = %(host)s
+"""
+
+SQL_RECORD_EDGE = """
+INSERT INTO resource_edges (run_id, parent_id, child_id, edge_kind, evidence_id)
+VALUES (%(run_id)s, %(parent_id)s, %(child_id)s, %(edge_kind)s, %(evidence_id)s)
+ON CONFLICT (run_id, parent_id, child_id, edge_kind) DO UPDATE
+SET evidence_id = COALESCE(EXCLUDED.evidence_id, resource_edges.evidence_id)
+"""
+
+SQL_FIND_RESOURCE_BY_SCHEDULE_KEY = """
+SELECT record FROM resources WHERE run_id = %(run_id)s AND schedule_key = %(schedule_key)s
+"""
+
+SQL_FIND_RESOURCE_BY_PAYLOAD = """
+SELECT record FROM resources
+WHERE run_id = %(run_id)s AND payload_sha256 = %(payload_sha256)s
+LIMIT 1
+"""
+
+SQL_UPSERT_STATE = """
+INSERT INTO states (state_id, run_id, resource_id, parent_state_id, state_key, status, record)
+VALUES (%(state_id)s, %(run_id)s, %(resource_id)s, %(parent_state_id)s, %(state_key)s,
+        %(status)s, %(record)s::jsonb)
+ON CONFLICT (run_id, resource_id, state_key) DO UPDATE
+SET parent_state_id = EXCLUDED.parent_state_id, status = EXCLUDED.status, record = EXCLUDED.record
+"""
+
+SQL_GET_STATES = """
+SELECT record FROM states
+WHERE run_id = %(run_id)s AND resource_id = %(resource_id)s
+ORDER BY state_id
+"""
+
+SQL_UPSERT_REGION = """
+INSERT INTO regions (region_id, run_id, resource_id, state_id, region_key, status, record)
+VALUES (%(region_id)s, %(run_id)s, %(resource_id)s, %(state_id)s, %(region_key)s,
+        %(status)s, %(record)s::jsonb)
+ON CONFLICT (run_id, resource_id, state_id, region_key) DO UPDATE
+SET status = EXCLUDED.status, record = EXCLUDED.record
+"""
+
+SQL_GET_REGIONS = """
+SELECT record FROM regions
+WHERE run_id = %(run_id)s AND resource_id = %(resource_id)s
+ORDER BY region_id
+"""
+
+SQL_LIST_RESOURCES = """
+SELECT record FROM resources WHERE run_id = %(run_id)s ORDER BY schedule_key
+"""
+
+SQL_GET_EVENTS_FOR_RUN = """
+SELECT seq, run_id, entity_type, entity_id, old_state, new_state, inventory_revision,
+       reason, attempt, evidence_ids, at
+FROM events
+WHERE run_id = %(run_id)s
+ORDER BY seq
+"""
+
+SQL_GET_EVENTS_FOR_ENTITY = """
+SELECT seq, run_id, entity_type, entity_id, old_state, new_state, inventory_revision,
+       reason, attempt, evidence_ids, at
+FROM events
+WHERE run_id = %(run_id)s AND entity_id = %(entity_id)s
+ORDER BY seq
+"""
+
+SQL_OUTSTANDING_RESOURCE_IDS = """
+SELECT DISTINCT res_id FROM (
+    SELECT t.payload->>'resource_id' AS res_id
+    FROM tasks t
+    WHERE t.run_id = %(run_id)s
+      AND t.state IN ('PENDING', 'LEASED')
+      AND t.kind = ANY(%(kinds)s)
+      AND t.payload ? 'resource_id'
+    UNION
+    SELECT r.resource_id AS res_id
+    FROM tasks t
+    JOIN resources r ON r.run_id = t.run_id AND r.schedule_key = (t.payload->>'schedule_key')
+    WHERE t.run_id = %(run_id)s
+      AND t.state IN ('PENDING', 'LEASED')
+      AND t.kind = ANY(%(kinds)s)
+      AND t.payload ? 'schedule_key'
+) sub
+WHERE res_id IS NOT NULL AND res_id <> ''
 """

@@ -46,9 +46,11 @@ __all__ = [
     "InventoryCounts",
     "Provenance",
     "RedirectHop",
+    "Region",
     "Resource",
     "RunEvent",
     "RunScope",
+    "State",
     "StatusVector",
     "T6Approval",
     "Task",
@@ -326,6 +328,37 @@ class Resource(StrictModel):
     status: EntityStatus = EntityStatus.DISCOVERED
     status_reason: str | None = None
     attempt: int = Field(default=1, ge=1)
+    expected_mime: str | None = None
+    expected_mime_source: str | None = None
+
+
+class State(StrictModel):
+    """A dynamic state discovered on a page (e.g. tab selected, disclosure opened)."""
+
+    state_id: str
+    run_id: str
+    resource_id: str
+    state_key: str
+    parent_state_id: str | None = None
+    status: EntityStatus = EntityStatus.DISCOVERED
+    evidence_ids: list[str] = Field(default_factory=list)
+    action: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class Region(StrictModel):
+    """A bounded area or container on a page/document in a specific state."""
+
+    region_id: str
+    run_id: str
+    resource_id: str
+    region_key: str
+    state_id: str | None = None
+    status: EntityStatus = EntityStatus.DISCOVERED
+    bbox: tuple[float, float, float, float] | None = None
+    role: str = "unknown"
+    evidence_ids: list[str] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class Gap(StrictModel):

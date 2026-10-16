@@ -27,6 +27,7 @@ _REVIEW_GAPS = frozenset(
         GapType.DEGRADED_VARIANT,
         GapType.SOFT_REDIRECT_SUSPECTED,
         GapType.VOLATILE,
+        GapType.SOFT_404_SUSPECTED,
     }
 )
 _PARTIAL_GAPS = frozenset(
