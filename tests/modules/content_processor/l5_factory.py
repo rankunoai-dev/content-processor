@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Literal
 
 from src.modules.content_processor.contracts import (
     ContentBlock,
@@ -28,7 +29,7 @@ def block(
     order: int,
     text: str,
     *,
-    role: str = "main",
+    role: Literal["main", "nav", "footer", "aside", "legal", "chrome", "unknown"] = "main",
     layer: ContentLayer = ContentLayer.RENDERED_VISIBLE,
     heading: list[str] | None = None,
     dedupe_of: str | None = None,
@@ -42,7 +43,7 @@ def block(
         heading_path=heading or [],
         reading_order=order,
         layer=layer,
-        role=role,  # type: ignore[arg-type]
+        role=role,
         raw_text=text,
         normalized_text=text,
         method="test",

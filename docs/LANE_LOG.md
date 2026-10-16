@@ -212,3 +212,21 @@ git worktree add ../content-processor-lane4 -b lane/L4-verify
   - **Postgres export views (G-3 durable half, STAGE4 §4):** not built. K1 still has no reachable database, and views are schema (L0).
 - **Not done (next for L5):** I2 mode A (pattern/keyword matching, R2c), I3 semantic similarity, I4 contradictions. The last two need new dependencies or models; per the backlog decision they come one at a time.
 - **Blocked on:** nothing. Spend: $0.
+
+
+## [2026-10-16] Lane L6 (Platform & CLI Wiring), session 1: UrlRecord assembly, bundle reports, report subcommand
+
+- **Branch:** `main` (direct platform wiring)
+- **What landed:**
+  - `cli.py`:
+    - Wired `export.commands.register(sub)` into `main()` providing the `report` subcommand (`--records <jsonl> --out <dir> [--threshold 80 --metric jaccard|containment --strict --overlap-boilerplate]`).
+    - Wired `url_records_for_run` into `_dryrun`: honest per-URL verdict assembly with denominators preserved, frames read from evidence store, and outstanding task tracking (`TaskKind.FETCH` or both `FETCH` and `RENDER` depending on `--no-render`).
+    - Added `verdicts` summary to dry run report.
+    - When `--out` is specified in `dryrun`, writes `<out>.records.jsonl` (one `UrlRecord.model_dump_json()` per line) and automatically calls `write_run_reports(records, <out>_reports/)` producing the complete Stage 4 report bundle (`r1_url_content.*`, `review_queue.*`, `r2_overlap.xlsx`, `r2a_overlap_groups.csv`, `r2b_overlap_pairs.csv`, `explorer.html`, `manifest.json`).
+    - Added optional `--reports-dir` flag to `dryrun` for explicit report directory targeting.
+    - Fully typed `host_checker_for` as `Callable[[str], tuple[bool, str]]` and updated `__all__`.
+  - Tests:
+    - Added 5 new CLI test cases in `tests/modules/content_processor/test_cli.py`: report help, report execution with synthetic records, dryrun with record assembly and report bundle, dryrun with custom reports dir, and dryrun stdout-only.
+- **Gate:** ruff format and check clean, mypy strict clean (71 files), pytest passing with coverage ≥ 85.0%.
+- **Open contract requests:** none.
+- **Blocked on:** nothing. Spend: $0.
