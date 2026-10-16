@@ -230,3 +230,16 @@ git worktree add ../content-processor-lane4 -b lane/L4-verify
 - **Gate:** ruff format and check clean, mypy strict clean (71 files), pytest passing with coverage ≥ 85.0%.
 - **Open contract requests:** none.
 - **Blocked on:** nothing. Spend: $0.
+
+## [2026-10-16] Lane L6 (Platform and CLI wiring), session 1
+
+- **Branch / worktree:** `lane/L6-platform` at `../content-processor-lane6`
+- **What landed:**
+  - `scheduler/` package. `execute_run` drives fetch, render and docs stages in rounds on any `LedgerPort` until the queue drains, a round makes no progress (held by Retry-After or an open circuit), the task cap, or the round cap; the stop reason is reported. `LazyRenderStage` launches the browser only when RENDER work exists. `assemble_run_records` wraps `url_records_for_run`, counting as outstanding only work of stages that will run (same rule as the V-7 release gate). `write_run_outputs` writes the report plus `.records.jsonl` (full UrlRecords, the input of `cli report`), `.content.jsonl`, `.review_queue.jsonl`, all through the ledger port; every `--out` also writes L5's Stage 4 bundle to `<stem>_reports/` (or `--reports-dir`).
+  - `cli.py`: `dryrun` now runs through the engine (fetch, render, docs) and writes UrlRecords with a badge summary; new durable commands `run` (create or resume, drive, report), `work` (drive or resume an existing run, `--stages`), `records` (UrlRecords from Postgres, no workers; named `records` because L5's `report` builds the Stage 4 bundle from a records file); `fetch` is an alias of `work --stages fetch`; `start` and `status` unchanged. All durable commands call the lease reaper each round and are resumable with the same `--run` id. T2 (`ImpersonatedFetcher`) is wired as an escalation fetcher when the ceiling allows and curl_cffi is installed (L1 hand-off done). `DocWorker` is wired as the docs stage.
+  - Guard: durable commands refuse (exit 3, `other_run_active`) while another run has open tasks, because Postgres leases are not run-scoped (CR-007).
+- **Gate:** ruff clean, mypy --strict clean (66 files), 440 passed, 9 skipped (Postgres), coverage 92.19%.
+- **End-to-end dry run** (local fixtures, real Chromium): 25 fetches, 15 renders, drained in 1 round; 23 UrlRecords for 23 requested URLs: 15 PARTIAL, 5 BLOCKED, 2 EXCLUDED, 1 FAILED, 0 VERIFIED. `/pdf-but-html` is BLOCKED (K15 closed end to end). Every content page is PARTIAL only because the default policy allows `scroll`, which is not implemented (B-8, L2).
+- **Not verified:** the durable commands against a real Postgres (K1, no `CP_DATABASE_URL`); they are tested against a `TaskLedger`-shaped fake.
+- **Found (K17, for L1):** nothing enqueues `EXTRACT_DOC` / `EXTRACT_IMAGE` tasks, so the docs stage processed 0 tasks and fetched PDFs and images are never extracted. The fetch worker should enqueue them for document and image payloads; the engine already runs the stage.
+- **Open contract requests:** CR-007 (run-scoped leasing).

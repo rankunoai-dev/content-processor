@@ -69,3 +69,10 @@ Only Lane L0 edits `contracts.py`, `enums.py`, `workers/ports.py`, `ledger/schem
 - **Why:** V-2 (R10). A soft 404 is recorded today as `LOW_CONFIDENCE` with reason `soft_404_suspected` so it routes to NEEDS_REVIEW; a dedicated type lets reports and the review queue filter it without parsing reasons.
 - **Status:** LANDED
 
+
+### CR-007: Run-scoped leasing and pending counts
+- **Lane:** L6
+- **File(s):** ports.py, ledger/sql.py, ledger/tasks.py, ledger/memory.py
+- **Change:** optional `run_id: str | None = None` on `LedgerPort.lease(worker, kinds, run_id=None)` and `pending_count(kinds, run_id=None)`; when set, `SQL_LEASE_PLAIN`, `SQL_LEASE_WITH_SLOT` and `SQL_PENDING_COUNT` add `AND t.run_id = %(run_id)s`. Workers pass their bound `run_id`. Default `None` keeps today's behaviour.
+- **Why:** P-1. A worker is bound to one run's scope, but Postgres leases match only the task kind, so with two open runs a worker can lease and process the other run's task under the wrong scope. Until this lands the durable `run`/`work` commands refuse to start while another run has open tasks (`foreign_open_tasks`, exit code 3).
+- **Status:** OPEN
