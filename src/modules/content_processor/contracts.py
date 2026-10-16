@@ -20,6 +20,7 @@ from src.modules.content_processor.enums import (
     AccessTier,
     AuthorizationKind,
     BlockKind,
+    ChangeStatus,
     ContentLayer,
     EntityStatus,
     EnvironmentProfile,
@@ -28,8 +29,10 @@ from src.modules.content_processor.enums import (
     RedirectKind,
     RobotsPolicy,
     ScopeMode,
+    SourceFormat,
     TaskKind,
     TaskState,
+    UiRegion,
     UrlBadge,
 )
 
@@ -41,6 +44,7 @@ __all__ = [
     "ContentBlock",
     "DiscoveryState",
     "FormPersona",
+    "FollowupRef",
     "Gap",
     "InteractionPolicy",
     "InventoryCounts",
@@ -330,6 +334,19 @@ class Resource(StrictModel):
     attempt: int = Field(default=1, ge=1)
     expected_mime: str | None = None
     expected_mime_source: str | None = None
+    # -- freshness and recrawl ---------------------------------------------------
+    http_etag: str | None = None
+    http_last_modified: str | None = None
+    page_modified_at: datetime | None = None
+    page_modified_source: str | None = None
+    page_published_at: datetime | None = None
+    content_fingerprint: str | None = Field(
+        default=None, description="Hash of the normalised visible text (ignores markup churn)"
+    )
+    change_status: ChangeStatus | None = None
+    change_basis: str | None = None
+    previous_run_id: str | None = None
+    reused_from_run_id: str | None = None
 
 
 class State(StrictModel):
@@ -427,6 +444,24 @@ class ContentBlock(StrictModel):
     provenance: Provenance = Field(default_factory=Provenance)
     claim_context: ClaimContext | None = None
     dedupe_of: str | None = None
+    # -- source tagging (where the content came from, and when) ------------
+    source_format: SourceFormat | None = Field(
+        default=None, description="Artefact type: html, pdf, image, office_doc, ..."
+    )
+    ui_region: UiRegion | None = Field(
+        default=None, description="Place on the page: hamburger_menu, snippet, palette, ..."
+    )
+    source_url: str | None = Field(default=None, description="URL the content was taken from")
+    extracted_at: datetime | None = Field(default=None, description="When we extracted it (UTC)")
+    page_modified_at: datetime | None = Field(
+        default=None, description="When the site says the page or file was last updated"
+    )
+    page_modified_source: str | None = Field(
+        default=None, description="Which signal gave page_modified_at (jsonld, meta, http, ...)"
+    )
+    reused_from_run_id: str | None = Field(
+        default=None, description="Set when the page was unchanged and this block was reused"
+    )
 
 
 class StatusVector(StrictModel):
@@ -464,6 +499,14 @@ class DiscoveryState(StrictModel):
     stop_reason: str | None = None
 
 
+class FollowupRef(StrictModel):
+    """A depth-1 child a page pointed to (kept so an unchanged page can re-queue it)."""
+
+    url: str
+    edge_kind: str | None = None
+    expected_mime: str | None = None
+
+
 class UrlRecord(StrictModel):
     """Per-URL export record (ARCHITECTURE.md §9)."""
 
@@ -484,6 +527,24 @@ class UrlRecord(StrictModel):
     design_evidence_id: str | None = None
     tier_reached: AccessTier | None = None
     warnings: list[str] = Field(default_factory=list)
+    # -- identity, freshness and recrawl baseline ---------------------------------
+    schedule_key: str | None = None
+    resource_status: EntityStatus | None = None
+    resource_status_reason: str | None = None
+    sniffed_mime: str | None = None
+    payload_sha256: str | None = None
+    http_etag: str | None = None
+    http_last_modified: str | None = None
+    page_modified_at: datetime | None = None
+    page_modified_source: str | None = None
+    page_published_at: datetime | None = None
+    content_fingerprint: str | None = None
+    change_status: ChangeStatus | None = None
+    change_basis: str | None = None
+    previous_run_id: str | None = None
+    reused_from_run_id: str | None = None
+    followups: list[FollowupRef] = Field(default_factory=list)
+    summaries: dict[str, dict[str, Any]] = Field(default_factory=dict)
 
 
 class Task(StrictModel):

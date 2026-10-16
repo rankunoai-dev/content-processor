@@ -263,3 +263,16 @@ git worktree add ../content-processor-lane4 -b lane/L4-verify
 - **Gate:** ruff format and check clean, mypy strict clean (74 files), 501 passed and 11 skipped (Postgres; 2 new integration tests for run-scoped leases and K16 blocks wait for K1), coverage 93.05% (`main` was 92.97%).
 - **Coordination:** `feature/provenance-recrawl` (session content-processor-33, commit `2cdd8b6`) touches `html_source.py`, `fetch_worker.py`, `render_worker.py`, `doc_worker.py`, `cli.py` and appends to `fixtures/server.py` and this log. It will rebase onto this branch once merged. Expected conflicts are only the two appends.
 - **Open:** K1 (`CP_DATABASE_URL`). The Postgres tests for CR-007 and K16 are written and skip until a disposable database exists.
+
+
+## [2026-10-16] Feature: content source tagging and change-aware recrawl
+
+- **Branch / worktree:** `feature/provenance-recrawl` at `../content-processor-provenance` (spans L0 contracts, L1 fetch worker, L4 record assembly, L6 CLI; coordinated with the K16/K17/CR-007 session, whose branch should merge first).
+- **What landed:** see `docs/PROVENANCE_AND_RECRAWL.md`.
+  - Contracts (additive): `SourceFormat`, `UiRegion`, `ChangeStatus` enums; `ContentBlock.source_format/ui_region/source_url/extracted_at/page_modified_at/page_modified_source/reused_from_run_id`; Resource and UrlRecord validators (ETag, Last-Modified), page modified/published dates, content fingerprint, change status/basis, previous and reused-from run ids; UrlRecord also carries schedule key, resource status, payload hash, follow-up refs and summaries so a records file is a complete baseline.
+  - `adapters/regions.py`: page-region classifier (hamburger and mega menus, breadcrumb, snippet, palette, card, carousel, modal, popover, tooltip, cookie banner, chat widget, ...). `provenance.stamp_blocks` applied by the fetch, render and doc workers.
+  - `recrawl/`: page dates (JSON-LD, meta, microdata, PDF ModDate, non-dynamic HTTP Last-Modified), baseline from a records file or a previous durable run, ordered change decision. Fetchers accept first-hop headers (conditional GET; 304 returned, not followed). Unchanged pages reuse blocks, gaps and summaries with their original dates; no render, exploration or OCR; children re-queued.
+  - CLI: `--baseline <records.jsonl>` on dryrun/run/work, `--baseline-run <id>` on run/work (or `scope.recrawl_of_run_id`); reports carry `changes` counts and baseline info.
+- **Gate:** ruff, mypy --strict clean (80 files), 534 passed, 9 skipped, coverage 93.10%.
+- **Measured:** fixture scope twice with real Chromium: run 1 rendered 17 pages in 87 s; run 2 with the baseline found 15 unchanged, rendered 2, took 33 s; no reused verdict changed.
+- **Limits:** HTML change is judged on server HTML (pure-SPA data changes look unchanged); sitemap lastmod and XMP/EXIF dates not read yet.

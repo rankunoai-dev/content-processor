@@ -21,8 +21,14 @@ from pydantic import Field
 from selectolax.parser import HTMLParser, Node
 
 from src.core.schemas import StrictModel
+from src.modules.content_processor.adapters.regions import classify_region
 from src.modules.content_processor.contracts import ContentBlock, Provenance
-from src.modules.content_processor.enums import ContentLayer, EntityStatus
+from src.modules.content_processor.enums import (
+    ContentLayer,
+    EntityStatus,
+    SourceFormat,
+    UiRegion,
+)
 
 __all__ = [
     "DiscoveredAsset",
@@ -190,6 +196,7 @@ class _Ctx:
     role: Role
     hidden_reason: str | None = None
     label: str | None = None
+    region: UiRegion = UiRegion.UNKNOWN
 
 
 @dataclass
@@ -253,6 +260,10 @@ class _Walker:
                 evidence_ids=[self.evidence_id],
                 provenance=Provenance(selector=ctx.label),
                 dedupe_of=dedupe_of,
+                source_format=SourceFormat.HTML,
+                ui_region=(
+                    UiRegion.PAGE_METADATA if ctx.layer is ContentLayer.METADATA else ctx.region
+                ),
             )
         )
         self.order += 1
@@ -276,7 +287,12 @@ class _Walker:
                 if comment:
                     n, ops = normalize_text(comment)
                     self.emit(
-                        comment, n, ops, _Ctx(ContentLayer.SOURCE_ONLY, ctx.role, label="comment")
+                        comment,
+                        n,
+                        ops,
+                        _Ctx(
+                            ContentLayer.SOURCE_ONLY, ctx.role, label="comment", region=ctx.region
+                        ),
                     )
                 continue
             self.element(child, ctx)
@@ -313,11 +329,15 @@ class _Walker:
             self.heading_path.append(title)
 
         if tag in ("template",):
-            self.walk(node, _Ctx(ContentLayer.SOURCE_ONLY, ctx.role, label="template"))
+            self.walk(
+                node, _Ctx(ContentLayer.SOURCE_ONLY, ctx.role, label="template", region=ctx.region)
+            )
             self.flush()
             return
         if tag == "noscript":
-            self.walk(node, _Ctx(ContentLayer.SOURCE_ONLY, ctx.role, label="noscript"))
+            self.walk(
+                node, _Ctx(ContentLayer.SOURCE_ONLY, ctx.role, label="noscript", region=ctx.region)
+            )
             self.flush()
             return
         if tag == "details" and "open" not in attrs:
@@ -329,7 +349,13 @@ class _Walker:
                     continue
                 else:
                     self.element(
-                        child, _Ctx(ContentLayer.COLLAPSED_PUBLISHED, ctx.role, label="details")
+                        child,
+                        _Ctx(
+                            ContentLayer.COLLAPSED_PUBLISHED,
+                            ctx.role,
+                            label="details",
+                            region=ctx.region,
+                        ),
                     )
             self.flush()
             return
@@ -380,7 +406,8 @@ class _Walker:
                 layer, label = ContentLayer.THIRD_PARTY_CHROME, ident.strip()[:60]
             elif _ICON_CLASS.search(attrs.get("class") or "") and tag in ("i", "span", "em", "b"):
                 layer, label = ContentLayer.ICON_ARTIFACT, (attrs.get("class") or "")[:60]
-        return _Ctx(layer, role, label=label)
+        region = classify_region(tag, attrs, parent.region)
+        return _Ctx(layer, role, label=label, region=region)
 
     def attribute_text(self, tag: str, attrs: dict[str, str | None], ctx: _Ctx) -> None:
         for name in ("aria-label", "alt", "title", "placeholder"):
@@ -393,7 +420,15 @@ class _Walker:
             if n:
                 self.flush()
                 self.emit(
-                    value, n, ops, _Ctx(ContentLayer.ACCESSIBILITY_ONLY, ctx.role, label=f"@{name}")
+                    value,
+                    n,
+                    ops,
+                    _Ctx(
+                        ContentLayer.ACCESSIBILITY_ONLY,
+                        ctx.role,
+                        label=f"@{name}",
+                        region=ctx.region,
+                    ),
                 )
 
     def script(self, node: Node, attrs: dict[str, str | None], parent: _Ctx) -> None:
@@ -418,7 +453,12 @@ class _Walker:
                 stripped[:5000],
                 n,
                 ops,
-                _Ctx(ContentLayer.SOURCE_ONLY, parent.role, label="inline_state_json"),
+                _Ctx(
+                    ContentLayer.SOURCE_ONLY,
+                    parent.role,
+                    label="inline_state_json",
+                    region=parent.region,
+                ),
             )
 
     def link(self, node: Node, attrs: dict[str, str | None], ctx: _Ctx) -> None:

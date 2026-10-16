@@ -44,6 +44,7 @@ from src.modules.content_processor.enums import (
     GapType,
     TaskKind,
 )
+from src.modules.content_processor.provenance import stamp_blocks
 from src.modules.content_processor.workers.ports import LedgerPort
 
 __all__ = ["DocWorker"]
@@ -222,7 +223,7 @@ class DocWorker:
             ocr_runner=self._ocr_runner if not self._isolate else None,
             locale=self._locale,
         )
-        self._ledger.upsert_blocks(resource.resource_id, extraction.blocks)
+        self._ledger.upsert_blocks(resource.resource_id, stamp_blocks(extraction.blocks, resource))
         for gap in extraction.gaps:
             self._ledger.record_gap(gap)
         reason = ";".join(["image_extracted", *extraction.warnings])
@@ -353,7 +354,7 @@ class DocWorker:
             reasons.append("ocr_engine_missing")
             status = EntityStatus.UNSUPPORTED if not blocks else EntityStatus.PARTIAL
 
-        self._ledger.upsert_blocks(resource.resource_id, blocks)
+        self._ledger.upsert_blocks(resource.resource_id, stamp_blocks(blocks, resource))
         self._finish(task, resource, status, ";".join(reasons))
 
     # -- helpers ------------------------------------------------------------

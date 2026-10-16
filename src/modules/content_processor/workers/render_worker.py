@@ -40,6 +40,7 @@ from src.modules.content_processor.explore import ExplorationResult, StateExplor
 from src.modules.content_processor.governor.block_classifier import classify_response
 from src.modules.content_processor.governor.escalation import ActionKind
 from src.modules.content_processor.governor.gates import detect_gates
+from src.modules.content_processor.provenance import stamp_blocks
 from src.modules.content_processor.verify.gaps import gap_for_gate, gap_id_for
 from src.modules.content_processor.verify.reconcile import reconcile_source_vs_rendered
 from src.modules.content_processor.workers.ports import LedgerPort
@@ -235,7 +236,9 @@ class RenderWorker:
         state_blocks, explore_facts = self._apply_exploration(
             resource_id, result, rendered_blocks, exploration, evidence_ids
         )
-        self._ledger.upsert_blocks(resource_id, [*source_blocks, *rendered_blocks, *state_blocks])
+        self._ledger.upsert_blocks(
+            resource_id, stamp_blocks([*source_blocks, *rendered_blocks, *state_blocks], resource)
+        )
 
         summary: dict[str, Any] = {
             **recon.model_dump(

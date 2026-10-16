@@ -33,17 +33,20 @@ from src.integrations.http_client import Fetcher, FetchResult
 from src.modules.content_processor.adapters.html_source import extract_html_source
 from src.modules.content_processor.contracts import (
     BlockVerdict,
+    FollowupRef,
     RedirectHop,
     Resource,
     RunEvent,
     RunScope,
     Task,
+    UrlRecord,
 )
 from src.modules.content_processor.enums import (
     AccessTier,
     AuthorizationKind,
     BlockKind,
     EntityStatus,
+    PriorityClass,
     RedirectKind,
     RobotsPolicy,
     TaskKind,
@@ -54,6 +57,15 @@ from src.modules.content_processor.governor.escalation import Action, ActionKind
 from src.modules.content_processor.governor.gates import detect_gates
 from src.modules.content_processor.governor.robots import evaluate_robots
 from src.modules.content_processor.ledger.keys import task_key
+from src.modules.content_processor.provenance import stamp_blocks
+from src.modules.content_processor.recrawl import (
+    Baseline,
+    ChangeDecision,
+    conditional_headers,
+    content_fingerprint,
+    decide_change,
+    extract_page_dates,
+)
 from src.modules.content_processor.scope.followups import (
     FollowupCandidate,
     anchor_hints,
@@ -61,7 +73,8 @@ from src.modules.content_processor.scope.followups import (
     mime_allowed,
     plan_followups,
 )
-from src.modules.content_processor.verify.gaps import gap_for_gate
+from src.modules.content_processor.scope.normalize import InvalidInputUrl, normalize_url
+from src.modules.content_processor.verify.gaps import gap_for_gate, gap_id_for
 from src.modules.content_processor.workers.ports import LedgerPort, RobotsCache
 
 __all__ = ["FetchWorker", "extraction_kind_for", "user_agent_for"]
@@ -126,6 +139,7 @@ class FetchWorker:
         run_id: str,
         worker_id: str,
         escalation_fetchers: Sequence[Fetcher] = (),
+        baseline: Baseline | None = None,
     ) -> None:
         """Bind the worker to one run.
 
@@ -138,6 +152,8 @@ class FetchWorker:
             worker_id: Lease owner name.
             escalation_fetchers: Higher HTTP tiers (e.g. an `ImpersonatedFetcher`
                 for T2). A host escalated to one of these tiers is fetched with it.
+            baseline: Previous run's records. When a URL is in it, the fetch is
+                conditional and an unchanged page reuses the previous extraction.
         """
         self._ledger = ledger
         self._fetcher = fetcher
@@ -151,6 +167,8 @@ class FetchWorker:
         # Per-process caches. Durable versions need contract changes (CR-004).
         self._expected_by_key: dict[str, Expectation] = {}
         self._payload_owner: dict[str, str] = {}
+        self._baseline = baseline
+        self._priors: dict[str, UrlRecord] = {}
 
     # -- loop ---------------------------------------------------------------
 
@@ -250,7 +268,19 @@ class FetchWorker:
             return
 
         self._ledger.heartbeat(task.id or 0, self._worker_id)
-        result = await fetcher.fetch(requested_url)
+        prior = (
+            self._baseline.lookup(resource.schedule_key, requested_url)
+            if self._baseline is not None
+            else None
+        )
+        if prior is not None:
+            self._priors[resource.resource_id] = prior
+        validators = conditional_headers(prior)
+        result = await (
+            fetcher.fetch(requested_url, headers=validators)
+            if validators
+            else fetcher.fetch(requested_url)
+        )
         resource.final_url = result.final_url
         resource.redirect_chain = [
             RedirectHop(
@@ -277,8 +307,20 @@ class FetchWorker:
             )
             return
 
+        if prior is not None and result.http_status == 304:
+            self._fill_acquisition(resource, result)
+            resource.acquired_at = datetime.now(UTC)
+            resource.acquired_at_tier = AccessTier(fetcher.tier_name)
+            decision = decide_change(
+                prior, http_status=304, payload_sha256=None, fingerprint=None, modified_at=None
+            )
+            self._reuse(task, resource, prior, decision, depth)
+            self._ledger.complete(task.id or 0, self._worker_id)
+            return
+
         evidence_ref = self._evidence.put(result.body, result.sniffed_mime)
         self._fill_acquisition(resource, result)
+        self._apply_page_dates(resource, result)
         resource.payload_sha256 = evidence_ref.sha256
         expected = self._expectation(task, result)
         block = classify_response(
@@ -325,6 +367,8 @@ class FetchWorker:
             self._upsert(
                 task, resource, EntityStatus.EXTRACTED_UNVERIFIED, f"duplicate_payload_of:{owner}"
             )
+        elif self._payload_unchanged(task, resource, result, sha256, depth):
+            pass  # previous extraction reused; nothing else to do for this URL
         elif result.sniffed_mime == "text/html":
             self._extract_source(task, resource, result, sha256, depth)
         else:
@@ -370,7 +414,21 @@ class FetchWorker:
             resource_id=resource.resource_id,
             state_id=f"{self._run_id}|source",
         )
-        self._ledger.upsert_blocks(resource.resource_id, extraction.blocks)
+        resource.content_fingerprint = content_fingerprint(extraction.blocks)
+        prior = self._priors.get(resource.resource_id)
+        if prior is not None:
+            decision = decide_change(
+                prior,
+                http_status=result.http_status,
+                payload_sha256=sha256,
+                fingerprint=resource.content_fingerprint,
+                modified_at=resource.page_modified_at,
+            )
+            self._note_change(resource, prior, decision)
+            if decision.reuse:
+                self._reuse(task, resource, prior, decision, depth)
+                return
+        self._ledger.upsert_blocks(resource.resource_id, stamp_blocks(extraction.blocks, resource))
         reasons = ["source_extracted"]
         if extraction.placeholder_suspected:
             reasons.append("placeholder_content_suspected")
@@ -442,6 +500,188 @@ class FetchWorker:
                 "expected_mime_source": child.expected_mime_source,
             },
         )
+
+    # -- freshness and recrawl ------------------------------------------------
+
+    @staticmethod
+    def _apply_page_dates(resource: Resource, result: FetchResult) -> None:
+        """Record validators and the dates the site declares for this payload."""
+        dates = extract_page_dates(
+            body=result.body,
+            headers=result.headers,
+            sniffed_mime=result.sniffed_mime,
+            fetched_at=resource.acquired_at or datetime.now(UTC),
+        )
+        resource.http_etag = dates.http_etag
+        resource.http_last_modified = dates.http_last_modified
+        resource.page_modified_at = dates.modified_at
+        resource.page_modified_source = dates.modified_source
+        resource.page_published_at = dates.published_at
+
+    def _note_change(
+        self, resource: Resource, prior: UrlRecord | None, decision: ChangeDecision
+    ) -> None:
+        resource.change_status = decision.status
+        resource.change_basis = ";".join([decision.basis, *decision.notes])
+        resource.previous_run_id = prior.run_id if prior is not None else None
+        self._ledger.record_summary(
+            resource.resource_id,
+            "recrawl",
+            {
+                "status": decision.status.value,
+                "basis": decision.basis,
+                "notes": decision.notes,
+                "previous_run_id": resource.previous_run_id,
+                "previous_captured_at": prior.captured_at.isoformat() if prior else None,
+                "previous_page_modified_at": (
+                    prior.page_modified_at.isoformat()
+                    if prior is not None and prior.page_modified_at
+                    else None
+                ),
+                "page_modified_at": (
+                    resource.page_modified_at.isoformat() if resource.page_modified_at else None
+                ),
+            },
+        )
+
+    def _payload_unchanged(
+        self, task: Task, resource: Resource, result: FetchResult, sha256: str, depth: int
+    ) -> bool:
+        """Reuse the previous extraction when the bytes are identical (any format).
+
+        HTML whose bytes differ is judged later on its visible text, after the
+        cheap source extraction; other formats are judged on bytes and dates here.
+        """
+        if self._baseline is None:
+            return False
+        prior = self._priors.get(resource.resource_id)
+        if prior is None:
+            self._note_change(
+                resource,
+                None,
+                decide_change(
+                    None, http_status=None, payload_sha256=None, fingerprint=None, modified_at=None
+                ),
+            )
+            return False
+        if result.sniffed_mime == "text/html" and sha256 != prior.payload_sha256:
+            return False
+        decision = decide_change(
+            prior,
+            http_status=result.http_status,
+            payload_sha256=sha256,
+            fingerprint=None,
+            modified_at=resource.page_modified_at,
+        )
+        self._note_change(resource, prior, decision)
+        if not decision.reuse:
+            return False
+        self._reuse(task, resource, prior, decision, depth)
+        return True
+
+    def _reuse(
+        self,
+        task: Task,
+        resource: Resource,
+        prior: UrlRecord,
+        decision: ChangeDecision,
+        depth: int,
+    ) -> None:
+        """Carry the previous capture forward instead of extracting again.
+
+        Blocks, gaps and summaries are copied under the new resource id with
+        their original `extracted_at`; no RENDER, OCR or exploration is queued.
+        Children the page pointed to are re-queued so each gets its own check.
+        """
+        self._note_change(resource, prior, decision)
+        origin = prior.reused_from_run_id or prior.run_id
+        resource.reused_from_run_id = origin
+        resource.payload_sha256 = resource.payload_sha256 or prior.payload_sha256
+        if (
+            resource.http_status == 304
+            or not resource.sniffed_mime
+            or (resource.sniffed_mime == "application/x-empty")
+        ):
+            resource.sniffed_mime = prior.sniffed_mime
+        resource.content_fingerprint = resource.content_fingerprint or prior.content_fingerprint
+        resource.http_etag = resource.http_etag or prior.http_etag
+        resource.http_last_modified = resource.http_last_modified or prior.http_last_modified
+        if resource.page_modified_at is None:
+            resource.page_modified_at = prior.page_modified_at
+            resource.page_modified_source = prior.page_modified_source
+        resource.page_published_at = resource.page_published_at or prior.page_published_at
+
+        blocks = []
+        for block in prior.blocks:
+            old = block.resource_id
+            blocks.append(
+                block.model_copy(
+                    update={
+                        "block_id": block.block_id.replace(old, resource.resource_id, 1),
+                        "region_id": block.region_id.replace(old, resource.resource_id, 1),
+                        "resource_id": resource.resource_id,
+                        "dedupe_of": (
+                            block.dedupe_of.replace(old, resource.resource_id, 1)
+                            if block.dedupe_of
+                            else None
+                        ),
+                        "reused_from_run_id": block.reused_from_run_id or origin,
+                    }
+                )
+            )
+        self._ledger.upsert_blocks(
+            resource.resource_id,
+            stamp_blocks(blocks, resource, extracted_at=prior.captured_at),
+        )
+        for gap in prior.gaps:
+            self._ledger.record_gap(
+                gap.model_copy(
+                    update={
+                        "gap_id": gap_id_for(
+                            self._run_id, resource.resource_id, f"reused:{gap.gap_id}"
+                        ),
+                        "run_id": self._run_id,
+                        "resource_id": resource.resource_id,
+                    }
+                )
+            )
+        for name, summary in prior.summaries.items():
+            if name != "recrawl":
+                self._ledger.record_summary(resource.resource_id, name, dict(summary))
+        status = prior.resource_status or EntityStatus.EXTRACTED_UNVERIFIED
+        reason = f"unchanged:{decision.basis};reused_from={origin}"
+        if prior.resource_status_reason:
+            reason += f";{prior.resource_status_reason}"
+        self._upsert(task, resource, status, reason)
+        children = [
+            c for c in (self._child_from_ref(ref) for ref in prior.followups) if c is not None
+        ]
+        if children:
+            self._ledger.enqueue_followups(
+                [self._followup_task(task, resource, c, depth) for c in children]
+            )
+
+    @staticmethod
+    def _child_from_ref(ref: FollowupRef) -> FollowupCandidate | None:
+        try:
+            norm = normalize_url(ref.url)
+        except InvalidInputUrl:
+            return None
+        image = (ref.expected_mime or "").startswith("image/")
+        try:
+            return FollowupCandidate.model_validate(
+                {
+                    "url": ref.url,
+                    "schedule_key": norm.schedule_key,
+                    "host": norm.host,
+                    "edge_kind": ref.edge_kind or "links_to",
+                    "priority": (PriorityClass.EMBEDDED_ASSET if image else PriorityClass.DOCUMENT),
+                    "expected_mime": ref.expected_mime,
+                    "expected_mime_source": "url_extension" if ref.expected_mime else None,
+                }
+            )
+        except ValueError:
+            return None
 
     def _handle_block(
         self,

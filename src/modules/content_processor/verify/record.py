@@ -21,6 +21,7 @@ from src.modules.content_processor.adapters.html_source import extract_html_sour
 from src.modules.content_processor.contracts import (
     ContentBlock,
     DiscoveryState,
+    FollowupRef,
     Gap,
     InventoryCounts,
     Resource,
@@ -374,7 +375,41 @@ def assemble_url_record(
         blocks=list(regions),
         tier_reached=target.acquired_at_tier,
         warnings=warnings,
+        **_freshness(target, summaries),
     )
+
+
+def _freshness(target: Resource, summaries: Mapping[str, Mapping[str, Any]]) -> dict[str, Any]:
+    """Identity, validators, page dates and change status: the next run's baseline."""
+    followed = _nested(summaries.get("followups"), "followed") or []
+    refs = [
+        FollowupRef(
+            url=str(item["url"]),
+            edge_kind=item.get("edge"),
+            expected_mime=item.get("expected_mime"),
+        )
+        for item in followed
+        if isinstance(item, dict) and item.get("url")
+    ]
+    return {
+        "schedule_key": target.schedule_key,
+        "resource_status": target.status,
+        "resource_status_reason": target.status_reason,
+        "sniffed_mime": target.sniffed_mime,
+        "payload_sha256": target.payload_sha256,
+        "http_etag": target.http_etag,
+        "http_last_modified": target.http_last_modified,
+        "page_modified_at": target.page_modified_at,
+        "page_modified_source": target.page_modified_source,
+        "page_published_at": target.page_published_at,
+        "content_fingerprint": target.content_fingerprint,
+        "change_status": target.change_status,
+        "change_basis": target.change_basis,
+        "previous_run_id": target.previous_run_id,
+        "reused_from_run_id": target.reused_from_run_id,
+        "followups": refs,
+        "summaries": {k: dict(v) for k, v in summaries.items()},
+    }
 
 
 def excluded_url_record(

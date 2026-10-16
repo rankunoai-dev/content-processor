@@ -17,6 +17,7 @@ __all__ = [
     "AccessTier",
     "AuthorizationKind",
     "BlockKind",
+    "ChangeStatus",
     "ContentLayer",
     "EntityStatus",
     "EnvironmentProfile",
@@ -25,8 +26,10 @@ __all__ = [
     "RedirectKind",
     "RobotsPolicy",
     "ScopeMode",
+    "SourceFormat",
     "TaskKind",
     "TaskState",
+    "UiRegion",
     "UrlBadge",
     "tier_rank",
 ]
@@ -253,3 +256,71 @@ class RedirectKind(StrEnum):
     META_REFRESH = "meta"
     JAVASCRIPT = "js"
     CANONICAL_HINT = "canonical_hint"
+
+
+class SourceFormat(StrEnum):
+    """The kind of artefact a piece of content was extracted from."""
+
+    HTML = "html"
+    PDF = "pdf"
+    IMAGE = "image"
+    OFFICE_DOC = "office_doc"
+    SPREADSHEET = "spreadsheet"
+    PRESENTATION = "presentation"
+    TEXT = "text"
+    JSON = "json"
+    XML = "xml"
+    AUDIO = "audio"
+    VIDEO = "video"
+    OTHER = "other"
+
+
+class UiRegion(StrEnum):
+    """Where on the page (or in the document) a piece of content sits.
+
+    The most specific region wins: a link inside a hamburger menu inside the
+    header is `hamburger_menu`. Detection uses tags, ARIA roles and common
+    id/class vocabularies, so it is a strong hint, not a guarantee.
+    """
+
+    MAIN_CONTENT = "main_content"
+    HEADER = "header"
+    HERO = "hero"
+    NAV_MENU = "nav_menu"
+    HAMBURGER_MENU = "hamburger_menu"
+    MEGA_MENU = "mega_menu"
+    BREADCRUMB = "breadcrumb"
+    SIDEBAR = "sidebar"
+    FOOTER = "footer"
+    MODAL = "modal"
+    POPOVER = "popover"
+    TOOLTIP = "tooltip"
+    ACCORDION_PANEL = "accordion_panel"
+    TAB_PANEL = "tab_panel"
+    CAROUSEL = "carousel"
+    CARD = "card"
+    SNIPPET = "snippet"
+    PALETTE = "palette"
+    SEARCH = "search"
+    FORM = "form"
+    TABLE = "table"
+    COOKIE_BANNER = "cookie_banner"
+    CHAT_WIDGET = "chat_widget"
+    AD_SLOT = "ad_slot"
+    DOCUMENT_METADATA = "document_metadata"
+    PAGE_METADATA = "page_metadata"
+    PDF_PAGE = "pdf_page"
+    PDF_TABLE = "pdf_table"
+    PDF_FORM = "pdf_form"
+    PDF_ANNOTATION = "pdf_annotation"
+    IMAGE_TEXT = "image_text"
+    UNKNOWN = "unknown"
+
+
+class ChangeStatus(StrEnum):
+    """Whether a URL changed since the previous capture (recrawl)."""
+
+    NEW = "new"
+    CHANGED = "changed"
+    UNCHANGED = "unchanged"
+    UNKNOWN = "unknown"

@@ -121,13 +121,15 @@ class ImpersonatedFetcher(ChainFetcher):
         await self._session.close()
 
     @asynccontextmanager
-    async def _open(self, url: str) -> AsyncGenerator[RawResponse, None]:
+    async def _open(
+        self, url: str, headers: dict[str, str] | None = None
+    ) -> AsyncGenerator[RawResponse, None]:
         async with self._session.stream(
             "GET",
             url,
             impersonate=self._impersonate,
             allow_redirects=False,
-            headers={"Accept-Language": self._accept_language},
+            headers={"Accept-Language": self._accept_language, **(headers or {})},
             timeout=(self._limits.connect_timeout_s, self._limits.read_timeout_s),
         ) as response:
             yield RawResponse(

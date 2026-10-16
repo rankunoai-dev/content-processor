@@ -128,8 +128,11 @@ class Fetcher(Protocol):
     tier_name: str
     """Access tier value this fetcher implements; recorded on every acquired resource."""
 
-    async def fetch(self, url: str) -> FetchResult:
-        """Acquire `url` and report everything observed; transport errors are data."""
+    async def fetch(self, url: str, headers: dict[str, str] | None = None) -> FetchResult:
+        """Acquire `url` and report everything observed; transport errors are data.
+
+        `headers` are sent on the first hop only (conditional-GET validators).
+        """
         ...
 
     async def aclose(self) -> None:
@@ -162,7 +165,9 @@ class ChainFetcher(ABC):
         self._limits = limits or FetchLimits()
 
     @abstractmethod
-    def _open(self, url: str) -> AbstractAsyncContextManager[RawResponse]:
+    def _open(
+        self, url: str, headers: dict[str, str] | None = None
+    ) -> AbstractAsyncContextManager[RawResponse]:
         """Open one GET for `url` without following redirects."""
 
     @abstractmethod
@@ -177,18 +182,24 @@ class ChainFetcher(ABC):
     async def aclose(self) -> None:
         """Close pooled connections."""
 
-    async def fetch(self, url: str) -> FetchResult:
-        """Acquire `url`, following HTTP and meta redirects within limits."""
+    async def fetch(self, url: str, headers: dict[str, str] | None = None) -> FetchResult:
+        """Acquire `url`, following HTTP and meta redirects within limits.
+
+        `headers` (e.g. If-None-Match) go on the first request only; a 304 is
+        returned as a result with an empty body, never followed.
+        """
         started = time.perf_counter()
         try:
             async with asyncio.timeout(self._limits.total_timeout_s):
-                result = await self._fetch_chain(url)
+                result = await self._fetch_chain(url, headers)
         except TimeoutError:
             result = FetchResult(requested_url=url, final_url=url, transport_error="total_timeout")
         result.elapsed_ms = (time.perf_counter() - started) * 1000
         return result
 
-    async def _fetch_chain(self, url: str) -> FetchResult:
+    async def _fetch_chain(
+        self, url: str, first_headers: dict[str, str] | None = None
+    ) -> FetchResult:
         hops: list[Hop] = []
         current = url
         for _ in range(self._limits.max_hops + 1):
@@ -199,7 +210,8 @@ class ChainFetcher(ABC):
                     requested_url=url, final_url=current, hops=hops, egress_denied=reason
                 )
             try:
-                async with self._open(current) as response:
+                extra = first_headers if not hops else None
+                async with self._open(current, extra) as response:
                     status = response.status
                     headers = response.headers
                     location = headers.get("location")
@@ -336,8 +348,10 @@ class HttpFetcher(ChainFetcher):
         await self._client.aclose()
 
     @asynccontextmanager
-    async def _open(self, url: str) -> AsyncGenerator[RawResponse, None]:
-        async with self._client.stream("GET", url) as response:
+    async def _open(
+        self, url: str, headers: dict[str, str] | None = None
+    ) -> AsyncGenerator[RawResponse, None]:
+        async with self._client.stream("GET", url, headers=headers) as response:
             yield RawResponse(
                 status=response.status_code,
                 headers={k.lower(): v for k, v in response.headers.items()},

@@ -262,3 +262,39 @@ def docs_hub() -> Response:
 def annual_report_pdf() -> Response:
     """A PDF with a real text layer."""
     return Response(content=_ANNUAL_REPORT_PDF, media_type="application/pdf")
+
+
+# -- Recrawl fixture: a page whose freshness a test controls ---------------------------
+
+FRESH_PAGE: dict[str, object] = {
+    "text": "Our annual fee is $120 for every plan.",
+    "modified": "2026-09-01T10:00:00Z",
+    "etag": '"v1"',
+    "send_etag": True,
+    "nonce": False,
+    "counter": 0,
+}
+
+
+@app.get("/fresh")
+def fresh(request: Request) -> Response:
+    """Page with JSON-LD dateModified, an ETag and optional per-request nonce."""
+    FRESH_PAGE["counter"] = int(str(FRESH_PAGE["counter"])) + 1
+    etag = str(FRESH_PAGE["etag"])
+    if FRESH_PAGE["send_etag"] and request.headers.get("if-none-match") == etag:
+        return Response(status_code=304, headers={"ETag": etag})
+    nonce = (
+        f'<script>window.__nonce="{FRESH_PAGE["counter"]}";</script>' if FRESH_PAGE["nonce"] else ""
+    )
+    modified = str(FRESH_PAGE["modified"])
+    body = (
+        '<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Fees</title>'
+        f'<meta property="article:modified_time" content="{modified}">'
+        '<script type="application/ld+json">'
+        f'{{"@type":"WebPage","dateModified":"{modified}","datePublished":"2025-01-15"}}'
+        f"</script>{nonce}</head><body><main><h1>Fees</h1><p>{FRESH_PAGE['text']}</p>"
+        '<p><a href="/files/brochure.pdf" type="application/pdf">Brochure (PDF)</a></p>'
+        "</main></body></html>"
+    )
+    headers = {"ETag": etag} if FRESH_PAGE["send_etag"] else {}
+    return HTMLResponse(body, headers=headers)

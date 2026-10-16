@@ -14,6 +14,10 @@ Reports (no database):
     ... report --records exports/x.records.jsonl --out exports/x_reports  R1, R2, review, explorer
 
 Every `--out` also writes the Stage 4 bundle to `<out stem>_reports/` (or `--reports-dir`).
+
+Recrawl: `--baseline <previous .records.jsonl>` (any run) or `--baseline-run <run id>`
+(durable) makes fetches conditional; a URL whose bytes or visible text did not change
+reuses the previous extraction instead of rendering, exploring and OCR-ing it again.
     ... fetch  --scope <scope.json> --run <id>                           work --stages fetch
     ... status --run <id>                                                task and resource counts
 
@@ -45,6 +49,7 @@ from src.modules.content_processor.export.commands import register as register_r
 from src.modules.content_processor.ledger.memory import MemoryLedger
 from src.modules.content_processor.ledger.tasks import TaskLedger, new_run_id
 from src.modules.content_processor.planner import fetch_tasks_for
+from src.modules.content_processor.recrawl import Baseline
 from src.modules.content_processor.scheduler import (
     DurableLedger,
     LazyRenderStage,
@@ -174,6 +179,7 @@ async def _drive(
     options: RunOptions,
     worker_prefix: str,
     reap: Any = None,
+    baseline: Baseline | None = None,
 ) -> RunExecution:
     """Build the workers for the requested stages, drive them, close everything."""
     t1, escalation = build_fetchers(scope)
@@ -188,6 +194,7 @@ async def _drive(
             run_id=run_id,
             worker_id=f"{worker_prefix}-fetch",
             escalation_fetchers=escalation,
+            baseline=baseline,
         )
     if "render" in stage_names:
         renderer = build_renderer(scope)
@@ -220,6 +227,17 @@ async def _drive(
             await render_stage.close()
         for fetcher in (t1, *escalation):
             await fetcher.aclose()
+
+
+def _baseline_from_file(args: argparse.Namespace) -> Baseline | None:
+    path = getattr(args, "baseline", None)
+    return Baseline.from_jsonl(Path(path)) if path else None
+
+
+def _baseline_info(baseline: Baseline | None, source: str | None) -> dict[str, Any] | None:
+    if baseline is None:
+        return None
+    return {"source": source, "urls": len(baseline), "not_reusable": baseline.skipped}
 
 
 def _options(args: argparse.Namespace, stages: list[StageName]) -> RunOptions:
@@ -260,6 +278,9 @@ def _finish(
     full: dict[str, Any] = {
         **report,
         "verdicts": dict(Counter(r.badge.value for r in records)),
+        "changes": dict(
+            Counter(r.change_status.value if r.change_status else "not_compared" for r in records)
+        ),
         "url_records": badge_summary(records),
     }
     bundle_dir: Path | None = Path(reports_dir) if reports_dir else None
@@ -310,6 +331,7 @@ async def _dryrun(args: argparse.Namespace) -> int:
     ledger.enqueue(fetch_tasks_for(run_id, plan))
     evidence = LocalEvidenceStore(get_settings().cp_evidence_root, scope.tenant_id)
     stages = _parse_stages(args.stages, no_render=args.no_render, no_docs=args.no_docs)
+    baseline = _baseline_from_file(args)
     execution = await _drive(
         ledger,
         scope=scope,
@@ -318,10 +340,12 @@ async def _dryrun(args: argparse.Namespace) -> int:
         stage_names=stages,
         options=_options(args, stages),
         worker_prefix="dry",
+        baseline=baseline,
     )
     report = {
         "run_id": run_id,
         "mode": "dryrun_memory_ledger",
+        "baseline": _baseline_info(baseline, getattr(args, "baseline", None)),
         "scheduled": len(plan.entries),
         "excluded_at_plan": [x.model_dump() for x in plan.excluded],
         "execution": execution.model_dump(),
@@ -390,6 +414,20 @@ async def _durable(args: argparse.Namespace, *, create: bool) -> int:
             no_render=getattr(args, "no_render", False),
             no_docs=getattr(args, "no_docs", False),
         )
+        baseline = _baseline_from_file(args)
+        baseline_source = getattr(args, "baseline", None)
+        prior_run = getattr(args, "baseline_run", None) or scope.recrawl_of_run_id
+        if baseline is None and prior_run:
+            baseline = Baseline(
+                assemble_run_records(
+                    ledger,
+                    run_id=prior_run,
+                    plan=None,
+                    evidence=evidence,
+                    stages_that_will_run=list(ALL_STAGES),
+                )
+            )
+            baseline_source = f"run:{prior_run}"
         execution = await _drive(
             ledger,
             scope=scope,
@@ -399,10 +437,12 @@ async def _durable(args: argparse.Namespace, *, create: bool) -> int:
             options=_options(args, stages),
             worker_prefix=args.worker_id,
             reap=ledger.reap,
+            baseline=baseline,
         )
         report = {
             "run_id": run_id,
             "mode": "durable_postgres",
+            "baseline": _baseline_info(baseline, baseline_source),
             "scheduled": len(plan.entries),
             "enqueued": enqueued,
             "execution": execution.model_dump(),
@@ -497,6 +537,9 @@ def _add_drive_options(p: argparse.ArgumentParser) -> None:
     p.add_argument("--max-rounds", type=int, default=10)
     p.add_argument("--max-wait", type=float, default=60.0, help="seconds to wait for held tasks")
     p.add_argument("--reports-dir", default=None, help="write the Stage 4 bundle here")
+    p.add_argument(
+        "--baseline", default=None, help="previous run's .records.jsonl: reuse unchanged pages"
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -519,6 +562,7 @@ def main(argv: list[str] | None = None) -> int:
     p_run.add_argument("--run", default=None)
     p_run.add_argument("--out", default=None)
     p_run.add_argument("--worker-id", default="w1")
+    p_run.add_argument("--baseline-run", default=None, help="durable run id to compare with")
     _add_drive_options(p_run)
     p_run.set_defaults(func=cmd_run)
 
@@ -532,6 +576,7 @@ def main(argv: list[str] | None = None) -> int:
     p_work.add_argument("--run", required=True)
     p_work.add_argument("--out", default=None)
     p_work.add_argument("--worker-id", default="w1")
+    p_work.add_argument("--baseline-run", default=None, help="durable run id to compare with")
     _add_drive_options(p_work)
     p_work.set_defaults(func=cmd_work)
 
