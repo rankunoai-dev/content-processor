@@ -243,3 +243,12 @@ git worktree add ../content-processor-lane4 -b lane/L4-verify
 - **Not verified:** the durable commands against a real Postgres (K1, no `CP_DATABASE_URL`); they are tested against a `TaskLedger`-shaped fake.
 - **Found (K17, for L1):** nothing enqueues `EXTRACT_DOC` / `EXTRACT_IMAGE` tasks, so the docs stage processed 0 tasks and fetched PDFs and images are never extracted. The fetch worker should enqueue them for document and image payloads; the engine already runs the stage.
 - **Open contract requests:** CR-007 (run-scoped leasing).
+
+## [2026-10-16] Lane L0 (Integrator), session 4: merged Lane 6
+
+- **Branch:** `main`
+- **What landed:** `lane/L6-platform` rebased onto `0d266ca` and fast-forwarded into `main` as `21d3e97`.
+- **Conflicts:** `docs/LANE_LOG.md` (kept both entries) and `cli.py`. Commit `0d266ca` on `main` had wired a one-pass dryrun with records and L5's bundle; the merged CLI keeps the L6 engine and durable commands and adds everything from `0d266ca`: full `.records.jsonl`, `verdicts`, the Stage 4 bundle in `<out stem>_reports/` or `--reports-dir`, and L5's `report` command. The durable ledger command was renamed from `report` to `records` so both exist; `records --out` output feeds `report --records` directly (tested).
+- **Gate on the merged tree:** ruff and mypy --strict clean (74 files), 483 passed, 9 skipped (Postgres), coverage 92.97%.
+- **Process note:** `0d266ca` (author unknown) committed Lane 6 work directly to `main` while `lane/L6-platform` existed. Lanes commit only on their branch.
+- **Open:** CR-007 (run-scoped leasing), K16, K17, K1 (`CP_DATABASE_URL`).
