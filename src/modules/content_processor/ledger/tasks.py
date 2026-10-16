@@ -35,7 +35,7 @@ from src.modules.content_processor.governor.escalation import CircuitState, Host
 from src.modules.content_processor.ledger import sql
 from src.modules.content_processor.workers.ports import RobotsCache
 
-__all__ = ["TaskLedger", "new_run_id"]
+__all__ = ["TaskLedger", "new_run_id", "storage_keys"]
 
 _logger = get_logger("content_processor.ledger")
 _SCHEMA_PATH = Path(__file__).with_name("schema.sql")
@@ -59,6 +59,13 @@ def _row_to_task(row: dict[str, Any]) -> Task:
         checkpoint=row["checkpoint"],
         last_error=row["last_error"],
     )
+
+
+def storage_keys(resource_id: str, block: ContentBlock) -> tuple[str, str]:
+    """(region_id column, extraction_id) for a block of `resource_id` (K16)."""
+    channel = block.state_id.split("|", 1)[1] if "|" in block.state_id else block.state_id
+    region_key = f"{resource_id}:{channel}:{block.region_id}"
+    return region_key, f"{region_key}|{block.method}"
 
 
 class TaskLedger:
@@ -157,8 +164,15 @@ class TaskLedger:
         self._conn.commit()
         return inserted
 
-    def lease(self, worker: str, kinds: Sequence[TaskKind]) -> Task | None:
-        """Lease the next eligible task of the given kinds, or None if nothing is ready."""
+    def lease(
+        self, worker: str, kinds: Sequence[TaskKind], run_id: str | None = None
+    ) -> Task | None:
+        """Lease the next eligible task of the given kinds, or None if nothing is ready.
+
+        With `run_id`, only that run's tasks are eligible (CR-007): a worker bound
+        to one run's scope never processes another run's task. Host slots stay
+        shared across runs, so politeness per host holds for concurrent runs.
+        """
         slot_kinds = [k.value for k in kinds if k in sql.HOST_SLOT_KINDS]
         plain_kinds = [k.value for k in kinds if k not in sql.HOST_SLOT_KINDS]
         with self._conn.cursor() as cur:
@@ -166,22 +180,24 @@ class TaskLedger:
             if slot_kinds:
                 cur.execute(
                     sql.SQL_LEASE_WITH_SLOT,
-                    {"kinds": slot_kinds, "worker": worker, "ttl_s": self._ttl},
+                    {"kinds": slot_kinds, "worker": worker, "ttl_s": self._ttl, "run_id": run_id},
                 )
                 row = cur.fetchone()
             if row is None and plain_kinds:
                 cur.execute(
                     sql.SQL_LEASE_PLAIN,
-                    {"kinds": plain_kinds, "worker": worker, "ttl_s": self._ttl},
+                    {"kinds": plain_kinds, "worker": worker, "ttl_s": self._ttl, "run_id": run_id},
                 )
                 row = cur.fetchone()
         self._conn.commit()
         return _row_to_task(row) if row else None
 
-    def pending_count(self, kinds: Sequence[TaskKind]) -> int:
-        """Non-terminal tasks of the given kinds across all runs."""
+    def pending_count(self, kinds: Sequence[TaskKind], run_id: str | None = None) -> int:
+        """Non-terminal tasks of the given kinds, in one run or (None) across all runs."""
         with self._conn.cursor() as cur:
-            cur.execute(sql.SQL_PENDING_COUNT, {"kinds": [k.value for k in kinds]})
+            cur.execute(
+                sql.SQL_PENDING_COUNT, {"kinds": [k.value for k in kinds], "run_id": run_id}
+            )
             row = cur.fetchone()
         self._conn.commit()
         return int(row["n"]) if row else 0
@@ -292,15 +308,26 @@ class TaskLedger:
         self._conn.commit()
 
     def upsert_blocks(self, resource_id: str, blocks: Sequence[ContentBlock]) -> None:
-        """Insert or update extracted blocks (one row per region and method)."""
+        """Insert or update extracted blocks (one row per resource, channel, region, method).
+
+        Storage keys are namespaced here (K16) so adapters need not make their
+        ids globally unique: PDF and image adapters emit ids like
+        `reg-pdf-metadata`, and before html_source ids carried the channel the
+        source and rendered blocks of a page shared `<resource>:src:N`. The
+        `region_id` column is `<resource>:<channel>:<region>` (so `get_blocks`
+        finds every block by its resource prefix) and `extraction_id` is that
+        plus the method, the same key the upsert conflicts on. The stored
+        record keeps the block exactly as the adapter produced it.
+        """
         with self._conn.cursor() as cur:
             for block in blocks:
+                region_key, extraction_id = storage_keys(resource_id, block)
                 cur.execute(
                     sql.SQL_UPSERT_BLOCK,
                     {
-                        "extraction_id": block.block_id,
+                        "extraction_id": extraction_id,
                         "run_id": block.state_id.split("|", 1)[0],
-                        "region_id": block.region_id,
+                        "region_id": region_key,
                         "block_key": block.block_key,
                         "method": block.method,
                         "tool_version": block.tool_version,

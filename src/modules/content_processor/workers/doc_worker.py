@@ -145,9 +145,9 @@ class DocWorker:
         idle = 0
         waited = 0.0
         while max_tasks is None or processed < max_tasks:
-            task = self._ledger.lease(self._worker_id, _KINDS)
+            task = self._ledger.lease(self._worker_id, _KINDS, run_id=self._run_id)
             if task is None:
-                if self._ledger.pending_count(_KINDS) == 0:
+                if self._ledger.pending_count(_KINDS, run_id=self._run_id) == 0:
                     idle += 1
                     if idle >= idle_polls:
                         break

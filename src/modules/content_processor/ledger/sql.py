@@ -84,6 +84,7 @@ WITH candidate AS (
     WHERE t.state = 'PENDING'
       AND t.not_before <= now()
       AND t.kind = ANY(%(kinds)s)
+      AND (%(run_id)s::text IS NULL OR t.run_id = %(run_id)s::text)
       AND NOT r.cancel_requested
     ORDER BY t.priority, t.id
     FOR UPDATE OF t SKIP LOCKED
@@ -108,6 +109,7 @@ WITH candidate AS (
     WHERE t.state = 'PENDING'
       AND t.not_before <= now()
       AND t.kind = ANY(%(kinds)s)
+      AND (%(run_id)s::text IS NULL OR t.run_id = %(run_id)s::text)
       AND NOT r.cancel_requested
       AND NOT h.legal_hold
       AND h.circuit_state <> 'OPEN'
@@ -212,6 +214,7 @@ RETURNING seq
 SQL_PENDING_COUNT = """
 SELECT count(*) AS n FROM tasks
 WHERE kind = ANY(%(kinds)s) AND state IN ('PENDING', 'LEASED')
+  AND (%(run_id)s::text IS NULL OR run_id = %(run_id)s::text)
 """
 
 SQL_TASK_COUNTS = """

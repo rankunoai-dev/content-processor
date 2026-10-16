@@ -156,3 +156,49 @@ def test_events_are_sequenced(ledger_db: TaskLedger, run: str):
         )
     )
     assert seq2 > seq1 > 0
+
+
+# -- CR-007 and K16 against real SQL --------------------------------------------
+
+
+def test_leases_and_pending_counts_are_run_scoped(ledger_db: TaskLedger, run: str, scope: RunScope):
+    other = f"test-{uuid.uuid4().hex[:8]}"
+    ledger_db.create_run(other, scope, {"engine": "0.1.0"})
+    ledger_db.enqueue("t1", [_task(run, "a.example", 1, TaskKind.VERIFY)])
+    ledger_db.enqueue("t1", [_task(other, "b.example", i, TaskKind.VERIFY) for i in range(2)])
+    assert ledger_db.pending_count([TaskKind.VERIFY], run_id=run) == 1
+    assert ledger_db.pending_count([TaskKind.VERIFY], run_id=other) == 2
+    mine = ledger_db.lease("w1", [TaskKind.VERIFY], run_id=run)
+    assert mine is not None and mine.run_id == run
+    assert ledger_db.lease("w1", [TaskKind.VERIFY], run_id=run) is None
+    theirs = ledger_db.lease("w2", [TaskKind.VERIFY], run_id=other)
+    assert theirs is not None and theirs.run_id == other
+
+
+def test_blocks_of_every_channel_and_document_survive(ledger_db: TaskLedger, run: str):
+    from src.modules.content_processor.adapters.html_source import extract_html_source
+    from src.modules.content_processor.contracts import Resource
+
+    html = b"<html><body><main><p>Same words.</p></main></body></html>"
+    stored: dict[str, int] = {}
+    for rid in ("res-k16-a", "res-k16-b"):
+        ledger_db.upsert_resource(
+            Resource(resource_id=rid, run_id=run, requested_url=rid, schedule_key=rid), "h"
+        )
+        source = extract_html_source(
+            html, base_url="https://h/", evidence_id="e", resource_id=rid, state_id=f"{run}|source"
+        ).blocks
+        # The pre-K16 collision: a rendered copy with the very same block and region id.
+        rendered = [b.model_copy(update={"state_id": f"{run}|rendered"}) for b in source]
+        pdf = [
+            b.model_copy(
+                update={"state_id": f"{run}|pdf", "region_id": "reg-pdf-metadata", "method": "pdf"}
+            )
+            for b in source
+        ]
+        ledger_db.upsert_blocks(rid, [*source, *rendered, *pdf])
+        stored[rid] = len(source) + len(rendered) + len(pdf)
+    for rid, count in stored.items():
+        blocks = ledger_db.get_blocks(rid)
+        assert len(blocks) == count, rid
+        assert {b.state_id.rsplit("|", 1)[1] for b in blocks} == {"source", "rendered", "pdf"}

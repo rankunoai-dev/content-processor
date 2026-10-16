@@ -210,3 +210,55 @@ def fingerprint_wall(request: Request) -> Response:
             status_code=403,
         )
     return FileResponse(PAGES / "static_ok.html", media_type="text/html; charset=utf-8")
+
+
+# -- K17: documents and images reach the doc worker ------------------------------
+
+
+def _text_pdf(lines: list[str]) -> bytes:
+    """A minimal valid one-page PDF whose text layer holds `lines` (xref offsets exact)."""
+    text_ops = " ".join(
+        f"BT /F1 12 Tf 72 {720 - 18 * i} Td ({line}) Tj ET" for i, line in enumerate(lines)
+    )
+    stream = text_ops.encode("latin-1")
+    objects = [
+        b"<</Type/Catalog/Pages 2 0 R>>",
+        b"<</Type/Pages/Kids[3 0 R]/Count 1>>",
+        b"<</Type/Page/Parent 2 0 R/MediaBox[0 0 612 792]/Contents 4 0 R"
+        b"/Resources<</Font<</F1 5 0 R>>>>>>",
+        b"<</Length " + str(len(stream)).encode() + b">>stream\n" + stream + b"\nendstream",
+        b"<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>",
+    ]
+    out = bytearray(b"%PDF-1.4\n")
+    offsets = []
+    for number, body in enumerate(objects, start=1):
+        offsets.append(len(out))
+        out += f"{number} 0 obj".encode() + body + b"endobj\n"
+    xref = len(out)
+    out += f"xref\n0 {len(objects) + 1}\n0000000000 65535 f \n".encode()
+    out += b"".join(f"{o:010d} 00000 n \n".encode() for o in offsets)
+    out += f"trailer<</Size {len(objects) + 1}/Root 1 0 R>>\nstartxref\n{xref}\n%%EOF\n".encode()
+    return bytes(out)
+
+
+_ANNUAL_REPORT_PDF = _text_pdf(
+    ["Annual report 2026", "Premiums grew in every region.", "Claims are paid within 30 days."]
+)
+
+
+@app.get("/docs-hub")
+def docs_hub() -> Response:
+    """Links a text PDF and embeds an image: both must be extracted by the doc worker."""
+    return HTMLResponse(
+        "<!doctype html><html><head><title>Reports</title></head><body><main>"
+        "<h1>Reports</h1><p>Download the annual report.</p>"
+        '<a href="/files/annual-report.pdf">Annual report (PDF)</a>'
+        '<img src="/files/logo.png" alt="Logo">'
+        "</main></body></html>"
+    )
+
+
+@app.get("/files/annual-report.pdf")
+def annual_report_pdf() -> Response:
+    """A PDF with a real text layer."""
+    return Response(content=_ANNUAL_REPORT_PDF, media_type="application/pdf")

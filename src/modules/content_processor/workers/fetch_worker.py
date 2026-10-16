@@ -64,7 +64,7 @@ from src.modules.content_processor.scope.followups import (
 from src.modules.content_processor.verify.gaps import gap_for_gate
 from src.modules.content_processor.workers.ports import LedgerPort, RobotsCache
 
-__all__ = ["FetchWorker", "user_agent_for"]
+__all__ = ["FetchWorker", "extraction_kind_for", "user_agent_for"]
 
 _logger = get_logger("content_processor.fetch_worker")
 
@@ -94,6 +94,15 @@ def _retry_after_seconds(headers: dict[str, str]) -> float | None:
     except (TypeError, ValueError):
         return None
     return max(0.0, (when - datetime.now(UTC)).total_seconds())
+
+
+def extraction_kind_for(media_type: str) -> TaskKind | None:
+    """The extraction task for a sniffed non-HTML type, or None when no adapter reads it."""
+    if media_type == "application/pdf":
+        return TaskKind.EXTRACT_DOC
+    if media_type.startswith("image/"):
+        return TaskKind.EXTRACT_IMAGE
+    return None
 
 
 def _resource_id(run_id: str, schedule_key: str) -> str:
@@ -163,9 +172,9 @@ class FetchWorker:
         idle = 0
         waited = 0.0
         while max_tasks is None or processed < max_tasks:
-            task = self._ledger.lease(self._worker_id, [TaskKind.FETCH])
+            task = self._ledger.lease(self._worker_id, [TaskKind.FETCH], run_id=self._run_id)
             if task is None:
-                if self._ledger.pending_count([TaskKind.FETCH]) == 0:
+                if self._ledger.pending_count([TaskKind.FETCH], run_id=self._run_id) == 0:
                     idle += 1
                     if idle >= idle_polls:
                         break
@@ -319,7 +328,36 @@ class FetchWorker:
         elif result.sniffed_mime == "text/html":
             self._extract_source(task, resource, result, sha256, depth)
         else:
-            self._upsert(task, resource, EntityStatus.IN_PROGRESS, "acquired:awaiting_extraction")
+            self._hand_off(task, resource, result, sha256)
+
+    def _hand_off(self, task: Task, resource: Resource, result: FetchResult, sha256: str) -> None:
+        """Queue document or image extraction for a non-HTML payload (K17)."""
+        kind = extraction_kind_for(result.sniffed_mime)
+        if kind is None:
+            # No adapter reads this type; say so instead of leaving it in progress.
+            self._upsert(
+                task, resource, EntityStatus.UNSUPPORTED, f"no_adapter:{result.sniffed_mime}"
+            )
+            return
+        self._upsert(task, resource, EntityStatus.IN_PROGRESS, "acquired:awaiting_extraction")
+        self._ledger.enqueue_followups(
+            [
+                Task(
+                    run_id=self._run_id,
+                    kind=kind,
+                    idempotency_key=task_key(self._run_id, kind, resource.schedule_key),
+                    host=task.host,
+                    priority=task.priority,
+                    max_attempts=2,
+                    payload={
+                        "resource_id": resource.resource_id,
+                        "sha256": sha256,
+                        "requested_url": resource.requested_url,
+                        "schedule_key": resource.schedule_key,
+                    },
+                )
+            ]
+        )
 
     def _extract_source(
         self, task: Task, resource: Resource, result: FetchResult, sha256: str, depth: int

@@ -134,9 +134,12 @@ class LazyRenderStage:
         ledger: LedgerPort,
         renderer: _Startable,
         worker_factory: Callable[[], Stage],
+        *,
+        run_id: str | None = None,
     ) -> None:
-        """Bind the stage; nothing is launched until work appears."""
+        """Bind the stage; nothing is launched until this run has RENDER work."""
         self._ledger = ledger
+        self._run_id = run_id
         self._renderer = renderer
         self._factory = worker_factory
         self._worker: Stage | None = None
@@ -156,7 +159,7 @@ class LazyRenderStage:
     ) -> int:
         """Render pending pages; a no-op (no browser) when nothing is pending."""
         if self._worker is None:
-            if self._ledger.pending_count(STAGE_KINDS["render"]) == 0:
+            if self._ledger.pending_count(STAGE_KINDS["render"], run_id=self._run_id) == 0:
                 return 0
             await self._renderer.start()
             self._worker = self._factory()
@@ -186,8 +189,8 @@ async def execute_run(
     """Drive the given stages in rounds until the run's queue drains or stalls.
 
     Args:
-        ledger: Shared ledger port; its `pending_count` decides when to stop.
-        run_id: Run being driven (reported; leasing is the workers' concern).
+        ledger: Shared ledger port; this run's `pending_count` decides when to stop.
+        run_id: Run being driven; only its open tasks keep the loop going (CR-007).
         stages: Worker per stage name; stages missing here are not run.
         options: Round and wait limits.
         reap: Called before each round (durable ledgers reclaim expired leases).
@@ -214,7 +217,7 @@ async def execute_run(
             )
             processed[name] += n
             progress += n
-        if ledger.pending_count(kinds) == 0:
+        if ledger.pending_count(kinds, run_id=run_id) == 0:
             stop = "drained"
             break
         if opts.max_tasks_per_stage is not None:
@@ -223,7 +226,7 @@ async def execute_run(
         if progress == 0:
             stop = "no_progress_tasks_held"
             break
-    open_after = ledger.pending_count(kinds) if kinds else 0
+    open_after = ledger.pending_count(kinds, run_id=run_id) if kinds else 0
     _logger.info(
         "run_execution_finished",
         extra={"run_id": run_id, "rounds": rounds, "stop": stop, "open_after": open_after},
@@ -269,9 +272,8 @@ def assemble_run_records(
 def foreign_open_tasks(ledger: DurableLedger, run_id: str) -> int:
     """Open tasks in the database that belong to other runs.
 
-    Postgres leases are matched by task kind only (CR-007 asks for a run
-    filter), so a worker bound to this run could lease another run's task.
-    Durable commands refuse to drive a run while this is non-zero.
+    Informational since CR-007: leases are run-scoped, so concurrent runs no
+    longer interfere; durable commands report this count instead of refusing.
     """
     everything = ledger.pending_count(list(TaskKind))
     own = ledger.task_counts(run_id)

@@ -70,7 +70,6 @@ __all__ = ["main"]
 _logger = get_logger("content_processor.cli")
 TOOL_VERSIONS = {"engine": "0.2.0", "cli": "L6-1"}
 ALL_STAGES: tuple[StageName, ...] = ("fetch", "render", "docs")
-EXIT_FOREIGN_RUN = 3
 
 
 def load_scope(path: str) -> RunScope:
@@ -203,7 +202,7 @@ async def _drive(
                 worker_id=f"{worker_prefix}-render",
             )
 
-        render_stage = LazyRenderStage(ledger, renderer, make_render_worker)
+        render_stage = LazyRenderStage(ledger, renderer, make_render_worker, run_id=run_id)
         stages["render"] = render_stage
     if "docs" in stage_names:
         stages["docs"] = DocWorker(
@@ -379,18 +378,8 @@ async def _durable(args: argparse.Namespace, *, create: bool) -> int:
         if create:
             ledger.create_schema()
         run_id = args.run or new_run_id()
-        foreign = foreign_open_tasks(ledger, run_id)
-        if foreign:
-            _emit(
-                {
-                    "run_id": run_id,
-                    "error": "other_run_active",
-                    "foreign_open_tasks": foreign,
-                    "detail": "Postgres leases are not run-scoped yet (CR-007); finish or "
-                    "cancel the other run first.",
-                }
-            )
-            return EXIT_FOREIGN_RUN
+        # Leases are run-scoped (CR-007): other open runs are reported, not refused.
+        concurrent = foreign_open_tasks(ledger, run_id)
         enqueued = 0
         if create:
             ledger.create_run(run_id, scope, TOOL_VERSIONS)
@@ -418,6 +407,7 @@ async def _durable(args: argparse.Namespace, *, create: bool) -> int:
             "enqueued": enqueued,
             "execution": execution.model_dump(),
             "tasks": ledger.task_counts(run_id),
+            "concurrent_open_tasks": concurrent,
         }
         _emit(
             _finish(

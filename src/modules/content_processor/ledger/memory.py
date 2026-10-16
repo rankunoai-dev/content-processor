@@ -91,11 +91,19 @@ class MemoryLedger:
 
     # -- LedgerPort ---------------------------------------------------------
 
-    def lease(self, worker: str, kinds: Sequence[TaskKind]) -> Task | None:
-        """Lease the next ready task, honouring host slots and delays."""
+    def lease(
+        self, worker: str, kinds: Sequence[TaskKind], run_id: str | None = None
+    ) -> Task | None:
+        """Lease the next ready task, honouring host slots and delays (and `run_id`)."""
         now = datetime.now(UTC)
         candidates = sorted(
-            (t for t in self._tasks.values() if t.state is TaskState.PENDING and t.kind in kinds),
+            (
+                t
+                for t in self._tasks.values()
+                if t.state is TaskState.PENDING
+                and t.kind in kinds
+                and (run_id is None or t.run_id == run_id)
+            ),
             key=lambda t: (int(t.priority), t.id or 0),
         )
         for task in candidates:
@@ -122,12 +130,14 @@ class MemoryLedger:
             return task
         return None
 
-    def pending_count(self, kinds: Sequence[TaskKind]) -> int:
-        """Non-terminal tasks of the given kinds."""
+    def pending_count(self, kinds: Sequence[TaskKind], run_id: str | None = None) -> int:
+        """Non-terminal tasks of the given kinds (in one run when `run_id` is given)."""
         return sum(
             1
             for t in self._tasks.values()
-            if t.kind in kinds and t.state in (TaskState.PENDING, TaskState.LEASED)
+            if t.kind in kinds
+            and t.state in (TaskState.PENDING, TaskState.LEASED)
+            and (run_id is None or t.run_id == run_id)
         )
 
     def heartbeat(self, task_id: int, worker: str) -> bool:

@@ -24,7 +24,13 @@ from src.core.schemas import StrictModel
 from src.modules.content_processor.contracts import ContentBlock, Provenance
 from src.modules.content_processor.enums import ContentLayer, EntityStatus
 
-__all__ = ["DiscoveredAsset", "DiscoveredLink", "SourceExtraction", "extract_html_source"]
+__all__ = [
+    "DiscoveredAsset",
+    "DiscoveredLink",
+    "SourceExtraction",
+    "block_channel",
+    "extract_html_source",
+]
 
 TOOL_VERSION = "html_source/1b"
 Role = Literal["main", "nav", "footer", "aside", "legal", "chrome", "unknown"]
@@ -149,6 +155,18 @@ class SourceExtraction(StrictModel):
         return counts
 
 
+def block_channel(state_id: str) -> str:
+    """Id segment for the extraction channel (K16): `src`, `rendered`, `state2`, ...
+
+    Block ids are `<resource>:<channel>:<order>`, so the source, rendered and
+    per-state extractions of one page never share an id or region id.
+    """
+    suffix = state_id.rsplit("|", 1)[-1] if "|" in state_id else state_id
+    if suffix == "source":
+        return "src"
+    return re.sub(r"[^A-Za-z0-9_-]", "", suffix) or "src"
+
+
 def normalize_text(raw: str) -> tuple[str, list[str]]:
     """NFC, invisible code points removed, whitespace collapsed; ops are recorded."""
     ops: list[str] = []
@@ -209,7 +227,7 @@ class _Walker:
     def emit(self, raw: str, normalized: str, ops: list[str], ctx: _Ctx) -> None:
         key_src = "/".join(self.heading_path) + "|" + normalized
         block_key = hashlib.sha256(key_src.encode("utf-8")).hexdigest()[:24]
-        block_id = f"{self.resource_id}:src:{self.order}"
+        block_id = f"{self.resource_id}:{block_channel(self.state_id)}:{self.order}"
         dedupe_of = self.seen_keys.get(block_key)
         if dedupe_of is None:
             self.seen_keys[block_key] = block_id

@@ -170,16 +170,17 @@ def test_work_resumes_and_report_reads_without_workers(wired: FakeDurable, tmp_p
     assert reported["mode"] == "report_only" and reported["url_records"]["urls"] == 2
 
 
-def test_durable_run_refuses_when_another_run_has_open_tasks(
+def test_durable_run_proceeds_alongside_other_open_runs(
     wired: FakeDurable, tmp_path: Path, capsys, monkeypatch: pytest.MonkeyPatch
 ):
+    # CR-007: leases are run-scoped, so another run's open tasks are reported, not refused.
     scope = _small_scope(tmp_path, ["/pages/static_ok"])
     monkeypatch.setattr(cli, "foreign_open_tasks", lambda _ledger, _run: 4)
     code = cli.main(["run", "--scope", str(scope), "--run", "run-z", "--no-render"])
-    assert code == cli.EXIT_FOREIGN_RUN
+    assert code == 0
     printed = _last_json(capsys)
-    assert printed["error"] == "other_run_active" and printed["foreign_open_tasks"] == 4
-    assert "run-z" not in wired.runs, "nothing is created when the guard trips"
+    assert printed["concurrent_open_tasks"] == 4 and "error" not in printed
+    assert "run-z" in wired.runs
 
 
 def test_fetch_alias_runs_fetch_only(wired: FakeDurable, tmp_path: Path, capsys):

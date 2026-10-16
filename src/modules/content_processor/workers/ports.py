@@ -37,16 +37,21 @@ class RobotsCache(StrictModel):
 class LedgerPort(Protocol):
     """The subset of the ledger a worker needs."""
 
-    def lease(self, worker: str, kinds: Sequence[TaskKind]) -> Task | None:
-        """Lease the next task."""
+    def lease(
+        self, worker: str, kinds: Sequence[TaskKind], run_id: str | None = None
+    ) -> Task | None:
+        """Lease the next task; with `run_id`, only that run's tasks (CR-007)."""
         ...
 
     def heartbeat(self, task_id: int, worker: str) -> bool:
         """Extend the lease."""
         ...
 
-    def pending_count(self, kinds: Sequence[TaskKind]) -> int:
-        """Tasks of these kinds not yet terminal (pending or leased), ready or not."""
+    def pending_count(self, kinds: Sequence[TaskKind], run_id: str | None = None) -> int:
+        """Tasks of these kinds not yet terminal (pending or leased), ready or not.
+
+        With `run_id`, only that run's tasks are counted (CR-007).
+        """
         ...
 
     def complete(self, task_id: int, worker: str) -> bool:

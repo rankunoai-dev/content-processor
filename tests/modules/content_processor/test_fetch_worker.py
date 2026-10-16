@@ -63,7 +63,7 @@ class InMemoryLedger:
         self._next += 1
         return task
 
-    def lease(self, worker: str, kinds: Sequence[TaskKind]) -> Task | None:
+    def lease(self, worker: str, kinds: Sequence[TaskKind], run_id=None) -> Task | None:
         for t in self.tasks.values():
             if t.state is TaskState.PENDING:
                 t.state = TaskState.LEASED
@@ -75,7 +75,7 @@ class InMemoryLedger:
     def heartbeat(self, task_id: int, worker: str) -> bool:
         return True
 
-    def pending_count(self, kinds: Sequence[TaskKind]) -> int:
+    def pending_count(self, kinds: Sequence[TaskKind], run_id=None) -> int:
         return sum(
             1
             for t in self.tasks.values()
