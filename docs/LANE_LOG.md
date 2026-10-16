@@ -50,7 +50,6 @@ git worktree add ../content-processor-lane4 -b lane/L4-verify
 - **Available to other lanes:** Lane 3 can rebase on `main` to inherit clean mypy typing without local `Any` workarounds.
 - **Open contract requests:** CR-002 (L1 edges), CR-003 (L2/L4 states and regions).
 
-<<<<<<< HEAD
 ---
 
 ## [2026-10-15 13:05 UTC] Lane L1 (Acquisition and access), session 1: follow-ups, T2, K15
