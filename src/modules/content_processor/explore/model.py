@@ -13,7 +13,14 @@ from pydantic import Field
 
 from src.core.schemas import StrictModel
 
-__all__ = ["ControlKind", "ControlRecord", "ControlStatus", "ExplorationResult", "ExploredState"]
+__all__ = [
+    "ControlKind",
+    "ControlRecord",
+    "ControlStatus",
+    "ExplorationResult",
+    "ExploredState",
+    "mark_responsive_duplicates",
+]
 
 ControlKind = Literal[
     "disclosure",
@@ -117,3 +124,33 @@ class ExplorationResult(StrictModel):
         for c in self.controls:
             out[c.status] = out.get(c.status, 0) + 1
         return out
+
+
+def _label_key(label: str) -> str:
+    return " ".join(label.casefold().split())
+
+
+def mark_responsive_duplicates(controls: list[ControlRecord]) -> int:
+    """Exclude never-visible controls that duplicate a visited one; return how many.
+
+    Responsive pages ship the same tabs or accordions twice (a mobile and a
+    desktop copy) and hide one with CSS. The hidden copy can never be clicked,
+    but its content is the content its visible twin revealed. A `never_visible`
+    control is excluded as `responsive_duplicate_of:<control_id>` when a control
+    of the same kind with the same normalized, non-empty label was visited or
+    was open from the start. Without such a twin it stays an unvisited gap.
+    """
+    twins: dict[tuple[str, str], str] = {}
+    for c in controls:
+        key = _label_key(c.label)
+        if key and c.status in ("visited", "initially_open"):
+            twins.setdefault((c.kind, key), c.control_id)
+    marked = 0
+    for c in controls:
+        if c.status != "unvisited" or c.reason != "never_visible":
+            continue
+        twin = twins.get((c.kind, _label_key(c.label)))
+        if twin is not None:
+            c.status, c.reason = "excluded", f"responsive_duplicate_of:{twin}"
+            marked += 1
+    return marked

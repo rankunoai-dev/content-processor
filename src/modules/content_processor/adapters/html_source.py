@@ -36,6 +36,7 @@ __all__ = [
     "SourceExtraction",
     "block_channel",
     "extract_html_source",
+    "match_key",
 ]
 
 TOOL_VERSION = "html_source/1b"
@@ -161,6 +162,20 @@ class SourceExtraction(StrictModel):
         return counts
 
 
+_SUPERSCRIPT = str.maketrans("0123456789+-=()", "⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾")
+_SUBSCRIPT = str.maketrans("0123456789+-=()", "₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎")
+_SCRIPT_POSITION = {"sup": _SUPERSCRIPT, "sub": _SUBSCRIPT}
+_SCRIPTABLE = re.compile(r"^[0-9+\-=()]{1,6}$")
+
+
+def _shift_script(text: str, table: dict[int, int]) -> str | None:
+    """Superscript or subscript digits and signs; None when the text is not only those."""
+    stripped = text.strip()
+    if not _SCRIPTABLE.match(stripped):
+        return None
+    return stripped.translate(table)
+
+
 def block_channel(state_id: str) -> str:
     """Id segment for the extraction channel (K16): `src`, `rendered`, `state2`, ...
 
@@ -171,6 +186,18 @@ def block_channel(state_id: str) -> str:
     if suffix == "source":
         return "src"
     return re.sub(r"[^A-Za-z0-9_-]", "", suffix) or "src"
+
+
+_UNSCRIPT = str.maketrans("⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎", "0123456789+-=()0123456789+-=()")
+
+
+def match_key(text: str) -> str:
+    """Comparison form for matching blocks against visible text.
+
+    Normalized, case-folded, and with super/subscript digits folded to plain
+    ones: blocks keep "$120¹" for the reader, while `innerText` shows "$1201".
+    """
+    return normalize_text(text)[0].translate(_UNSCRIPT).casefold()
 
 
 def normalize_text(raw: str) -> tuple[str, list[str]]:
@@ -270,16 +297,20 @@ class _Walker:
 
     # -- traversal ------------------------------------------------------------
 
-    def walk(self, node: Node, ctx: _Ctx) -> None:
+    def append_text(self, text: str, ctx: _Ctx) -> None:
+        """Add inline text to the open block; a change of context starts a new block."""
+        if self.buffer_ctx is not None and self.buffer_ctx != ctx and self.buffer:
+            self.flush()
+        self.buffer_ctx = ctx
+        self.buffer.append(text)
+
+    def walk(self, node: Node, ctx: _Ctx, *, flush_end: bool = True) -> None:
         for child in node.iter(include_text=True):
             tag = child.tag
             if tag == "-text":
                 text = child.text(deep=False)
                 if text:
-                    if self.buffer_ctx is not None and self.buffer_ctx != ctx and self.buffer:
-                        self.flush()
-                    self.buffer_ctx = ctx
-                    self.buffer.append(text)
+                    self.append_text(text, ctx)
                 continue
             if tag == "_comment":
                 self.flush()
@@ -296,7 +327,8 @@ class _Walker:
                     )
                 continue
             self.element(child, ctx)
-        self.flush()
+        if flush_end:
+            self.flush()
 
     def element(self, node: Node, parent: _Ctx) -> None:  # noqa: C901 - one dispatch table
         tag = node.tag or ""
@@ -361,6 +393,12 @@ class _Walker:
             return
 
         self.attribute_text(tag, attrs, ctx)
+        if tag in _SCRIPT_POSITION and ctx.layer is not ContentLayer.ICON_ARTIFACT:
+            shifted = _shift_script(node.text(deep=True) or "", _SCRIPT_POSITION[tag])
+            if shifted is not None:
+                # Case 90: "$120<sup>1</sup>" must not read as "$1201" (R9 critical tokens).
+                self.append_text(shifted, ctx)
+                return
         if ctx.layer is ContentLayer.ICON_ARTIFACT:
             text = node.text(deep=True) or ""
             n, ops = normalize_text(text)
@@ -368,7 +406,9 @@ class _Walker:
                 self.flush()
                 self.emit(text.strip(), n, ops, ctx)
             return
-        self.walk(node, ctx)
+        # Inline elements (span, b, a, ...) continue the open block; only block
+        # elements end it, so a sentence with a link is not cut in two.
+        self.walk(node, ctx, flush_end=is_block)
         if is_block:
             self.flush()
 

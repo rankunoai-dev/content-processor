@@ -56,6 +56,7 @@ from src.modules.content_processor.explore.model import (
     ControlRecord,
     ExplorationResult,
     ExploredState,
+    mark_responsive_duplicates,
 )
 from src.modules.content_processor.explore.scroll import explore_scroll_surfaces
 
@@ -478,6 +479,7 @@ class StateExplorer:
             else:
                 rec.reason = "not_reached"
         result.controls = [records[i] for i in order]
+        mark_responsive_duplicates(result.controls)
 
     async def _calibrate(self, page: Any) -> None:
         """Click plain text once so interaction-triggered beacons are learned as background.

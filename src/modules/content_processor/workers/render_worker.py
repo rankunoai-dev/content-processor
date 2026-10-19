@@ -19,7 +19,7 @@ from typing import Any, Protocol
 from src.core.logger import get_logger
 from src.integrations.browser_client import PageHook, RenderResult
 from src.integrations.evidence_store import EvidenceStore
-from src.modules.content_processor.adapters.html_source import extract_html_source, normalize_text
+from src.modules.content_processor.adapters.html_source import extract_html_source, match_key
 from src.modules.content_processor.contracts import (
     ContentBlock,
     Gap,
@@ -524,7 +524,7 @@ def _worse(a: EntityStatus, b: EntityStatus) -> bool:
 
 
 def _key(text: str) -> str:
-    return normalize_text(text)[0].casefold()
+    return match_key(text)
 
 
 def retry_at(seconds: float) -> datetime:

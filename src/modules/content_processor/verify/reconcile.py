@@ -17,7 +17,7 @@ from collections.abc import Sequence
 from pydantic import Field
 
 from src.core.schemas import StrictModel
-from src.modules.content_processor.adapters.html_source import normalize_text
+from src.modules.content_processor.adapters.html_source import match_key
 from src.modules.content_processor.contracts import ContentBlock
 from src.modules.content_processor.enums import ContentLayer, EntityStatus
 
@@ -50,7 +50,7 @@ class ReconcileResult(StrictModel):
 
 
 def _norm(text: str) -> str:
-    return normalize_text(text)[0].casefold()
+    return match_key(text)
 
 
 def reconcile_source_vs_rendered(

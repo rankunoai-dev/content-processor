@@ -5,11 +5,15 @@ stable ids, so re-running a rule updates its gaps instead of duplicating them.
 Rules never raise a status; `verify.record` applies the gaps to the badge.
 
 Implemented here: R1 inventory accounting, R2 acquisition, R3 frame outcomes,
-R10 payload sanity. R4-R9 and R11-R13 follow in later items (V-3..V-6).
+R9 critical tokens, R10 payload sanity. R4-R8 and R11-R13 follow in later
+items (V-3, V-5, V-6).
 """
 
 from __future__ import annotations
 
+import re
+import unicodedata
+from collections import Counter
 from collections.abc import Iterable, Sequence
 from urllib.parse import urlsplit
 
@@ -36,7 +40,10 @@ __all__ = [
     "rule_r1_inventory",
     "rule_r2_acquisition",
     "rule_r3_frames",
+    "R9_MAX_GAPS",
+    "critical_tokens",
     "rule_r10_payload",
+    "rule_r9_critical_tokens",
 ]
 
 # Statuses that claim content was obtained (so content-level rules apply).
@@ -473,3 +480,112 @@ def rule_r10_payload(
             )
         )
     return gaps
+
+
+# -- R9 critical tokens (V-4) --------------------------------------------------
+
+R9_MAX_GAPS = 25
+"""Per resource; a page with more damaged blocks is already a review case."""
+
+_R9_NUMBER = re.compile(r"[0-9⁰¹²³⁴⁵⁶⁷⁸⁹₀₁₂₃₄₅₆₇₈₉]+(?:[.,][0-9]+)*")
+_R9_CURRENCY = re.compile(r"[$€£¥₹₩₽¢]|\b(?:USD|EUR|GBP|INR|JPY|CHF|CAD|AUD|CNY)\b")
+_R9_NEGATION = re.compile(
+    r"\b(?:not|no|never|none|nor|neither|without|cannot)\b|n['’]t\b", re.IGNORECASE
+)
+_R9_MARKER = re.compile(r"[*†‡§¶%‰]|\[\d{1,3}\]")
+_R9_SPLIT_TAIL = re.compile(r"(?:[$€£¥₹]\s*\d{1,3}[,.]?|\d{1,3}[,.])$")
+_R9_SPLIT_HEAD = re.compile(r"^\d{3}\b")
+_R9_INVISIBLE = re.compile("[­​‌‍﻿]")
+
+
+def critical_tokens(text: str) -> Counter[str]:
+    """Numbers, currencies, negations and footnote/percent markers in `text`, counted."""
+    found: Counter[str] = Counter()
+    for pattern in (_R9_NUMBER, _R9_CURRENCY, _R9_MARKER):
+        found.update(m.group(0) for m in pattern.finditer(text))
+    found.update(m.group(0).lower().replace("’", "'") for m in _R9_NEGATION.finditer(text))
+    return found
+
+
+def _canonical(raw: str) -> str:
+    """The only changes normalization may make: NFC, invisible code points, spacing."""
+    text = unicodedata.normalize("NFC", raw)
+    text = _R9_INVISIBLE.sub("", text).replace(" ", " ")
+    return " ".join(text.split())
+
+
+def _describe(counter: Counter[str]) -> str:
+    return ",".join(f"{tok}x{n}" if n > 1 else tok for tok, n in sorted(counter.items()))[:120]
+
+
+def _r9_gap(run_id: str, resource: Resource, block: ContentBlock, kind: str, reason: str) -> Gap:
+    return Gap(
+        gap_id=gap_id_for(run_id, resource.resource_id, f"R9:{kind}:{block.block_id}"),
+        run_id=run_id,
+        resource_id=resource.resource_id,
+        state_id=block.state_id,
+        region_id=block.region_id,
+        gap_type=GapType.FIDELITY_DISAGREEMENT,
+        status=EntityStatus.EXTRACTED_UNVERIFIED,
+        reason=reason,
+        evidence_ids=list(block.evidence_ids),
+        tier_reached=resource.acquired_at_tier,
+    )
+
+
+def rule_r9_critical_tokens(
+    run_id: str, resource: Resource, regions: Sequence[ContentBlock]
+) -> list[Gap]:
+    """R9: numbers, currencies, negations and markers survive extraction.
+
+    Two checks over the corpus blocks:
+
+    * raw to normalized: after the allowed normalization (NFC, invisible code
+      points, spacing) the critical tokens of `raw_text` and `normalized_text`
+      must be identical. Any adapter that drops a negation, turns a superscript
+      footnote into a plain digit or loses a currency sign is caught here.
+    * split numbers: a block ending in `$1,` or `12.` followed in reading order
+      (same state, same heading path) by one starting with three digits means
+      one amount was cut across two blocks.
+
+    Gaps are FIDELITY_DISAGREEMENT (review), keyed by block, at most
+    `R9_MAX_GAPS` per resource.
+    """
+    gaps: list[Gap] = []
+    for block in regions:
+        if block.dedupe_of is not None or not block.normalized_text:
+            continue
+        before = critical_tokens(_canonical(block.raw_text))
+        after = critical_tokens(block.normalized_text)
+        if before != after:
+            lost, added = before - after, after - before
+            detail = []
+            if lost:
+                detail.append(f"lost={_describe(lost)}")
+            if added:
+                detail.append(f"added={_describe(added)}")
+            gaps.append(
+                _r9_gap(
+                    run_id, resource, block, "tokens", "critical_tokens_changed:" + ";".join(detail)
+                )
+            )
+    ordered = sorted(
+        (b for b in regions if b.dedupe_of is None and b.normalized_text),
+        key=lambda b: (b.state_id, b.reading_order),
+    )
+    for first, second in zip(ordered, ordered[1:], strict=False):
+        if (
+            first.state_id == second.state_id
+            and first.heading_path == second.heading_path
+            and second.reading_order == first.reading_order + 1
+            and _R9_SPLIT_TAIL.search(first.normalized_text)
+            and _R9_SPLIT_HEAD.match(second.normalized_text)
+        ):
+            tail = first.normalized_text[-12:]
+            head = second.normalized_text[:12]
+            gaps.append(
+                _r9_gap(
+                    run_id, resource, first, "split", f"number_split_across_blocks:{tail}|{head}"
+                )
+            )
+    return gaps[:R9_MAX_GAPS]

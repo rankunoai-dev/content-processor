@@ -56,6 +56,7 @@ from src.modules.content_processor.verify.rules import (
     rule_r1_inventory,
     rule_r2_acquisition,
     rule_r3_frames,
+    rule_r9_critical_tokens,
     rule_r10_payload,
 )
 from src.modules.content_processor.verify.rules_extended import (
@@ -364,6 +365,7 @@ def assemble_url_record(
         run_id, target, children=children, recorded=[*recorded_gaps, *rule_gaps]
     )
     rule_gaps += rule_r3_frames(run_id, target, frames=frames, children=children, blocks=blocks)
+    rule_gaps += rule_r9_critical_tokens(run_id, target, regions)
     rule_gaps += rule_r1_inventory(
         run_id, target, discovery=discovery, children=children, regions=regions
     )
