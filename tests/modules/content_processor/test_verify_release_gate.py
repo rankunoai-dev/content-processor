@@ -183,6 +183,7 @@ async def _run_suite(tmp: Path, *, render: bool) -> dict[str, list[UrlRecord]]:
         "run_id": RUN_ID,
         "plan": plan,
         "frames_for": frames_from_evidence(evidence),
+        "evidence": evidence,
         "expectations": expectations,
         "outstanding": outstanding,
     }

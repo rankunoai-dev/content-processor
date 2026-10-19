@@ -25,7 +25,12 @@
     "http://127.0.0.1:8765/pages/pincode_modal",
     "http://127.0.0.1:8765/pages/product_unavailable",
     "http://127.0.0.1:8765/pages/age_gate",
-    "http://127.0.0.1:8765/pages/newsletter_only"
+    "http://127.0.0.1:8765/pages/newsletter_only",
+    "http://127.0.0.1:8765/pages/malformed_markup",
+    "http://127.0.0.1:8765/pages/charset_entities",
+    "http://127.0.0.1:8765/discontinued-product",
+    "http://127.0.0.1:8765/pages/obfuscated_font",
+    "http://127.0.0.1:8765/pages/soft_paywall"
   ],
   "hosts_in_scope": [
     "127.0.0.1",

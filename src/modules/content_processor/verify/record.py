@@ -12,12 +12,15 @@ no render ran (K14), and a wrong payload seen once stays seen (K15).
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Callable, Collection, Mapping, Sequence
+import statistics
+from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any, Protocol
+from urllib.parse import urlsplit
 
 from src.integrations.evidence_store import EvidenceStore
 from src.modules.content_processor.adapters.html_source import extract_html_source
+from src.modules.content_processor.adapters.ocr import is_ocr_available
 from src.modules.content_processor.contracts import (
     ContentBlock,
     DiscoveryState,
@@ -37,6 +40,15 @@ from src.modules.content_processor.enums import (
     UrlBadge,
 )
 from src.modules.content_processor.scope.frontier import ExcludedInput, FrontierPlan
+from src.modules.content_processor.verify.detectors import (
+    DetectedRegion,
+    EvidenceProblem,
+    PdfRegionRef,
+    TextRegionDetector,
+    evidence_problems,
+    pdf_regions_from_evidence,
+    screenshot_sha,
+)
 from src.modules.content_processor.verify.gaps import gap_id_for, strictest_status
 from src.modules.content_processor.verify.rules import (
     CONTENT_STATUSES,
@@ -45,6 +57,18 @@ from src.modules.content_processor.verify.rules import (
     rule_r2_acquisition,
     rule_r3_frames,
     rule_r10_payload,
+)
+from src.modules.content_processor.verify.rules_extended import (
+    main_word_count,
+    rule_evidence_integrity,
+    rule_r6_visual_regions,
+    rule_r7_channel_agreement,
+    rule_r8_pdf_regions,
+    rule_r11_degradation,
+    rule_r12_limits,
+    rule_r13_layer_hygiene,
+    rule_volatility,
+    uncovered_pdf_regions,
 )
 from src.modules.content_processor.verify.status import derive_status_vector, derive_url_badge
 
@@ -278,6 +302,12 @@ def assemble_url_record(
     tool_versions: Mapping[str, str] | None = None,
     captured_at: datetime | None = None,
     assume_discovery_closed: bool = False,
+    visual_regions: Sequence[DetectedRegion] | None = None,
+    detector_name: str | None = None,
+    pdf_regions: Sequence[PdfRegionRef] | None = None,
+    ocr_available: bool = False,
+    evidence_issues: Sequence[EvidenceProblem] = (),
+    host_baseline: tuple[float, int] | None = None,
 ) -> UrlRecord:
     """Assemble the honest verdict for one URL.
 
@@ -297,6 +327,14 @@ def assemble_url_record(
         assume_discovery_closed: Counterfactual for the release gate only: treat
             discovery as closed to prove traps fail on their own merits. The
             record says so in its warnings.
+        visual_regions: Text regions on the rendered screenshot (R6); None when
+            no detector ran.
+        detector_name: The detector that produced `visual_regions`; None when no
+            detector is installed (the record warns `r6:detector_unavailable`).
+        pdf_regions: Image regions of a PDF target (R8); None when not a PDF.
+        ocr_available: Whether an OCR engine could have run (R8).
+        evidence_issues: Missing or changed evidence the record cites.
+        host_baseline: (median main-region words, pages) for the target's host (R11).
 
     Returns:
         The `UrlRecord`. Its badge never claims more than its gaps allow.
@@ -329,6 +367,18 @@ def assemble_url_record(
     rule_gaps += rule_r1_inventory(
         run_id, target, discovery=discovery, children=children, regions=regions
     )
+    rule_gaps += _extended_rules(
+        run_id,
+        target,
+        blocks=blocks,
+        summaries=summaries,
+        visual_regions=visual_regions,
+        pdf_regions=pdf_regions,
+        ocr_available=ocr_available,
+        evidence_issues=evidence_issues,
+        host_baseline=host_baseline,
+        already=[*recorded_gaps, *rule_gaps],
+    )
     gaps = _dedupe([*recorded_gaps, *rule_gaps])
 
     target_status = _effective(target, gaps)
@@ -352,6 +402,15 @@ def assemble_url_record(
             if hidden:
                 warnings.append(f"hidden_frames_skipped={hidden}")
             warnings.append("frames_from_source_dom_only")
+    warnings += _ocr_warnings(
+        target,
+        summaries=summaries,
+        visual_regions=visual_regions,
+        detector_name=detector_name,
+        pdf_regions=pdf_regions,
+        ocr_available=ocr_available,
+        blocks=blocks,
+    )
     if target_status is not target.status:
         warnings.append(f"status_lowered_by_gaps:{target.status.value}->{target_status.value}")
 
@@ -377,6 +436,69 @@ def assemble_url_record(
         warnings=warnings,
         **_freshness(target, summaries),
     )
+
+
+def _extended_rules(
+    run_id: str,
+    target: Resource,
+    *,
+    blocks: Sequence[ContentBlock],
+    summaries: Mapping[str, Mapping[str, Any]],
+    visual_regions: Sequence[DetectedRegion] | None,
+    pdf_regions: Sequence[PdfRegionRef] | None,
+    ocr_available: bool,
+    evidence_issues: Sequence[EvidenceProblem],
+    host_baseline: tuple[float, int] | None,
+    already: Sequence[Gap],
+) -> list[Gap]:
+    """R6, R7, R8, R11, R12, R13, volatility and evidence integrity for one target."""
+    gaps = rule_evidence_integrity(run_id, target, problems=evidence_issues)
+    if target.status not in CONTENT_STATUSES:
+        return gaps
+    gaps += rule_r6_visual_regions(run_id, target, regions=visual_regions, blocks=blocks)
+    gaps += rule_r7_channel_agreement(run_id, target, blocks=blocks)
+    gaps += rule_r8_pdf_regions(
+        run_id, target, regions=pdf_regions, blocks=blocks, ocr_available=ocr_available
+    )
+    gaps += rule_r12_limits(run_id, target, summaries=summaries)
+    gaps += rule_r13_layer_hygiene(run_id, target, blocks=blocks)
+    gaps += rule_volatility(run_id, target, summaries=summaries)
+    explained = any(g.resource_id == target.resource_id for g in [*already, *gaps])
+    if host_baseline is not None and not explained:
+        median, pages = host_baseline
+        gaps += rule_r11_degradation(
+            run_id,
+            target,
+            main_words=main_word_count(blocks),
+            host_median=median,
+            host_pages=pages,
+        )
+    return gaps
+
+
+def _ocr_warnings(
+    target: Resource,
+    *,
+    summaries: Mapping[str, Mapping[str, Any]],
+    visual_regions: Sequence[DetectedRegion] | None,
+    detector_name: str | None,
+    pdf_regions: Sequence[PdfRegionRef] | None,
+    ocr_available: bool,
+    blocks: Sequence[ContentBlock],
+) -> list[str]:
+    """Say when R6 or R8 could not judge for lack of an engine (record, not block)."""
+    if target.status not in CONTENT_STATUSES:
+        return []
+    warnings: list[str] = []
+    if "render" in summaries and visual_regions is None:
+        warnings.append(
+            "r6:detector_unavailable" if detector_name is None else "r6:screenshot_unavailable"
+        )
+    if pdf_regions is not None and not ocr_available:
+        uncovered = uncovered_pdf_regions(pdf_regions, blocks)
+        if uncovered:
+            warnings.append(f"r8:ocr_unavailable:regions={len(uncovered)}")
+    return warnings
 
 
 def _freshness(target: Resource, summaries: Mapping[str, Mapping[str, Any]]) -> dict[str, Any]:
@@ -493,6 +615,23 @@ def frames_from_evidence(store: EvidenceStore) -> Callable[[Resource], list[Fram
     return read
 
 
+def _host(resource: Resource) -> str:
+    return (urlsplit(resource.final_url or resource.requested_url).hostname or "").lower()
+
+
+def _host_baselines(
+    resources: Iterable[Resource], blocks_by_id: Mapping[str, Sequence[ContentBlock]]
+) -> dict[str, tuple[float, int]]:
+    """(median main-region words, page count) per host over pages that claim content (R11)."""
+    words: dict[str, list[int]] = {}
+    for res in resources:
+        if res.status in (EntityStatus.VERIFIED_EXTRACTED, EntityStatus.EXTRACTED_UNVERIFIED):
+            words.setdefault(_host(res), []).append(
+                main_word_count(blocks_by_id.get(res.resource_id, []))
+            )
+    return {host: (float(statistics.median(ws)), len(ws)) for host, ws in words.items()}
+
+
 def url_records_for_run(
     reader: RunReader,
     *,
@@ -503,6 +642,9 @@ def url_records_for_run(
     outstanding: Collection[str] = (),
     tool_versions: Mapping[str, str] | None = None,
     assume_discovery_closed: bool = False,
+    evidence: EvidenceStore | None = None,
+    detector: TextRegionDetector | None = None,
+    ocr_available: bool | None = None,
 ) -> list[UrlRecord]:
     """One record per scheduled URL plus one per excluded input.
 
@@ -521,8 +663,15 @@ def url_records_for_run(
         tool_versions: Versions recorded on every record.
         assume_discovery_closed: Release-gate counterfactual; see
             `assemble_url_record`.
+        evidence: Evidence store; enables evidence integrity, R8 PDF regions and
+            (with a detector) R6 on the rendered screenshot.
+        detector: Text-region detector for R6 (`default_detector()`); None when
+            no engine is installed, which records warn about.
+        ocr_available: Whether OCR could run (R8); None detects it.
     """
     expected = dict(expectations or {})
+    ocr = is_ocr_available() if ocr_available is None else ocr_available
+    pdf_regions_for = pdf_regions_from_evidence(evidence) if evidence is not None else None
     resources: dict[str, Resource] = {r.schedule_key: r for r in reader.list_resources(run_id)}
     if plan is not None:
         for entry in plan.entries:
@@ -539,22 +688,39 @@ def url_records_for_run(
                     status_reason="scheduled_not_started",
                 ),
             )
+    blocks_by_id = {r.resource_id: reader.get_blocks(r.resource_id) for r in resources.values()}
+    baselines = _host_baselines(resources.values(), blocks_by_id)
     records: list[UrlRecord] = []
     for key, res in resources.items():
         history = reader.get_events(run_id, res.resource_id)
+        blocks = blocks_by_id[res.resource_id]
+        summaries = reader.get_summaries(res.resource_id)
+        regions: list[DetectedRegion] | None = None
+        if detector is not None and evidence is not None and "render" in summaries:
+            shot = screenshot_sha(history, res.resource_id)
+            if shot is not None and evidence.exists(shot):
+                regions = detector.detect(evidence.get(shot))
         records.append(
             assemble_url_record(
                 run_id=run_id,
                 target=res,
                 recorded_gaps=reader.get_gaps(res.resource_id),
-                blocks=reader.get_blocks(res.resource_id),
-                summaries=reader.get_summaries(res.resource_id),
+                blocks=blocks,
+                summaries=summaries,
                 frames=frames_for(res) if frames_for is not None else None,
                 expected_mime=expected.get(res.requested_url) or expected.get(key),
                 history=history,
                 work_outstanding=res.resource_id in outstanding,
                 tool_versions=tool_versions,
                 assume_discovery_closed=assume_discovery_closed,
+                visual_regions=regions,
+                detector_name=detector.name if detector is not None else None,
+                pdf_regions=pdf_regions_for(res) if pdf_regions_for is not None else None,
+                ocr_available=ocr,
+                evidence_issues=(
+                    evidence_problems(evidence, res, blocks) if evidence is not None else ()
+                ),
+                host_baseline=baselines.get(_host(res)),
             )
         )
     if plan is not None:

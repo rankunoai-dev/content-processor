@@ -156,7 +156,10 @@ def test_corpus_prefers_rendered_channel_and_drops_non_corpus_layers():
 def test_clean_closed_page_is_verified_with_explicit_denominators():
     rec = _record(tool_versions={"engine": "0.1.0"})
     assert rec.badge is UrlBadge.VERIFIED_WITHIN_SCOPE
-    assert rec.gaps == [] and rec.warnings == ["frames_from_source_dom_only"]
+    assert rec.gaps == [] and rec.warnings == [
+        "frames_from_source_dom_only",
+        "r6:detector_unavailable",
+    ]
     inv = rec.inventory
     assert inv.denominator_basis == "observed_inventory_only"
     assert (inv.resources_discovered, inv.resources_acquired) == (1, 1)

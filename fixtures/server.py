@@ -298,3 +298,15 @@ def fresh(request: Request) -> Response:
     )
     headers = {"ETag": etag} if FRESH_PAGE["send_etag"] else {}
     return HTMLResponse(body, headers=headers)
+
+
+@app.get("/")
+def home() -> Response:
+    """Site homepage (target of the soft-redirect fixture)."""
+    return FileResponse(PAGES / "home.html", media_type="text/html; charset=utf-8")
+
+
+@app.get("/discontinued-product")
+def discontinued_product() -> Response:
+    """A retired deep URL that redirects to the homepage (case 98, soft redirect)."""
+    return Response(status_code=302, headers={"Location": "/"})

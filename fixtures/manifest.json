@@ -208,6 +208,50 @@
       "expect_gate": null,
       "trap": "false_positive",
       "expect_badge": "VERIFIED_WITHIN_SCOPE"
+    },
+    {
+      "path": "/pages/malformed_markup",
+      "case": "01",
+      "case_source": "primary",
+      "expect_block": "NONE",
+      "expect_badge": "VERIFIED_WITHIN_SCOPE",
+      "must_contain": [
+        "Coverage starts on the first day of the month."
+      ],
+      "notes": "Unclosed and misnested tags; the parser repairs them and no text is lost."
+    },
+    {
+      "path": "/pages/charset_entities",
+      "case": "02",
+      "case_source": "primary",
+      "expect_block": "NONE",
+      "expect_badge": "VERIFIED_WITHIN_SCOPE",
+      "must_contain_normalized": [
+        "Café costs €5 per month."
+      ],
+      "notes": "Named and numeric character references decode to the visible text."
+    },
+    {
+      "path": "/discontinued-product",
+      "case": "98",
+      "expect_block": "NONE",
+      "expect_badge": "NEEDS_REVIEW",
+      "notes": "302 from a deep URL to the homepage: R10 flags SOFT_REDIRECT_SUSPECTED; the homepage content is never reported as the product."
+    },
+    {
+      "path": "/pages/obfuscated_font",
+      "case": "114",
+      "expect_block": "NONE",
+      "expect_badge": "NEEDS_REVIEW",
+      "notes": "Price drawn from private-use glyph codes remapped by a custom font: R7 obfuscated_font_suspected (case 221 is the marketplace form)."
+    },
+    {
+      "path": "/pages/soft_paywall",
+      "case": "141",
+      "expect_block": "NONE",
+      "expect_gate": "soft_paywall",
+      "expect_badge": "PARTIAL",
+      "notes": "Full article in the DOM under a subscribe overlay: soft_paywall gate, ACCESS_BLOCKED gap, never VERIFIED."
     }
   ],
   "seeds": [

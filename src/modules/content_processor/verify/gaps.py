@@ -25,6 +25,8 @@ GATE_STATUS: dict[str, tuple[GapType, EntityStatus, EntityStatus]] = {
     "login_wall": (GapType.ACCESS_BLOCKED, EntityStatus.BLOCKED, EntityStatus.BLOCKED),
     "age_or_audience_gate": (GapType.ACCESS_BLOCKED, EntityStatus.BLOCKED, EntityStatus.PARTIAL),
     "geo_pincode_modal": (GapType.UNVISITED_STATE, EntityStatus.PARTIAL, EntityStatus.PARTIAL),
+    # Soft paywall: the text may be in the DOM, but a visitor sees it behind the overlay.
+    "soft_paywall": (GapType.ACCESS_BLOCKED, EntityStatus.BLOCKED, EntityStatus.PARTIAL),
     "product_unavailable": (
         GapType.DEGRADED_VARIANT,
         EntityStatus.EXTRACTED_UNVERIFIED,

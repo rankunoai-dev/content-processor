@@ -21,9 +21,9 @@ JH_SCOPE = ROOT / "fixtures" / "scopes" / "johnhancock.json"
 def test_plan_fixture_scope_allows_loopback_in_development(capsys):
     assert cli.main(["plan", "--scope", str(FIXTURE_SCOPE)]) == 0
     out = json.loads(capsys.readouterr().out)
-    assert out["scheduled"] == 23 and out["excluded"] == 0
+    assert out["scheduled"] == 28 and out["excluded"] == 0
     # access-failure fixtures live on a second host so their circuit cannot starve the rest (K13)
-    assert out["hosts"] == {"127.0.0.1": 18, "localhost": 5}
+    assert out["hosts"] == {"127.0.0.1": 23, "localhost": 5}
 
 
 def test_plan_johnhancock_scope_is_single_host_t3_ceiling(capsys):
