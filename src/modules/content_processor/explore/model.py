@@ -1,4 +1,4 @@
-"""Exploration records (B-1).
+"""Exploration records (B-1; kinds for B-4 to B-12).
 
 Every discovered control ends in exactly one terminal outcome, so the control
 count is an honest denominator: visited, initially open/selected, excluded by
@@ -15,7 +15,23 @@ from src.core.schemas import StrictModel
 
 __all__ = ["ControlKind", "ControlRecord", "ControlStatus", "ExplorationResult", "ExploredState"]
 
-ControlKind = Literal["disclosure", "accordion", "tab", "find_reveal", "menu", "scroll_surface"]
+ControlKind = Literal[
+    "disclosure",
+    "accordion",
+    "tab",
+    "find_reveal",
+    "menu",
+    "scroll_surface",
+    "carousel",
+    "hover",
+    "keyboard",
+    "dialog",
+    "consent",
+    "load_more",
+    "pagination",
+    "frame",
+    "shadow_root",
+]
 ControlStatus = Literal["pending", "visited", "initially_open", "excluded", "unvisited"]
 
 
@@ -42,6 +58,9 @@ class ExploredState(StrictModel):
     text_delta_chars: int = Field(
         description="Visible text length change versus the previous state"
     )
+    frame_path: str = Field(
+        default="main", description="Frame the state was read from (iframe URL or srcdoc:<n>)"
+    )
 
 
 class ExplorationResult(StrictModel):
@@ -57,6 +76,14 @@ class ExplorationResult(StrictModel):
     elapsed_s: float = Field(default=0.0, ge=0.0)
     stop_reason: str | None = None
     unsafe_requests: list[str] = Field(default_factory=list)
+    followup_urls: list[str] = Field(
+        default_factory=list,
+        description="Pagination links that are separate URLs; the frontier owns them (B-7)",
+    )
+    composition: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Shadow roots and frames read into the captured states (B-11, B-12)",
+    )
     unexplored_action_kinds: list[str] = Field(
         default_factory=list,
         description="Allowed by policy but not implemented yet; discovery cannot close",

@@ -1,0 +1,6 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Reviews</title></head><body><main><h1>Reviews</h1><p>Review 1: great service.</p>
+<button type="button" id="more">Show more</button></main>
+<script>
+document.getElementById('more').addEventListener('click', function () {
+  fetch('/reviews', { method: 'POST' }).catch(function () {}); });
+</script></body></html>

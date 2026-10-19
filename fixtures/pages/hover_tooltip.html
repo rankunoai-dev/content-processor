@@ -1,0 +1,9 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Coverage</title><style>#tip{display:none}nav li ul{display:none}nav li:hover ul{display:block}</style></head><body><nav><ul><li><a href="#">Products</a><ul><li><a href="#">Term life insurance</a></li>
+</ul></li></ul></nav><main><h1>Coverage</h1>
+<p>Deductible <button type="button" data-tooltip="1" aria-describedby="tip">?</button></p>
+<div id="tip" role="tooltip">The deductible resets every January.</div></main>
+<script>
+var b = document.querySelector('[data-tooltip]'), t = document.getElementById('tip');
+b.addEventListener('mouseenter', function () { t.style.display = 'block'; });
+b.addEventListener('mouseleave', function () { t.style.display = 'none'; });
+</script></body></html>

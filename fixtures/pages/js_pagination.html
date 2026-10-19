@@ -1,0 +1,11 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Branches</title></head><body><main><h1>Branches</h1><ul id="list"></ul>
+<nav class="pagination" aria-label="pagination"><button type="button" id="next">Next</button></nav></main>
+<script>
+var pages = [['Branch: Boston office.'], ['Branch: Chicago office.'], ['Branch: Denver office.']];
+var p = 0;
+function show() { var ul = document.getElementById('list'); ul.innerHTML = '';
+  pages[p].forEach(function (t) { var li = document.createElement('li'); li.textContent = t; ul.appendChild(li); });
+  document.getElementById('next').disabled = p === pages.length - 1; }
+document.getElementById('next').addEventListener('click', function () { p += 1; show(); });
+show();
+</script></body></html>

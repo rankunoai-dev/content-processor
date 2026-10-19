@@ -1,0 +1,12 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Benefits</title></head><body><main><h1>Benefits</h1>
+<benefit-card><span>Slotted light text: dental included.</span></benefit-card>
+<secret-box></secret-box>
+<div id="decl"><template shadowrootmode="closed"><p>Declarative closed text: vision included.</p></template></div>
+</main>
+<script>
+customElements.define('benefit-card', class extends HTMLElement { constructor() { super();
+  this.attachShadow({ mode: 'open' }).innerHTML =
+    '<p>Open shadow text: wellness rewards.</p><slot></slot><p style="display:none">Hidden shadow text.</p>'; } });
+customElements.define('secret-box', class extends HTMLElement { constructor() { super();
+  this.attachShadow({ mode: 'closed' }).innerHTML = '<p>Closed shadow text: travel cover.</p>'; } });
+</script></body></html>

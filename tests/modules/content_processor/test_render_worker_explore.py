@@ -250,6 +250,48 @@ async def test_still_collapsed_text_in_a_state_is_not_kept_as_new(tmp_path: Path
     assert by_text["Refunds within 14 days."] == "run-t|state:2"
 
 
+async def test_frame_state_blocks_carry_their_frame_path(tmp_path: Path):
+    """B-11: frame text becomes blocks R3 can match to the frame by `frame_path`."""
+    frame_html = b"<html><body><p>Widget says claims close in 48 hours.</p></body></html>"
+    frame_state = ExploredState(
+        index=1,
+        control_id="frame:1",
+        kind="frame",
+        label="Partner widget",
+        inner_text="Widget says claims close in 48 hours.",
+        dom_html=frame_html,
+        text_delta_chars=37,
+        frame_path="http://partner.example/widget",
+    )
+    exploration = ExplorationResult(
+        controls=[
+            ControlRecord(
+                control_id="frame:1",
+                kind="frame",
+                label="cross_origin:http://partner.example/widget",
+                status="visited",
+                reason="cross_origin_read",
+                state_index=1,
+            )
+        ],
+        states=[frame_state],
+        composition={"frames": [{"frame_path": "http://partner.example/widget"}]},
+        followup_urls=["http://testserver/plans?page=2"],
+    )
+    ledger, res = await _run(tmp_path, exploration, ["expand_disclosure", "select_tab"])
+    frame_blocks = [b for b in ledger.get_blocks(res.resource_id) if "|state:1" in b.state_id]
+    assert [b.normalized_text for b in frame_blocks] == ["Widget says claims close in 48 hours."]
+    assert frame_blocks[0].provenance.frame_path == "http://partner.example/widget"
+    assert frame_blocks[0].status is EntityStatus.VERIFIED_EXTRACTED
+    main_blocks = [
+        b for b in ledger.get_blocks(res.resource_id) if b.state_id.endswith("|rendered")
+    ]
+    assert {b.provenance.frame_path for b in main_blocks} == {"main"}
+    facts = ledger.summaries[res.resource_id]["explore"]
+    assert facts["composition"]["frames"][0]["frame_path"] == "http://partner.example/widget"
+    assert facts["followup_urls"] == ["http://testserver/plans?page=2"]
+
+
 async def test_explorer_error_is_reported_not_raised(tmp_path: Path):
     exploration = ExplorationResult(error="PlaywrightError:Target closed")
     _, res = await _run(tmp_path, exploration, ["expand_disclosure"])

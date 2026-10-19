@@ -65,7 +65,16 @@ ANNOTATE_JS = """
   let hidden = 0, icons = 0, total = 0;
   const root = document.documentElement;
   const docRect = { w: root.scrollWidth, h: root.scrollHeight };
-  for (const el of document.body ? document.body.querySelectorAll('*') : []) {
+  // Walk the composed tree: elements inside open shadow roots are marked too.
+  const all = [];
+  const collect = (root) => {
+    for (const el of root.querySelectorAll('*')) {
+      all.push(el);
+      if (el.shadowRoot) { collect(el.shadowRoot); }
+    }
+  };
+  if (document.body) { collect(document.body); }
+  for (const el of all) {
     total += 1;
     const tag = el.tagName.toLowerCase();
     if (tag === 'script' || tag === 'style' || tag === 'template' || tag === 'noscript') continue;

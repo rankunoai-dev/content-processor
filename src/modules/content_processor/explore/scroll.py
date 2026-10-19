@@ -1,4 +1,4 @@
-"""Scroll exploration (B-8 scroll accumulation and lazy load; B-10 nested surfaces).
+"""Scroll exploration (B-8 scroll and lazy load, B-9 virtualized lists, B-10 nested surfaces).
 
 Every scroll surface is a control with a terminal outcome:
 
@@ -12,8 +12,12 @@ Every scroll surface is a control with a terminal outcome:
   feed and the surface ends `unvisited:scroll_budget_exhausted` (PARTIAL);
 - text seen while scrolling is accumulated; lines that were visible during the
   scroll but are no longer in the page afterwards mean the surface recycles its
-  nodes (virtualized list, B-9), and the surface ends
-  `unvisited:virtualized_content_recycled` instead of claiming completeness.
+  nodes (virtualized list, B-9). Rows are collected at every step, before they
+  are recycled, keyed by `aria-rowindex`/`aria-posinset` when present and by
+  text otherwise, and returned as one synthetic state. The surface is visited
+  only when the rows are complete: all of `aria-rowcount`/`aria-setsize` when
+  the list declares a total, no holes in the row indices when it numbers rows,
+  and otherwise the end reached (said as `total_unknown`).
 
 Scroll steps never click and never submit; the explorer's side-effect guard
 still applies to any request a scroll triggers.
@@ -22,6 +26,7 @@ still applies to any request a scroll triggers.
 from __future__ import annotations
 
 import asyncio
+import html
 import time
 from collections.abc import Awaitable, Callable
 from typing import Any
@@ -31,9 +36,16 @@ from pydantic import Field
 from src.core.schemas import StrictModel
 from src.modules.content_processor.explore.model import ControlRecord
 
-__all__ = ["MAX_NESTED", "ScrollOutcome", "ScrollSurfaceResult", "explore_scroll_surfaces"]
+__all__ = [
+    "MAX_NESTED",
+    "AccumulatedRows",
+    "ScrollOutcome",
+    "ScrollSurfaceResult",
+    "explore_scroll_surfaces",
+]
 
 MAX_NESTED = 10
+MAX_ROWS = 5000
 _STEP_FRACTION = 0.85
 _RECYCLE_MIN_LINES = 3
 
@@ -107,6 +119,36 @@ TEXT_JS = """
 }
 """
 
+# Leaf rows inside a surface: ARIA/list/table rows, else leaf elements with text.
+ROWS_JS = """
+(id) => {
+  const root = id === 'window' ? document.body
+    : document.querySelector(`[data-cp-scroll="${id.slice(7)}"]`);
+  if (!root) { return null; }
+  const rowSel = '[role=row],[role=listitem],[role=option],[role=article],[aria-rowindex],'
+    + '[aria-posinset],li,tr';
+  let rows = Array.from(root.querySelectorAll(rowSel)).filter((el) => !el.querySelector(rowSel));
+  if (!rows.length) {
+    rows = Array.from(root.querySelectorAll('*')).filter(
+      (el) => el.childElementCount === 0 && (el.textContent || '').trim());
+  }
+  const out = [];
+  for (const el of rows) {
+    const r = el.getBoundingClientRect();
+    if (r.width === 0 || r.height === 0) { continue; }
+    const text = (el.innerText || '').trim();
+    if (!text) { continue; }
+    const idx = el.getAttribute('aria-rowindex') || el.getAttribute('aria-posinset') || '';
+    const html = el.outerHTML.replace(/ data-cp-[a-z-]+="[^"]*"/g, '');
+    out.push([idx, text, html, el.tagName.toLowerCase()]);
+  }
+  const declared = root.closest('[aria-rowcount]') || root.querySelector('[aria-rowcount]');
+  let total = declared ? Number(declared.getAttribute('aria-rowcount')) : 0;
+  if (!total && rows.length) { total = Number(rows[0].getAttribute('aria-setsize') || 0); }
+  return { rows: out, total: total > 0 ? total : 0 };
+}
+"""
+
 RESET_JS = """
 () => {
   for (const el of document.querySelectorAll('[data-cp-scroll]')) { el.scrollTop = 0; }
@@ -126,7 +168,20 @@ class ScrollSurfaceResult(StrictModel):
     height_end: int = Field(ge=0)
     grew: bool
     recycled_lines: int = Field(ge=0)
+    rows_accumulated: int = Field(default=0, ge=0)
+    rows_total: int | None = Field(default=None, description="Declared by the list, if any")
+    row_index_gaps: int = Field(default=0, ge=0)
     stop_reason: str
+
+
+class AccumulatedRows(StrictModel):
+    """Rows of a virtualized surface collected before they were recycled (B-9)."""
+
+    surface_id: str
+    label: str
+    html: str
+    text: str
+    rows: int = Field(ge=0)
 
 
 class ScrollOutcome(StrictModel):
@@ -134,11 +189,56 @@ class ScrollOutcome(StrictModel):
 
     surfaces: list[ScrollSurfaceResult] = Field(default_factory=list)
     controls: list[ControlRecord] = Field(default_factory=list)
+    accumulated: list[AccumulatedRows] = Field(default_factory=list)
     stop_reason: str | None = None
 
 
 def _lines(text: str) -> list[str]:
     return [line.strip() for line in text.splitlines() if len(line.strip()) >= 2]
+
+
+class _Rows:
+    """First-seen rows of one surface, in scroll order."""
+
+    def __init__(self) -> None:
+        self.by_key: dict[str, tuple[str, str, str]] = {}
+        self.total = 0
+
+    def add(self, found: dict[str, Any] | None) -> None:
+        if not found:
+            return
+        self.total = max(self.total, int(found.get("total") or 0))
+        for idx, text, row_html, tag in found.get("rows", []):
+            key = f"i:{idx}" if idx else f"t:{text}"
+            if key not in self.by_key and len(self.by_key) < MAX_ROWS:
+                self.by_key[key] = (str(text), str(row_html), str(tag))
+
+    def index_gaps(self) -> int:
+        idx = sorted(int(k[2:]) for k in self.by_key if k.startswith("i:") and k[2:].isdigit())
+        if len(idx) < 2:
+            return 0
+        return (idx[-1] - idx[0] + 1) - len(idx)
+
+    def as_state(self, surface_id: str, label: str) -> AccumulatedRows:
+        rows = list(self.by_key.values())
+        tags = {tag for _, _, tag in rows}
+        body = "".join(h for _, h, _ in rows)
+        if tags == {"tr"}:
+            body = f"<table><tbody>{body}</tbody></table>"
+        elif tags == {"li"}:
+            body = f"<ul>{body}</ul>"
+        page = (
+            '<!DOCTYPE html><html><body><main><section data-cp-virtualized="'
+            f'{html.escape(surface_id)}" aria-label="{html.escape(label)}">{body}'
+            "</section></main></body></html>"
+        )
+        return AccumulatedRows(
+            surface_id=surface_id,
+            label=label,
+            html=page,
+            text="\n".join(t for t, _, _ in rows),
+            rows=len(rows),
+        )
 
 
 async def _scroll_one(
@@ -149,8 +249,10 @@ async def _scroll_one(
     deadline: float,
     settle: Callable[[Any], Awaitable[None]],
     end_grace_s: float,
+    rows: _Rows,
 ) -> ScrollSurfaceResult:
     sid = str(surface["id"])
+    rows.add(await page.evaluate(ROWS_JS, sid))
     seen: dict[str, None] = dict.fromkeys(_lines(str(await page.evaluate(TEXT_JS, sid))))
     height_start = int(surface.get("scrollHeight") or 0)
     passes = 0
@@ -169,6 +271,7 @@ async def _scroll_one(
         await settle(page)
         for line in _lines(str(await page.evaluate(TEXT_JS, sid))):
             seen.setdefault(line, None)
+        rows.add(await page.evaluate(ROWS_JS, sid))
         metrics = await page.evaluate(METRICS_JS, sid) or metrics
         at_end = metrics["top"] + metrics["clientHeight"] >= metrics["scrollHeight"] - 2
         if not at_end:
@@ -197,8 +300,31 @@ async def _scroll_one(
         height_end=height_end,
         grew=height_end > height_start + 2,
         recycled_lines=len(recycled),
+        rows_accumulated=len(rows.by_key),
+        rows_total=rows.total or None,
+        row_index_gaps=rows.index_gaps(),
         stop_reason=stop,
     )
+
+
+def _verdict(result: ScrollSurfaceResult) -> tuple[str, str]:
+    """Terminal outcome of one surface."""
+    if result.recycled_lines < _RECYCLE_MIN_LINES:
+        if result.reached_end:
+            return "visited", "reached_end" + (":content_grew" if result.grew else "")
+        return "unvisited", result.stop_reason
+    n, total = result.rows_accumulated, result.rows_total
+    count = f"{n}/{total}" if total else str(n)
+    if not result.reached_end:
+        return "unvisited", f"{result.stop_reason}:virtualized_rows={count}"
+    if total and n < total:
+        return "unvisited", f"virtualized_rows_incomplete:{count}"
+    if result.row_index_gaps:
+        gaps = result.row_index_gaps
+        return "unvisited", f"virtualized_rows_incomplete:{count}:index_gaps={gaps}"
+    if n == 0:
+        return "unvisited", f"virtualized_content_recycled:{result.recycled_lines}"
+    return "visited", f"virtualized_rows_accumulated:{count}" + ("" if total else ":total_unknown")
 
 
 async def explore_scroll_surfaces(
@@ -225,6 +351,7 @@ async def explore_scroll_surfaces(
                 )
             )
             continue
+        rows = _Rows()
         result = await _scroll_one(
             page,
             surface,
@@ -232,14 +359,12 @@ async def explore_scroll_surfaces(
             deadline=deadline,
             settle=settle,
             end_grace_s=end_grace_s,
+            rows=rows,
         )
         outcome.surfaces.append(result)
-        if result.reached_end and result.recycled_lines >= _RECYCLE_MIN_LINES:
-            status, reason = "unvisited", f"virtualized_content_recycled:{result.recycled_lines}"
-        elif result.reached_end:
-            status, reason = "visited", "reached_end" + (":content_grew" if result.grew else "")
-        else:
-            status, reason = "unvisited", result.stop_reason
+        status, reason = _verdict(result)
+        if result.recycled_lines >= _RECYCLE_MIN_LINES and rows.by_key:
+            outcome.accumulated.append(rows.as_state(result.surface_id, result.label))
         outcome.controls.append(
             ControlRecord(
                 control_id=f"scroll:{result.surface_id}",

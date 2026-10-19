@@ -1,0 +1,9 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Plan details</title></head><body><main><h1>Plan details</h1>
+<button type="button" aria-haspopup="dialog" id="open">What is covered?</button>
+<dialog id="dlg"><p>Hospital stays up to 30 days are covered.</p>
+<button type="button" aria-label="Close" onclick="this.closest('dialog').close()">x</button></dialog>
+<details><summary>Exclusions</summary><p>Cosmetic surgery is excluded.</p></details></main>
+<script>
+document.getElementById('open').addEventListener('click', function () {
+  document.getElementById('dlg').showModal(); });
+</script></body></html>

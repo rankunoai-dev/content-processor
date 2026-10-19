@@ -1,0 +1,12 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Offers</title><style>.slide{display:none}.slide.on{display:block}</style></head><body><main><h1>Offers</h1>
+<section class="carousel" aria-roledescription="carousel" aria-label="offers">
+<div class="slide on" aria-roledescription="slide"><p>Slide one: free annual check-up.</p></div>
+<div class="slide" aria-roledescription="slide"><p>Slide two: 10% off family plans.</p></div>
+<div class="slide" aria-roledescription="slide"><p>Slide three: no fee for online claims.</p></div>
+<button type="button" aria-label="Next slide">&rsaquo;</button></section>
+<p>Body text below the carousel.</p></main>
+<script>
+var i = 0, s = document.querySelectorAll('.slide');
+document.querySelector('[aria-label="Next slide"]').addEventListener('click', function () {
+  s[i].classList.remove('on'); i = (i + 1) % s.length; s[i].classList.add('on'); });
+</script></body></html>

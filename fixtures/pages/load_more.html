@@ -1,0 +1,10 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Articles</title></head><body><main><h1>Articles</h1><ul id="list"><li>Article 1: choosing a plan.</li></ul>
+<button type="button" id="more">Load more</button>
+<nav class="pager"><a rel="next" href="/pages/static_ok">Next page</a></nav></main>
+<script>
+var n = 1;
+document.getElementById('more').addEventListener('click', function () {
+  for (var k = 0; k < 2; k++) { n += 1; var li = document.createElement('li');
+    li.textContent = 'Article ' + n + ': loaded later.'; document.getElementById('list').appendChild(li); }
+  if (n >= 5) { this.remove(); } });
+</script></body></html>

@@ -1,0 +1,11 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Savings</title><style>#onetrust-banner-sdk{position:fixed;inset:0;background:rgba(0,0,0,.5)}</style></head><body><main><h1>Savings</h1>
+<details><summary>How interest is paid</summary><p>Interest is paid quarterly.</p></details></main>
+<div id="onetrust-banner-sdk" role="dialog" aria-label="Cookie consent">
+<p>We use cookies.</p><button id="accept">Accept all</button>
+<button id="onetrust-reject-all-handler">Reject all</button></div>
+<script>
+function close() { document.getElementById('onetrust-banner-sdk').style.display = 'none'; }
+document.getElementById('onetrust-reject-all-handler').addEventListener('click', function () {
+  fetch('/consent-log', { method: 'POST', body: 'reject' }).catch(function () {}); close(); });
+document.getElementById('accept').addEventListener('click', close);
+</script></body></html>

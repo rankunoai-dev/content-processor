@@ -84,3 +84,14 @@ Only Lane L0 edits `contracts.py`, `enums.py`, `workers/ports.py`, `ledger/schem
 - **Not requested:** LibreOffice. `.doc`, `.xls` and `.ppt` are reported as `UNSUPPORTED` with reason `legacy_office_requires_libreoffice:<ext>`; LibreOffice is deferred until the modern formats are verified and the operator approves a system install.
 - **Why:** C-9 (Office formats, cases 63–68, 161–168)
 - **Status:** LANDED (merged to main with lane/L3-docs, 2026-10-19; `office` extra in pyproject.toml)
+
+
+### CR-008: Interaction policy for the B-4 to B-12 explorer
+- **Lane:** L2
+- **File(s):** contracts.py (`AllowedAction`, `InteractionPolicy`, `_default_actions`)
+- **Change:**
+  1. `AllowedAction` gains `"advance_carousel"`. Carousels are clicked under `select_tab` today; L2 switches `_ACTION_FOR_KIND["carousel"]` once it lands.
+  2. `InteractionPolicy.consent_choice: Literal["reject_non_essential", "leave_in_place"] = "reject_non_essential"`. Today the explorer answers a consent overlay with "reject non-essential" whenever `open_informational_dialog` is allowed, and leaves it in place otherwise; it never accepts.
+  3. Decision needed from the operator: whether `_default_actions()` should add `hover_info`, `open_informational_dialog` and `paginate_get` (all read-only, under the GET-only, no-navigation guard). Under today's default (`scroll`, `expand_disclosure`, `select_tab`), a page with a tooltip, an informational dialog or an in-page "Load more" ends PARTIAL with `policy_disallows:<action>`. That is honest, but it is a policy choice, not a capability limit. `keyboard_traverse` costs up to `4 x max_actions_per_url` key presses per page and should stay opt-in.
+- **Why:** B-4, B-6 and the default-policy verdicts. The explorer implements every `AllowedAction` now; these change only how a scope declares them.
+- **Status:** PROPOSED (1 and 2 are mechanical; 3 needs the operator's decision)

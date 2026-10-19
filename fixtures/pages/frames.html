@@ -1,0 +1,8 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Documents</title></head><body><main><h1>Documents</h1>
+<iframe src="/pages/frame_child" title="Policy summary" width="600" height="120"></iframe>
+<iframe srcdoc="<p>Srcdoc notice: rates valid until December.</p>" width="600" height="80"></iframe>
+<iframe id="xo" title="Partner widget" width="600" height="120"></iframe>
+<iframe src="/pages/frame_child" width="1" height="1" style="display:none"></iframe></main>
+<script>
+document.getElementById('xo').src = location.protocol + '//localhost:' + location.port + '/pages/frame_partner';
+</script></body></html>

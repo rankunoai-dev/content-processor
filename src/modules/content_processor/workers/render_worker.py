@@ -3,7 +3,8 @@
 Per RENDER task: governor gate, render, evidence (DOM, visible text, screenshot),
 block classification on the rendered document, rendered extraction with the
 computed-visibility annotations, reconciliation against the source blocks,
-state exploration (disclosures, accordions, tabs) on the live page, per-state
+state exploration (B-2 to B-12: disclosures, tabs, scroll, carousels, hover,
+dialogs, pagination, frames, shadow DOM) on the live page, per-state
 extraction and verification, unvisited-control gaps, block persistence,
 summary, events. Never raises out of `process()`.
 """
@@ -337,9 +338,10 @@ class RenderWorker:
             dom_ref = self._evidence.put(st.dom_html, "text/html")
             self._evidence.put(st.inner_text.encode("utf-8"), "text/plain")
             revealed_text += "\n" + st.inner_text
+            in_frame = st.frame_path != "main"
             extracted = extract_html_source(
                 st.dom_html,
-                base_url=result.final_url,
+                base_url=st.frame_path if st.frame_path.startswith("http") else result.final_url,
                 evidence_id=f"evidence:{dom_ref.sha256}",
                 resource_id=resource_id,
                 state_id=f"{self._run_id}|state:{st.index}",
@@ -365,7 +367,11 @@ class RenderWorker:
                             "block_id": block_id,
                             "region_id": block_id,
                             "provenance": b.provenance.model_copy(
-                                update={"selector": f"state:{st.kind}:{st.label[:60]}"}
+                                update={
+                                    "selector": f"state:{st.kind}:{st.label[:60]}",
+                                    # R3 matches frames by this path (B-11)
+                                    "frame_path": st.frame_path if in_frame else "main",
+                                }
                             ),
                         }
                     )
@@ -405,6 +411,8 @@ class RenderWorker:
                     "action_budget": exploration.action_budget,
                     "stop_reason": exploration.stop_reason,
                     "scroll_surfaces": exploration.scroll_surfaces,
+                    "composition": exploration.composition,
+                    "followup_urls": exploration.followup_urls,
                     "unsafe_requests": exploration.unsafe_requests,
                     "unexplored_action_kinds": exploration.unexplored_action_kinds,
                     "elapsed_s": exploration.elapsed_s,

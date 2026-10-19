@@ -1,0 +1,13 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Funds</title></head><body><main><h1>Funds</h1>
+<div id="vp" role="grid" aria-rowcount="300" aria-label="fund grid"
+ style="height:300px;overflow-y:auto;position:relative"><div id="in" style="height:9000px;position:relative"></div></div>
+</main>
+<script>
+var vp = document.getElementById('vp'), inner = document.getElementById('in');
+function render() { var first = Math.floor(vp.scrollTop / 30); inner.innerHTML = '';
+  for (var i = first; i < Math.min(first + 12, 300); i++) { var d = document.createElement('div');
+    d.setAttribute('role', 'row'); d.setAttribute('aria-rowindex', String(i + 1));
+    d.style.position = 'absolute'; d.style.top = (i * 30) + 'px'; d.textContent = 'Fund row ' + (i + 1);
+    inner.appendChild(d); } }
+vp.addEventListener('scroll', render); render();
+</script></body></html>
