@@ -380,3 +380,12 @@ git worktree add ../content-processor-lane4 -b lane/L4-verify
 - **Limits, stated:** the durable reaper and `cancel_open_tasks` SQL are tested with a mocked cursor only (K1: still no reachable Postgres). Budgets apply per invocation of the engine: a resumed durable `work` restarts runtime, request and evidence counts (bytes are seeded from the ledger); cumulative run-level counters would need columns on `runs`. The in-memory ledger has no reaper (in-process leases cannot outlive their worker), so K8 is durable-only. A task in flight can overshoot a byte budget by its own size.
 - **Port change (additive):** `LedgerPort.cancel_open_tasks(run_id, kinds, reason) -> list[Task]`, implemented in `MemoryLedger` and `TaskLedger`; `RobotsCache.crawl_delay_s: float | None = None`.
 - **Blocked on:** K1 for the live Postgres proof. Spend: $0.
+
+## [2026-10-19] Lane L0 (Integrator), session 7: CR-009 item 3 and two operator decisions
+
+- **Branch:** `main`
+- **What landed:**
+  - CR-009 item 3 (operator decision): `_default_actions()` now allows `scroll`, `expand_disclosure`, `select_tab`, `hover_info`, `open_informational_dialog` and `paginate_get`; `keyboard_traverse` stays opt-in. All run under the GET-only, no-navigation guard. Side effect, stated: with `open_informational_dialog` allowed, a consent overlay is answered "reject non-essential" by default (never accepted). Two explorer tests that used the default policy to mean "not allowed" now declare `NO_DIALOGS_OR_PAGING` explicitly; a contract test pins the new default.
+  - Decision recorded, no code change: bot-sensor and consent beacons stay blocked (every non-GET request, telemetry included). A telemetry exception may only be considered as part of a host's T5 approval under the paid-tier procedure; nothing allows it today. Both decisions are in `ARCHITECTURE.md` §19.
+- **Gate:** ruff format and check clean, mypy strict clean (89 files), all tests pass (684 + 1 new, 11 skipped), coverage 92.91%.
+- **Still open:** CR-009 items 1 (`advance_carousel`) and 2 (`consent_choice`) for L2 to land with the explorer wiring; K1.

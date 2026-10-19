@@ -5,7 +5,12 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from pydantic import ValidationError
 
-from src.modules.content_processor.contracts import Authorization, Budgets, RunScope
+from src.modules.content_processor.contracts import (
+    Authorization,
+    Budgets,
+    InteractionPolicy,
+    RunScope,
+)
 from src.modules.content_processor.enums import AccessTier, AuthorizationKind, RobotsPolicy
 
 
@@ -109,3 +114,17 @@ def test_scope_hash_is_stable_and_ignores_recrawl_pointer():
 def test_unknown_fields_are_rejected():
     with pytest.raises(ValidationError):
         _scope(unexpected="x")
+
+
+def test_default_interactions_are_every_read_only_action_but_keyboard_traversal():
+    """CR-009, operator decision 2026-10-19."""
+    allowed = InteractionPolicy().allowed
+    assert allowed == [
+        "scroll",
+        "expand_disclosure",
+        "select_tab",
+        "hover_info",
+        "open_informational_dialog",
+        "paginate_get",
+    ]
+    assert "keyboard_traverse" not in allowed

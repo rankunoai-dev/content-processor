@@ -606,6 +606,8 @@ Scope mode; authorized vs third-party hosts; UGC; soft paywalls; retention; depl
 | T6 | off; dual sign-off procedure in playbook §2 | `access_tier_ceiling` validator rejects `T6_POLICY_GATED` unless `authorization.reference` carries a `t6:` approval token with two approvers and an expiry. |
 | Robots policy | `respect` for `public_third_party`; `informational` for `owner_authorized` | Default derived from `authorization.kind`; `respect_with_exceptions` requires `authorization.robots_exceptions` paths. |
 | OCR languages | multilingual routing from Stage 1, local engines only | §6.1; unknown script → `UNSUPPORTED(ocr_lang)`. |
+| Default interactions (2026-10-19, CR-009) | `scroll`, `expand_disclosure`, `select_tab`, `hover_info`, `open_informational_dialog`, `paginate_get` on by default; `keyboard_traverse` opt-in | `_default_actions()` in `contracts.py`. All run under the GET-only, no-navigation guard; a POSTing control is refused (`unsafe_side_effect`). With `open_informational_dialog` allowed, a consent overlay is answered "reject non-essential"; it is never accepted. |
+| Bot-sensor beacons (2026-10-19) | keep blocking every non-GET request, telemetry included, in every tier up to T3 | Explorer guard and `TELEMETRY_HOSTS` (`explore/explorer.py`). An exception for a host's telemetry may be considered only for a host approved for T5 under the paid-tier procedure above, as part of that approval; nothing allows it today. |
 
 ---
 

@@ -116,7 +116,19 @@ class Authorization(StrictModel):
 
 
 def _default_actions() -> list[AllowedAction]:
-    return ["scroll", "expand_disclosure", "select_tab"]
+    """Every read-only action except keyboard traversal (CR-009, operator decision 2026-10-19).
+
+    All of them run under the GET-only, no-navigation guard. `keyboard_traverse`
+    costs up to 4 x `max_actions_per_url` key presses per page and stays opt-in.
+    """
+    return [
+        "scroll",
+        "expand_disclosure",
+        "select_tab",
+        "hover_info",
+        "open_informational_dialog",
+        "paginate_get",
+    ]
 
 
 class InteractionPolicy(StrictModel):

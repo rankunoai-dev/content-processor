@@ -18,6 +18,8 @@ from src.modules.content_processor.explore import ExplorationResult, StateExplor
 pytestmark = pytest.mark.browser
 
 CONTROLS_ONLY = ["expand_disclosure", "select_tab"]
+# A scope that forbids dialogs and paging (the defaults allow both since CR-009).
+NO_DIALOGS_OR_PAGING = ["scroll", "expand_disclosure", "select_tab"]
 
 
 def _free_port() -> int:
@@ -347,7 +349,11 @@ async def test_consent_with_only_accept_is_left_in_place(renderer, server_url):
 
 
 async def test_consent_not_allowed_is_left_in_place(renderer, server_url):
-    _, ex = await _explore(renderer, f"{server_url}/pages/consent_banner", InteractionPolicy())
+    _, ex = await _explore(
+        renderer,
+        f"{server_url}/pages/consent_banner",
+        InteractionPolicy(allowed=NO_DIALOGS_OR_PAGING),
+    )
     consent = _one(ex, "consent")
     assert consent.reason == "consent_overlay_left_in_place:policy"
     assert ex.unsafe_requests == []
@@ -373,7 +379,9 @@ async def test_load_more_that_posts_is_blocked(renderer, server_url):
 
 
 async def test_load_more_not_allowed_is_a_gap(renderer, server_url):
-    _, ex = await _explore(renderer, f"{server_url}/pages/load_more", InteractionPolicy())
+    _, ex = await _explore(
+        renderer, f"{server_url}/pages/load_more", InteractionPolicy(allowed=NO_DIALOGS_OR_PAGING)
+    )
     assert _one(ex, "load_more").reason == "policy_disallows:paginate_get"
 
 
