@@ -839,9 +839,11 @@
       "case": 90,
       "title": "critical tokens (as cited in code)",
       "source": "unified",
-      "coverage": "open",
-      "evidence": [],
-      "note": "unified numbering (code: critical tokens, R9) - on lane/L4-rules, not merged"
+      "coverage": "test",
+      "evidence": [
+        "tests/modules/content_processor/test_critical_tokens.py"
+      ],
+      "note": "unified numbering (code: critical tokens, R9): rule_r9_critical_tokens; superscript footnotes no longer merge into amounts ($120<sup>1</sup> -> $120¹)"
     },
     {
       "case": 91,
