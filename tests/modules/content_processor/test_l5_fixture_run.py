@@ -57,3 +57,17 @@ async def test_overlap_quotes_are_verbatim_block_text(bundle):
         for quote in pair["shared_spans"].split(" || "):
             for line in quote.removesuffix("…").split("\n"):
                 assert any(line in t for t in texts[pair["url_a"]]), line
+
+
+async def test_contradiction_quotes_are_verbatim_block_text(bundle):
+    """I4 release gate on the real fixture suite: zero fabricated proofs."""
+    records, out, manifest = bundle
+    texts = {r.requested_url: [b.normalized_text for b in r.blocks] for r in records}
+    rows = [
+        json.loads(x) for x in (out / "r4_contradictions.jsonl").read_text("utf-8").splitlines()
+    ]
+    assert len(rows) == manifest["contradictions"]["reported_pairs"]
+    assert manifest["contradictions"]["judge_status"] == "disabled(no_local_provider)"
+    for row in rows:
+        for side in ("a", "b"):
+            assert any(row[f"quote_{side}"] in t for t in texts[row[f"url_{side}"]]), row

@@ -7,6 +7,7 @@ Files (all rows carry `run_id`, evidence ids and block ids):
 | `r1_url_content.{csv,xlsx,jsonl}` | Report R1, one row per requested URL |
 | `review_queue.{csv,xlsx,jsonl}` | URLs needing a decision, blank operator columns |
 | `r2_overlap.xlsx`, `r2a_overlap_groups.csv`, `r2b_overlap_pairs.csv` | Reports R2a and R2b |
+| `r4_contradictions.{csv,xlsx,jsonl}` | Report R4, contradiction candidates, reviewer column |
 | `explorer.html` | I1 URL Content Explorer, offline, links to the files above |
 | `manifest.json` | Counts, parameters, files and XLSX character replacements |
 
@@ -17,11 +18,17 @@ part columns and flag them (see `export/tabular.py`).
 from __future__ import annotations
 
 import json
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from src.modules.content_processor.analysis.contradictions import (
+    ContradictionConfig,
+    find_contradictions,
+    r4_table,
+)
+from src.modules.content_processor.analysis.nli import NliJudge
 from src.modules.content_processor.analysis.overlap import (
     OverlapConfig,
     find_overlaps,
@@ -40,7 +47,7 @@ from src.modules.content_processor.ui.explorer import write_explorer
 
 __all__ = ["BUNDLE_FILES", "REPORT_VERSION", "write_run_reports"]
 
-REPORT_VERSION = "l5-v1"
+REPORT_VERSION = "l5-v2"
 BUNDLE_FILES: tuple[str, ...] = (
     "explorer.html",
     "manifest.json",
@@ -50,6 +57,9 @@ BUNDLE_FILES: tuple[str, ...] = (
     "r2_overlap.xlsx",
     "r2a_overlap_groups.csv",
     "r2b_overlap_pairs.csv",
+    "r4_contradictions.csv",
+    "r4_contradictions.jsonl",
+    "r4_contradictions.xlsx",
     "review_queue.csv",
     "review_queue.jsonl",
     "review_queue.xlsx",
@@ -64,8 +74,11 @@ def write_run_reports(
     run_id: str | None = None,
     overlap: OverlapConfig | None = None,
     include_boilerplate: bool = True,
+    contradictions: ContradictionConfig | None = None,
+    judge: NliJudge | None = None,
+    decisions: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
-    """Write R1, the review queue, R2a/R2b and the explorer; return the manifest.
+    """Write R1, the review queue, R2a/R2b, R4 and the explorer; return the manifest.
 
     Args:
         records: One `UrlRecord` per requested URL (`url_records_for_run`).
@@ -75,6 +88,10 @@ def write_run_reports(
         include_boilerplate: R1's `whole_content` includes nav/chrome/footer roles
             (the spec default). The overlap analysis excludes them unless its
             own config says otherwise.
+        contradictions: Contradiction settings; defaults follow the Stage 4 spec.
+        judge: NLI judge for R4; None runs deterministic checks only and the
+            manifest records `judge_status: disabled(...)`.
+        decisions: Reviewer decisions by `pair_id` from an earlier R4, carried forward.
     """
     run = run_id or (records[0].run_id if records else "unknown-run")
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -98,11 +115,18 @@ def write_run_reports(
     write_csv(out_dir / "r2b_overlap_pairs.csv", pairs)
     replaced["r2_overlap.xlsx"] = write_xlsx(out_dir / "r2_overlap.xlsx", [groups, pairs])
 
+    found = find_contradictions(records, contradictions, judge=judge)
+    r4 = r4_table(found, decisions)
+    write_jsonl(out_dir / "r4_contradictions.jsonl", r4.rows)
+    write_csv(out_dir / "r4_contradictions.csv", r4)
+    replaced["r4_contradictions.xlsx"] = write_xlsx(out_dir / "r4_contradictions.xlsx", [r4])
+
     downloads = {
         "R1 (XLSX)": "r1_url_content.xlsx",
         "R1 (CSV)": "r1_url_content.csv",
         "Review queue (XLSX)": "review_queue.xlsx",
         "Overlap R2 (XLSX)": "r2_overlap.xlsx",
+        "Contradictions R4 (XLSX)": "r4_contradictions.xlsx",
     }
     write_explorer(out_dir / "explorer.html", records, run_id=run, downloads=downloads)
 
@@ -119,6 +143,7 @@ def write_run_reports(
         "r1_split_rows": sum(1 for r in r1_sheet.rows if r.get("whole_content_split")),
         "review_rows": len(review),
         "overlap": result.summary(),
+        "contradictions": found.summary(),
         "xlsx_characters_replaced": replaced,
         "files": list(BUNDLE_FILES),
     }

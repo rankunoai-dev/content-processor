@@ -4,6 +4,12 @@
 
 `--records` is a JSONL file with one `UrlRecord` per line (as written by the
 dry run once L6 wires `url_records_for_run` into it).
+
+R4 runs deterministic contradiction checks by default. `--nli-endpoint` (a
+local OpenAI-compatible URL such as `http://localhost:11434/v1`) with
+`--nli-model` adds the NLI judge; non-local endpoints are refused while the
+cost ceiling is $0. `--decisions` carries reviewer decisions forward from an
+earlier R4 CSV or JSONL.
 """
 
 from __future__ import annotations
@@ -14,6 +20,11 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from src.modules.content_processor.analysis.contradictions import (
+    ContradictionConfig,
+    load_reviewer_decisions,
+)
+from src.modules.content_processor.analysis.nli import GatewayJudge, JudgeRefusedError
 from src.modules.content_processor.analysis.overlap import OverlapConfig
 from src.modules.content_processor.contracts import UrlRecord
 from src.modules.content_processor.export.bundle import write_run_reports
@@ -46,16 +57,37 @@ def cmd_report(args: argparse.Namespace) -> int:
         strict=args.strict,
         include_boilerplate=args.overlap_boilerplate,
     )
-    manifest: dict[str, Any] = write_run_reports(
-        records, Path(args.out), run_id=args.run, overlap=config
-    )
+    judge: GatewayJudge | None = None
+    if args.nli_endpoint:
+        if not args.nli_model:
+            sys.stderr.write("--nli-endpoint needs --nli-model\n")
+            return 2
+        try:
+            judge = GatewayJudge(args.nli_endpoint, args.nli_model)
+        except JudgeRefusedError as exc:
+            sys.stderr.write(f"{exc}\n")
+            return 2
+    decisions = load_reviewer_decisions(Path(args.decisions)) if args.decisions else None
+    try:
+        manifest: dict[str, Any] = write_run_reports(
+            records,
+            Path(args.out),
+            run_id=args.run,
+            overlap=config,
+            contradictions=ContradictionConfig(threshold=args.contradiction_threshold / 100.0),
+            judge=judge,
+            decisions=decisions,
+        )
+    finally:
+        if judge is not None:
+            judge.close()
     sys.stdout.write(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n")
     return 0
 
 
 def register(subparsers: Any) -> None:
     """Add the `report` subcommand to the CLI's subparsers."""
-    parser = subparsers.add_parser("report", help="write R1, review queue, R2 and the explorer")
+    parser = subparsers.add_parser("report", help="write R1, review queue, R2, R4 and the explorer")
     parser.add_argument("--records", required=True, help="UrlRecord JSONL file")
     parser.add_argument("--out", required=True, help="output directory")
     parser.add_argument("--run", default=None, help="run id (defaults to the records' run id)")
@@ -68,4 +100,13 @@ def register(subparsers: Any) -> None:
         action="store_true",
         help="include nav/chrome/footer text in the overlap analysis",
     )
+    parser.add_argument(
+        "--contradiction-threshold",
+        type=float,
+        default=70.0,
+        help="judge contradiction %% at which R4 reports a pair (default 70)",
+    )
+    parser.add_argument("--nli-endpoint", default=None, help="local OpenAI-compatible URL")
+    parser.add_argument("--nli-model", default=None, help="model name at the endpoint")
+    parser.add_argument("--decisions", default=None, help="earlier R4 CSV/JSONL to carry forward")
     parser.set_defaults(func=cmd_report)
