@@ -76,3 +76,11 @@ Only Lane L0 edits `contracts.py`, `enums.py`, `workers/ports.py`, `ledger/schem
 - **Change:** optional `run_id: str | None = None` on `LedgerPort.lease(worker, kinds, run_id=None)` and `pending_count(kinds, run_id=None)`; when set, `SQL_LEASE_PLAIN`, `SQL_LEASE_WITH_SLOT` and `SQL_PENDING_COUNT` add `AND t.run_id = %(run_id)s`. Workers pass their bound `run_id`. Default `None` keeps today's behaviour.
 - **Why:** P-1. A worker is bound to one run's scope, but Postgres leases match only the task kind, so with two open runs a worker can lease and process the other run's task under the wrong scope. Until this lands the durable `run`/`work` commands refuse to start while another run has open tasks (`foreign_open_tasks`, exit code 3).
 - **Status:** LANDED `0dc8878` (merged to `main` 2026-10-19). Workers, the scheduler's drain checks and `LazyRenderStage` pass their run id; the CLI's `other_run_active` guard is replaced by an informational `concurrent_open_tasks` count.
+
+### CR-008: Office document dependencies for C-9
+- **Lane:** L3 (anticipated by WORK_BREAKDOWN.md 3.4)
+- **File(s):** pyproject.toml
+- **Change:** new optional extra `office = ["docling-slim[format-office]>=2.140,<3"]`, installed by CI alongside `dev`. Use `docling-slim`, not `docling`: the plain `docling` package always pulls the `standard` extra, which brings torch and model weights. `docling-slim[format-office]` installs the DOCX, PPTX, XLSX, HTML, Markdown and CSV backends (about 242 MB, no torch, measured 2026-10-19 in a scratch venv). No new mypy override is expected; check with `mypy --strict` after install.
+- **External binary, not a pip dependency:** `.doc`, `.ppt` and `.xls` need LibreOffice on PATH. Without it Docling reports `LibreOffice is required` and the adapter must emit `UNSUPPORTED_FORMAT` for legacy files. LibreOffice is a system install by the operator; it is not added to `pyproject.toml`.
+- **Why:** C-9 (Office formats, cases 63–68, 161–168)
+- **Status:** OPEN
