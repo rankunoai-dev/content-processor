@@ -27,12 +27,13 @@ from src.modules.content_processor.explore.model import (
     ExplorationResult,
     ExploredState,
 )
+from src.modules.content_processor.explore.scroll import explore_scroll_surfaces
 
 __all__ = ["IMPLEMENTED_ACTIONS", "StateExplorer"]
 
 _logger = get_logger("content_processor.explore")
 
-IMPLEMENTED_ACTIONS: frozenset[str] = frozenset({"expand_disclosure", "select_tab"})
+IMPLEMENTED_ACTIONS: frozenset[str] = frozenset({"expand_disclosure", "select_tab", "scroll"})
 _ACTION_FOR_KIND: dict[str, str] = {
     "disclosure": "expand_disclosure",
     "accordion": "expand_disclosure",
@@ -170,6 +171,42 @@ class StateExplorer:
         order: list[str] = []
         last_text = str(await page.evaluate("document.body ? document.body.innerText : ''"))
         seen_states: set[str] = {_digest(last_text)}
+
+        if "scroll" in self._allowed:
+            # Scroll first: lazy sections can bring new disclosures and tabs with them.
+            scrolled = await explore_scroll_surfaces(
+                page,
+                max_passes=self._policy.max_scroll_passes,
+                deadline=started + self._max_s,
+                settle=self._settle,
+            )
+            for rec in scrolled.controls:
+                records[rec.control_id] = rec
+                order.append(rec.control_id)
+            result.scroll_surfaces = [s.model_dump() for s in scrolled.surfaces]
+            if scrolled.stop_reason:
+                result.stop_reason = scrolled.stop_reason
+            text, dom = await self._capture(page)
+            key = _digest(text)
+            if key not in seen_states:
+                seen_states.add(key)
+                window = next(
+                    (r for r in scrolled.controls if r.control_id == "scroll:window"), None
+                )
+                state = ExploredState(
+                    index=len(result.states) + 1,
+                    control_id=window.control_id if window else "scroll:window",
+                    kind="scroll_surface",
+                    label="scroll",
+                    inner_text=text,
+                    dom_html=dom,
+                    text_delta_chars=len(text) - len(last_text),
+                )
+                result.states.append(state)
+                for rec in scrolled.controls:
+                    if rec.status == "visited":
+                        rec.state_index = state.index
+                last_text = text
 
         while True:
             await self._scan(page, records, order)

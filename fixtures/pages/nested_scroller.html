@@ -1,0 +1,12 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Terms</title></head>
+<body><main><h1>Terms</h1>
+<div id="terms" aria-label="terms box" style="height:200px;overflow-y:auto">
+<p style="height:600px">Clause 1. Standard terms apply.</p><div id="end">end</div></div></main>
+<script>
+var box = document.getElementById('terms'); var done = false;
+box.addEventListener('scroll', function () {
+  if (done || box.scrollTop + box.clientHeight < box.scrollHeight - 5) return; done = true;
+  setTimeout(function () { var p = document.createElement('p');
+    p.textContent = 'Clause 9. Cancellation within 14 days is free.'; box.appendChild(p); }, 200);
+});
+</script></body></html>

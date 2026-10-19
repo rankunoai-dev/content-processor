@@ -161,10 +161,71 @@ async def test_side_effect_click_is_blocked_and_reported(
     assert not ex.controls_closed
 
 
-async def test_default_policy_reports_unimplemented_scroll(
+async def test_default_policy_scrolls_short_page_and_closes_discovery(
     renderer: BrowserRenderer, server_url: str
 ):
     _, ex = await _explore(renderer, f"{server_url}/pages/static_ok", InteractionPolicy())
-    assert ex.controls == [] and ex.controls_closed
-    assert ex.unexplored_action_kinds == ["scroll"]
+    assert ex.unexplored_action_kinds == []
+    assert [(c.kind, c.status, c.reason) for c in ex.controls] == [
+        ("scroll_surface", "visited", "reached_end")
+    ]
+    assert ex.discovery_closed
+
+
+async def test_lazy_section_is_loaded_by_scrolling(renderer: BrowserRenderer, server_url: str):
+    base, ex = await _explore(renderer, f"{server_url}/pages/lazy_sections", InteractionPolicy())
+    assert "fee is waived for students" not in base.inner_text
+    window = next(c for c in ex.controls if c.control_id == "scroll:window")
+    assert window.status == "visited" and window.reason == "reached_end:content_grew"
+    assert ex.discovery_closed
+    assert any("fee is waived for students" in s.inner_text for s in ex.states)
+    # captured from the top: nothing above the fold is mislabelled hidden
+    scroll_state = next(s for s in ex.states if s.kind == "scroll_surface")
+    assert b"Intro paragraph visible on load." in scroll_state.dom_html
+    assert ex.scroll_surfaces[0]["grew"] is True
+
+
+async def test_infinite_feed_stops_at_budget_and_stays_open(
+    renderer: BrowserRenderer, server_url: str
+):
+    _, ex = await _explore(
+        renderer,
+        f"{server_url}/pages/infinite_scroll",
+        InteractionPolicy(max_scroll_passes=4),
+    )
+    window = next(c for c in ex.controls if c.control_id == "scroll:window")
+    assert (window.status, window.reason) == ("unvisited", "scroll_budget_exhausted")
     assert not ex.discovery_closed
+    assert ex.scroll_surfaces[0]["passes"] == 4
+
+
+async def test_nested_scroller_is_its_own_surface(renderer: BrowserRenderer, server_url: str):
+    base, ex = await _explore(renderer, f"{server_url}/pages/nested_scroller", InteractionPolicy())
+    nested = [c for c in ex.controls if c.control_id.startswith("scroll:nested:")]
+    assert len(nested) == 1 and nested[0].label == "terms box"
+    assert nested[0].status == "visited" and nested[0].reason.startswith("reached_end")
+    assert "Cancellation within 14 days" not in base.inner_text
+    assert any("Cancellation within 14 days is free." in s.inner_text for s in ex.states)
+    assert ex.discovery_closed
+
+
+async def test_virtualized_list_is_not_claimed_complete(renderer: BrowserRenderer, server_url: str):
+    _, ex = await _explore(
+        renderer,
+        f"{server_url}/pages/virtualized_list",
+        InteractionPolicy(max_scroll_passes=40),
+    )
+    nested = next(c for c in ex.controls if c.control_id.startswith("scroll:nested:"))
+    assert nested.status == "unvisited"
+    assert (nested.reason or "").startswith("virtualized_content_recycled:")
+    assert not ex.discovery_closed
+
+
+async def test_scroll_not_allowed_means_no_scrolling(renderer: BrowserRenderer, server_url: str):
+    _, ex = await _explore(
+        renderer,
+        f"{server_url}/pages/lazy_sections",
+        InteractionPolicy(allowed=["expand_disclosure", "select_tab"]),
+    )
+    assert not any(c.kind == "scroll_surface" for c in ex.controls)
+    assert all("fee is waived" not in s.inner_text for s in ex.states)

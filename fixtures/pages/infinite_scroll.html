@@ -1,0 +1,9 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Feed</title></head>
+<body><main><h1>Feed</h1><div id="feed"></div><div id="more">More</div></main>
+<script>
+var n = 0;
+function add() { for (var i = 0; i < 5; i++) { n++; var p = document.createElement('p');
+  p.style.height = '300px'; p.textContent = 'Feed item ' + n; document.getElementById('feed').appendChild(p); } }
+add();
+new IntersectionObserver(function (e) { if (e[0].isIntersecting) add(); }).observe(document.getElementById('more'));
+</script></body></html>

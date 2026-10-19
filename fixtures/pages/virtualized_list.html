@@ -1,0 +1,12 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Rates</title></head>
+<body><main><h1>Rates</h1>
+<div id="viewport" aria-label="rate list" style="height:300px;overflow-y:auto;position:relative">
+<div id="inner" style="height:6000px;position:relative"></div></div></main>
+<script>
+var vp = document.getElementById('viewport'), inner = document.getElementById('inner');
+function render() { var first = Math.floor(vp.scrollTop / 30); inner.innerHTML = '';
+  for (var i = first; i < Math.min(first + 12, 200); i++) { var d = document.createElement('div');
+    d.style.position = 'absolute'; d.style.top = (i * 30) + 'px'; d.textContent = 'Rate row ' + i;
+    inner.appendChild(d); } }
+vp.addEventListener('scroll', render); render();
+</script></body></html>

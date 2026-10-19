@@ -176,6 +176,17 @@ async def test_closed_exploration_verifies_and_keeps_only_new_text(tmp_path: Pat
     assert all(b.block_id.startswith("res-plans:state1:") for b in state_blocks)
     facts = ledger.summaries[res.resource_id]["explore"]
     assert facts["states"] == 1 and facts["new_blocks_from_states"] == 2
+    # the base <details> answer was revealed and verified by the state: it is verified
+    # too, and points at the state block so exports do not repeat it
+    collapsed = [
+        b
+        for b in ledger.get_blocks(res.resource_id)
+        if b.layer.value == "collapsed_published" and b.state_id.endswith("|rendered")
+    ]
+    assert [(b.normalized_text, b.status) for b in collapsed] == [
+        ("Refunds within 14 days.", EntityStatus.VERIFIED_EXTRACTED)
+    ]
+    assert collapsed[0].dedupe_of is not None and ":state1:" in collapsed[0].dedupe_of
     assert ledger.get_gaps(res.resource_id) == []
 
 

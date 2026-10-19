@@ -324,3 +324,15 @@ git worktree add ../content-processor-lane4 -b lane/L4-verify
   - **Gateway / A-7:** a paid (OpenRouter) judge needs the cost ledger first; until then `GatewayJudge` stays local-only.
   - **L0 (Postgres views, G-3 durable half):** R4 export view and a reviewer-decisions table keyed by `pair_id`.
 - **Blocked on:** nothing. Spend: $0.
+
+## [2026-10-19] Lane L2 (Browser state explorer), session 2: B-8 scroll accumulation and lazy load (+ B-10 nested surfaces)
+
+- **Branch / worktree:** `lane/L2-explorer` at `../content-processor-lane2`, rebased on `f56a95e`.
+- **What landed:**
+  - `explore/scroll.py`: every scroll surface (the page plus up to 10 nested overflow containers) is a `scroll_surface` control with a terminal outcome. Overlapping 85% steps with a DOM settle after each; at the bottom a grace wait, and if content grew scrolling continues (lazy load). Outcomes: `visited:reached_end[:content_grew]`, `unvisited:scroll_budget_exhausted` (infinite feed, `max_scroll_passes`), `unvisited:time_budget_exhausted`, `unvisited:virtualized_content_recycled:N` (lines seen while scrolling that are gone afterwards: B-9 needed). Page and surfaces reset to the top before capture so viewport-relative visibility annotation does not mark above-the-fold content hidden.
+  - `scroll` is now an implemented action: scroll runs first (lazy sections can bring controls), then disclosures and tabs. `ExplorationResult.scroll_surfaces` and the render worker's `explore` summary report passes, heights, growth and recycled lines per surface.
+  - Render worker: a collapsed `<details>` block revealed and verified by an explored state is now verified too and points at the state block (`dedupe_of`), so the FAQ case reaches VERIFIED and exports do not repeat the text. This was masked while every page was PARTIAL for missing scroll.
+  - Fixtures: `lazy_sections`, `infinite_scroll`, `nested_scroller`, `virtualized_list`.
+- **Gate:** ruff, mypy --strict (81 files), 558 passed, 11 skipped, coverage 93.14%; 12 live explorer tests.
+- **End to end (30 fixture URLs, default policy, real Chromium):** 15 VERIFIED_WITHIN_SCOPE (0 before B-8), 6 PARTIAL each with a named gap (infinite feed, virtualized list, pincode modal, gated whitepaper, soft 404, truncated), 5 BLOCKED, 2 EXCLUDED, 1 NEEDS_REVIEW (unavailable product), 1 FAILED (rate-limited).
+- **Next for L2:** B-9 virtualization (accumulate recycled rows into blocks), B-11 frames, B-12 shadow DOM.

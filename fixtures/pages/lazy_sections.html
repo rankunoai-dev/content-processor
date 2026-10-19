@@ -1,0 +1,15 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Lazy</title></head>
+<body><main><h1>Plans</h1><p>Intro paragraph visible on load.</p><div style="height:2200px">Spacer above the fold content.</div>
+<div id="sentinel">Loading more</div></main>
+<script>
+new IntersectionObserver(function (entries, obs) {
+  if (!entries[0].isIntersecting) return;
+  obs.disconnect();
+  setTimeout(function () {
+    var s = document.createElement('section');
+    s.innerHTML = '<h2>Exceptions</h2><p>Lazy section: the fee is waived for students.</p>';
+    document.querySelector('main').appendChild(s);
+    document.getElementById('sentinel').textContent = '';
+  }, 300);
+}).observe(document.getElementById('sentinel'));
+</script></body></html>

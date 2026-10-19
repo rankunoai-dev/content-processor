@@ -370,6 +370,22 @@ class RenderWorker:
                         }
                     )
                 )
+        # A collapsed-but-published block whose text an explored state showed and
+        # verified is verified too; it is linked to that state block as a duplicate
+        # so whole-content exports do not print the text twice.
+        verified_in_state = {
+            _key(b.normalized_text): b.block_id
+            for b in kept
+            if b.status is EntityStatus.VERIFIED_EXTRACTED
+        }
+        for i, b in enumerate(rendered_blocks):
+            if b.layer is not ContentLayer.COLLAPSED_PUBLISHED:
+                continue
+            state_block = verified_in_state.get(_key(b.normalized_text))
+            if state_block is not None:
+                rendered_blocks[i] = b.model_copy(
+                    update={"status": EntityStatus.VERIFIED_EXTRACTED, "dedupe_of": state_block}
+                )
         haystack = _key(revealed_text)
         collapsed = [b for b in rendered_blocks if b.layer is ContentLayer.COLLAPSED_PUBLISHED]
         revealed = sum(1 for b in collapsed if _key(b.normalized_text) in haystack)
@@ -388,6 +404,7 @@ class RenderWorker:
                     "actions_used": exploration.actions_used,
                     "action_budget": exploration.action_budget,
                     "stop_reason": exploration.stop_reason,
+                    "scroll_surfaces": exploration.scroll_surfaces,
                     "unsafe_requests": exploration.unsafe_requests,
                     "unexplored_action_kinds": exploration.unexplored_action_kinds,
                     "elapsed_s": exploration.elapsed_s,

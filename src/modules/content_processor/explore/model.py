@@ -7,7 +7,7 @@ design (site navigation menus), or unvisited with a reason.
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import Field
 
@@ -15,7 +15,7 @@ from src.core.schemas import StrictModel
 
 __all__ = ["ControlKind", "ControlRecord", "ControlStatus", "ExplorationResult", "ExploredState"]
 
-ControlKind = Literal["disclosure", "accordion", "tab", "find_reveal", "menu"]
+ControlKind = Literal["disclosure", "accordion", "tab", "find_reveal", "menu", "scroll_surface"]
 ControlStatus = Literal["pending", "visited", "initially_open", "excluded", "unvisited"]
 
 
@@ -50,6 +50,9 @@ class ExplorationResult(StrictModel):
     controls: list[ControlRecord] = Field(default_factory=list)
     states: list[ExploredState] = Field(default_factory=list)
     actions_used: int = Field(default=0, ge=0)
+    scroll_surfaces: list[dict[str, Any]] = Field(
+        default_factory=list, description="Per-surface scroll results (B-8, B-10)"
+    )
     action_budget: int = Field(default=0, ge=0)
     elapsed_s: float = Field(default=0.0, ge=0.0)
     stop_reason: str | None = None
