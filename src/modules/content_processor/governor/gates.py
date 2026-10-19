@@ -25,6 +25,7 @@ GateKind = Literal[
     "product_unavailable",
     "login_wall",
     "age_or_audience_gate",
+    "soft_paywall",
 ]
 
 _ASSET_WORDS = re.compile(
@@ -74,6 +75,13 @@ _SIGNIN_PROMPT = re.compile(
 _SIGNIN_MAX_WORDS = 40
 _SENTENCE = re.compile(r"(?<=[.!?])\s+")
 _HEADINGS = ("h1", "h2", "h3", "h4", "h5", "h6")
+_PAYWALL = re.compile(
+    r"(subscribe (now )?to (continue|keep) reading|to (continue|keep) reading,? (please )?"
+    r"(subscribe|sign in|log in|register)|subscribers only|for subscribers|"
+    r"you.ve (reached|used) (your|all your) (free|monthly) (article|story|limit)|"
+    r"free articles? (left|remaining)|become a (member|subscriber) to read)",
+    re.IGNORECASE,
+)
 _WS = re.compile(r"\s+")
 
 
@@ -264,6 +272,23 @@ def detect_gates(dom_html: bytes, inner_text: str = "") -> list[GateFinding]:
             )
         )
 
+    # Soft paywall: an overlay asks to subscribe while the text may still be in the DOM (case 141).
+    for node in tree.css("dialog, [role=dialog], [aria-modal=true], div, section, aside"):
+        if not _is_overlay(node):
+            continue
+        paywall = _PAYWALL.search(_text(node))
+        if paywall:
+            findings.append(
+                GateFinding(
+                    kind="soft_paywall",
+                    severity="partial" if main_words >= 120 else "blocks_main_content",
+                    evidence=[f"phrase:{paywall.group(0)[:50]}", f"main_words={main_words}"],
+                    selector_hint=_selector(node),
+                    main_word_count=main_words,
+                )
+            )
+            break
+
     # Age / audience gate.
     age = _AGE_GATE.search(page_text[:6000])
     if age:
@@ -278,19 +303,29 @@ def detect_gates(dom_html: bytes, inner_text: str = "") -> list[GateFinding]:
     return findings
 
 
+def _is_overlay(node: Node) -> bool:
+    """A dialog, modal or fixed-position layer, judged from its own attributes."""
+    if node.tag == "dialog":
+        return True
+    a = node.attributes
+    if (a.get("aria-modal") or "").lower() == "true":
+        return True
+    parts = (a.get("id"), a.get("class"), a.get("role"), a.get("style"))
+    blob = " ".join(str(p or "") for p in parts).lower()
+    return (
+        "dialog" in blob
+        or "modal" in blob
+        or "overlay" in blob
+        or "paywall" in blob
+        or "position:fixed" in blob.replace(" ", "")
+    )
+
+
 def _overlay_ancestor(node: Node) -> Node | None:
     current = node.parent
     depth = 0
     while current is not None and depth < 8:
-        a = current.attributes
-        parts = (a.get("id"), a.get("class"), a.get("role"), a.get("style"))
-        blob = " ".join(str(p or "") for p in parts).lower()
-        if (
-            "dialog" in blob
-            or "modal" in blob
-            or "overlay" in blob
-            or "position:fixed" in blob.replace(" ", "")
-        ):
+        if _is_overlay(current):
             return current
         current = current.parent
         depth += 1

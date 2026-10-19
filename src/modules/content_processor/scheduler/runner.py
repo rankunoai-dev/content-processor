@@ -29,6 +29,7 @@ from src.modules.content_processor.enums import EntityStatus, GapType, TaskKind
 from src.modules.content_processor.ledger.outcomes import close_out_task_resource
 from src.modules.content_processor.scheduler.budget import BudgetMeter, BudgetName
 from src.modules.content_processor.scope.frontier import FrontierPlan
+from src.modules.content_processor.verify.detectors import default_detector
 from src.modules.content_processor.verify.record import frames_from_evidence, url_records_for_run
 from src.modules.content_processor.workers.ports import LedgerPort
 
@@ -356,6 +357,8 @@ def assemble_run_records(
         frames_for=frames_from_evidence(evidence),
         outstanding=outstanding,
         tool_versions=tool_versions,
+        evidence=evidence,
+        detector=default_detector(),
     )
 
 

@@ -65,3 +65,34 @@ def test_seed_file_matches_manifest_count():
     seed = MANIFEST["seeds"][0]
     lines = (ROOT / "fixtures" / seed["file"]).read_text(encoding="utf-8").splitlines()
     assert len([line for line in lines if line.strip()]) == 34
+
+
+INVENTORY = json.loads((ROOT / "fixtures" / "case_inventory.json").read_text(encoding="utf-8"))
+COVERAGE = {"fixture", "test", "open", "not_local", "source_missing"}
+
+
+def test_case_inventory_lists_every_case_once():
+    """V-8: all 222 adversarial cases are accounted for, none silently dropped."""
+    numbers = [c["case"] for c in INVENTORY["cases"]]
+    assert numbers == list(range(1, 223))
+    assert {c["coverage"] for c in INVENTORY["cases"]} <= COVERAGE
+
+
+def test_case_inventory_evidence_exists():
+    manifest_paths = {f["path"] for f in MANIFEST["fixtures"]}
+    for case in INVENTORY["cases"]:
+        if case["coverage"] == "fixture":
+            assert case["evidence"], case
+            assert set(case["evidence"]) <= manifest_paths, case
+        elif case["coverage"] == "test":
+            assert case["evidence"], case
+            for path in case["evidence"]:
+                assert (ROOT / path).is_file(), (case["case"], path)
+        else:
+            assert case["note"], case  # open, not_local, source_missing must say why
+
+
+def test_every_manifest_fixture_is_in_the_inventory():
+    cited = {p for c in INVENTORY["cases"] if c["coverage"] == "fixture" for p in c["evidence"]}
+    uncited = [f["path"] for f in MANIFEST["fixtures"] if f["path"] not in cited]
+    assert uncited == [], uncited

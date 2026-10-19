@@ -1,0 +1,2016 @@
+{
+  "schema_version": "1.0",
+  "notes": "Every adversarial case (V-8). Cases 1-83 are titled from the primary investigation; 84-90 come from the unified investigation, which is not in the repository (code cites 84, 88 and 90). Manifest entries written before V-8 cite 1-90 in the unified numbering, so coverage for 1-83 is mapped by topic. coverage: fixture = manifest path(s); test = test file(s); open = locally testable, not covered yet; not_local = needs a real external system or a later stage; source_missing = the definition is lost.",
+  "cases": [
+    {
+      "case": 1,
+      "title": "Static HTML, malformed markup",
+      "source": "primary",
+      "coverage": "fixture",
+      "evidence": [
+        "/pages/malformed_markup",
+        "/pages/static_ok"
+      ],
+      "note": ""
+    },
+    {
+      "case": 2,
+      "title": "Charset, entities, Unicode normalization",
+      "source": "primary",
+      "coverage": "fixture",
+      "evidence": [
+        "/pages/charset_entities",
+        "/pages/soft_hyphen"
+      ],
+      "note": ""
+    },
+    {
+      "case": 3,
+      "title": "SSR followed by hydration",
+      "source": "primary",
+      "coverage": "fixture",
+      "evidence": [
+        "/pages/delayed_hydration"
+      ],
+      "note": ""
+    },
+    {
+      "case": 4,
+      "title": "Client-only SPA or streamed HTML",
+      "source": "primary",
+      "coverage": "fixture",
+      "evidence": [
+        "/pages/delayed_hydration"
+      ],
+      "note": ""
+    },
+    {
+      "case": 5,
+      "title": "Delayed fetch, long polling, WebSockets",
+      "source": "primary",
+      "coverage": "open",
+      "evidence": [],
+      "note": "needs a WebSocket/long-poll fixture route; the settle probe bounds the capture window"
+    },
+    {
+      "case": 6,
+      "title": "Lazy sections/images",
+      "source": "primary",
+      "coverage": "test",
+      "evidence": [
+        "tests/modules/content_processor/test_explorer.py"
+      ],
+      "note": "pages/lazy_sections"
+    },
+    {
+      "case": 7,
+      "title": "Nested overflow containers",
+      "source": "primary",
+      "coverage": "test",
+      "evidence": [
+        "tests/modules/content_processor/test_explorer.py"
+      ],
+      "note": "pages/nested_scroller"
+    },
+    {
+      "case": 8,
+      "title": "Infinite scroll",
+      "source": "primary",
+      "coverage": "test",
+      "evidence": [
+        "tests/modules/content_processor/test_explorer.py"
+      ],
+      "note": "pages/infinite_scroll"
+    },
+    {
+      "case": 9,
+      "title": "Virtualized list",
+      "source": "primary",
+      "coverage": "test",
+      "evidence": [
+        "tests/modules/content_processor/test_explorer.py"
+      ],
+      "note": "pages/virtualized_list"
+    },
+    {
+      "case": 10,
+      "title": "Virtualized table/grid columns",
+      "source": "primary",
+      "coverage": "test",
+      "evidence": [
+        "tests/modules/content_processor/test_explorer.py"
+      ],
+      "note": "pages/virtualized_grid"
+    },
+    {
+      "case": 11,
+      "title": "Accordions/details/FAQs",
+      "source": "primary",
+      "coverage": "fixture",
+      "evidence": [
+        "/pages/details_collapsed"
+      ],
+      "note": ""
+    },
+    {
+      "case": 12,
+      "title": "Tabs",
+      "source": "primary",
+      "coverage": "test",
+      "evidence": [
+        "tests/modules/content_processor/test_explorer.py"
+      ],
+      "note": "pages/tabs"
+    },
+    {
+      "case": 13,
+      "title": "Carousels/slides",
+      "source": "primary",
+      "coverage": "test",
+      "evidence": [
+        "tests/modules/content_processor/test_explorer.py"
+      ],
+      "note": "pages/carousel"
+    },
+    {
+      "case": 14,
+      "title": "Hover/focus help and menus",
+      "source": "primary",
+      "coverage": "test",
+      "evidence": [
+        "tests/modules/content_processor/test_explorer.py"
+      ],
+      "note": "pages/hover_tooltip, pages/focus_reveal"
+    },
+    {
+      "case": 15,
+      "title": "Informational modals",
+      "source": "primary",
+      "coverage": "test",
+      "evidence": [
+        "tests/modules/content_processor/test_explorer.py"
+      ],
+      "note": "pages/modal_info"
+    },
+    {
+      "case": 16,
+      "title": "Pagination/load-more",
+      "source": "primary",
+      "coverage": "test",
+      "evidence": [
+        "tests/modules/content_processor/test_explorer.py"
+      ],
+      "note": "pages/load_more, pages/js_pagination"
+    },
+    {
+      "case": 17,
+      "title": "Product/plan/region selectors",
+      "source": "primary",
+      "coverage": "open",
+      "evidence": [],
+      "note": "variant selectors need B-14"
+    },
+    {
+      "case": 18,
+      "title": "Search/calculators/forms",
+      "source": "primary",
+      "coverage": "open",
+      "evidence": [],
+      "note": "forms are never submitted (GET-only guard); a fixture asserting it is still to add"
+    },
+    {
+      "case": 19,
+      "title": "Open/nested/declarative shadow DOM",
+      "source": "primary",
+      "coverage": "test",
+      "evidence": [
+        "tests/modules/content_processor/test_explorer.py"
+      ],
+      "note": "pages/shadow_dom"
+    },
+    {
+      "case": 20,
+      "title": "Closed shadow roots",
+      "source": "primary",
+      "coverage": "open",
+      "evidence": [],
+      "note": "closed shadow roots need screenshot OCR (B-12, C-8)"
+    },
+    {
+      "case": 21,
+      "title": "Nested/cross-origin/srcdoc frames",
+      "source": "primary",
+      "coverage": "test",
+      "evidence": [
+        "tests/modules/content_processor/test_explorer.py"
+      ],
+      "note": "pages/frames, frame_child, frame_partner"
+    },
+    {
+      "case": 22,
+      "title": "object/embed/document viewers",
+      "source": "primary",
+      "coverage": "open",
+      "evidence": [],
+      "note": "object/embed document viewers: no fixture yet"
+    },
+    {
+      "case": 23,
+      "title": "CSS pseudo-elements/counters/markers",
+      "source": "primary",
+      "coverage": "open",
+      "evidence": [],
+      "note": "CSS pseudo-element text needs B-13"
+    },
+    {
+      "case": 24,
+      "title": "CSS backgrounds/sprites/image-set",
+      "source": "primary",
+      "coverage": "open",
+      "evidence": [],
+      "note": "CSS background text needs OCR (C-8)"
+    },
+    {
+      "case": 25,
+      "title": "Canvas/WebGL",
+      "source": "primary",
+      "coverage": "open",
+      "evidence": [],
+      "note": "canvas/WebGL text needs OCR (C-8)"
+    },
+    {
+      "case": 26,
+      "title": "SVG text and outlined glyphs",
+      "source": "primary",
+      "coverage": "open",
+      "evidence": [],
+      "note": "SVG text and outlined glyphs need B-13"
+    },
+    {
+      "case": 27,
+      "title": "picture/srcset/responsive artwork",
+      "source": "primary",
+      "coverage": "test",
+      "evidence": [
+        "tests/modules/content_processor/test_html_source.py"
+      ],
+      "note": "srcset image discovery"
+    },
+    {
+      "case": 28,
+      "title": "Hidden/offscreen/aria-hidden text",
+      "source": "primary",
+      "coverage": "fixture",
+      "evidence": [
+        "/pages/template_hidden",
+        "/pages/icon_font"
+      ],
+      "note": ""
+    },
+    {
+      "case": 29,
+      "title": "Clamping/clipping/ellipsis",
+      "source": "primary",
+      "coverage": "open",
+      "evidence": [],
+      "note": "clamped/ellipsis text: no fixture yet"
+    },
+    {
+      "case": 30,
+      "title": "Input values/placeholders/selections",
+      "source": "primary",
+      "coverage": "open",
+      "evidence": [],
+      "note": "input values and placeholders: no fixture yet"
+    },
+    {
+      "case": 31,
+      "title": "HTML tables and footnotes",
+      "source": "primary",
+      "coverage": "fixture",
+      "evidence": [
+        "/pages/static_ok"
+      ],
+      "note": ""
+    },
+    {
+      "case": 32,
+      "title": "Math/code/preformatted blocks",
+      "source": "primary",
+      "coverage": "open",
+      "evidence": [],
+      "note": "math/code blocks: no fixture yet"
+    },
+    {
+      "case": 33,
+      "title": "Responsive/mobile/desktop layout",
+      "source": "primary",
+      "coverage": "open",
+      "evidence": [],
+      "note": "responsive duplicates: handled on lane/L4-rules (not merged)"
+    },
+    {
+      "case": 34,
+      "title": "Locale/geography/currency/timezone",
+      "source": "primary",
+      "coverage": "not_local",
+      "evidence": [],
+      "note": "needs geo/locale variants served by a real host; the scope declares the locale"
+    },
+    {
+      "case": 35,
+      "title": "A/B tests/personalization/live values",
+      "source": "primary",
+      "coverage": "not_local",
+      "evidence": [],
+      "note": "A/B and personalization vary per visitor on real hosts; V-6 covers never-settling pages"
+    },
+    {
+      "case": 36,
+      "title": "Consent/sticky overlays",
+      "source": "primary",
+      "coverage": "test",
+      "evidence": [
+        "tests/modules/content_processor/test_explorer.py"
+      ],
+      "note": "pages/consent_banner, pages/consent_accept_only"
+    },
+    {
+      "case": 37,
+      "title": "JSON-LD/microdata/hydration JSON",
+      "source": "primary",
+      "coverage": "test",
+      "evidence": [
+        "tests/modules/content_processor/test_html_source.py"
+      ],
+      "note": "JSON-LD structured data"
+    },
+    {
+      "case": 38,
+      "title": "noscript/templates/comments/bundles",
+      "source": "primary",
+      "coverage": "fixture",
+      "evidence": [
+        "/pages/template_hidden"
+      ],
+      "note": ""
+    },
+    {
+      "case": 39,
+      "title": "Print-only content",
+      "source": "primary",
+      "coverage": "open",
+      "evidence": [],
+      "note": "print-only CSS: no fixture yet"
+    },
+    {
+      "case": 40,
+      "title": "Script failures/service workers/cache",
+      "source": "primary",
+      "coverage": "open",
+      "evidence": [],
+      "note": "script failures/service workers: no fixture yet"
+    },
+    {
+      "case": 41,
+      "title": "Native PDF marginalia/headers/footers",
+      "source": "primary",
+      "coverage": "test",
+      "evidence": [
+        "tests/modules/content_processor/test_pdf_structures.py"
+      ],
+      "note": ""
+    },
+    {
+      "case": 42,
+      "title": "Scanned PDF",
+      "source": "primary",
+      "coverage": "test",
+      "evidence": [
+        "tests/modules/content_processor/test_doc_worker.py"
+      ],
+      "note": "scanned PDF, OCR engine missing"
+    },
+    {
+      "case": 43,
+      "title": "Mixed native/scanned page",
+      "source": "primary",
+      "coverage": "test",
+      "evidence": [
+        "tests/modules/content_processor/test_doc_worker.py"
+      ],
+      "note": "native header plus scanned body"
+    },
+    {
+      "case": 44,
+      "title": "Bad/stale/partial existing OCR",
+      "source": "primary",
+      "coverage": "test",
+      "evidence": [
+        "tests/modules/content_processor/test_verify_rules_extended.py"
+      ],
+      "note": "R8 native vs OCR disagreement"
+    },
+    {
+      "case": 45,
+      "title": "Broken fonts/vector text",
+      "source": "primary",
+      "coverage": "test",
+      "evidence": [
+        "tests/modules/content_processor/test_pdf_structures.py"
+      ],
+      "note": "garbled text"
+    },
+    {
+      "case": 46,
+      "title": "Columns/sidebars/rotation/RTL/CJK",
+      "source": "primary",
+      "coverage": "open",
+      "evidence": [],
+      "note": "columns/RTL/CJK PDFs: no fixture yet"
+    },
+    {
+      "case": 47,
+      "title": "Tiny/blurred/skewed/low-contrast text",
+      "source": "primary",
+      "coverage": "open",
+      "evidence": [],
+      "note": "tiny/blurred text needs OCR (C-1)"
+    },
+    {
+      "case": 48,
+      "title": "Merged/multipage tables",
+      "source": "primary",
+      "coverage": "test",
+      "evidence": [
+        "tests/modules/content_processor/test_pdf_structures.py"
+      ],
+      "note": "tables across pages"
+    },
+    {
+      "case": 49,
+      "title": "Charts/maps/diagrams/equations",
+      "source": "primary",
+      "coverage": "open",
+      "evidence": [],
+      "note": "charts/diagrams need OCR (C-1)"
+    },
+    {
+      "case": 50,
+      "title": "PDF forms/widgets/XFA/checkmarks",
+      "source": "primary",
+      "coverage": "test",
+      "evidence": [
+        "tests/modules/content_processor/test_pdf_structures.py"
+      ],
+      "note": "form field values"
+    },
+    {
+      "case": 51,
+      "title": "Annotations/popups/comments",
+      "source": "primary",
+      "coverage": "test",
+      "evidence": [
+        "tests/modules/content_processor/test_pdf_structures.py"
+      ],
+      "note": "annotation layer"
+    },
+    {
+      "case": 52,
+      "title": "Attachments/portfolios",
+      "source": "primary",
+      "coverage": "test",
+      "evidence": [
+        "tests/modules/content_processor/test_pdf_structures.py"
+      ],
+      "note": "attachments"
+    },
+    {
+      "case": 53,
+      "title": "Layers/clipped/off-page/invisible text",
+      "source": "primary",
+      "coverage": "test",
+      "evidence": [
+        "tests/modules/content_processor/test_pdf_structures.py"
+      ],
+      "note": "invisible and hidden-layer text"
+    },
+    {
+      "case": 54,
+      "title": "Encrypted/corrupt/truncated PDF",
+      "source": "primary",
+      "coverage": "test",
+      "evidence": [
+        "tests/modules/content_processor/test_doc_worker.py"
+      ],
+      "note": "unreadable PDF"
+    },
+    {
+      "case": 55,
+      "title": "Raster image/screenshot",
+      "source": "primary",
+      "coverage": "test",
+      "evidence": [
+        "tests/modules/content_processor/test_doc_worker.py",
+        "tests/modules/content_processor/test_ocr_adapter.py"
+      ],
+      "note": ""
+    },
+    {
+      "case": 56,
+      "title": "Photos/logos/pictograms",
+      "source": "primary",
+      "coverage": "test",
+      "evidence": [
+        "tests/modules/content_processor/test_doc_worker.py"
+      ],
+      "note": "image OCR, engine missing"
+    },
+    {
+      "case": 57,
+      "title": "TIFF/GIF/WebP multiple frames",
+      "source": "primary",
+      "coverage": "open",
+      "evidence": [],
+      "note": "multi-frame TIFF/GIF/WebP: no fixture yet"
+    },
+    {
+      "case": 58,
+      "title": "DOCX package parts",
+      "source": "primary",
+      "coverage": "test",
+      "evidence": [
+        "tests/modules/content_processor/test_office.py"
+      ],
+      "note": ""
+    },
+    {
+      "case": 59,
+      "title": "PPTX shapes/notes/hidden slides",
+      "source": "primary",
+      "coverage": "test",
+      "evidence": [
+        "tests/modules/content_processor/test_office.py"
+      ],
+      "note": ""
+    },
+    {
+      "case": 60,
+      "title": "XLSX cells/formulas/hidden sheets",
+      "source": "primary",
+      "coverage": "test",
+      "evidence": [
+        "tests/modules/content_processor/test_office.py"
+      ],
+      "note": ""
+    },
+    {
+      "case": 61,
+      "title": "CSV/TSV/JSON/XML/TXT",
+      "source": "primary",
+      "coverage": "open",
+      "evidence": [],
+      "note": "CSV/JSON/XML/TXT adapters not built"
+    },
+    {
+      "case": 62,
+      "title": "EPUB/ZIP/nested packages",
+      "source": "primary",
+      "coverage": "open",
+      "evidence": [],
+      "note": "EPUB/ZIP not built (C-9 rest)"
+    },
+    {
+      "case": 63,
+      "title": "Audio/captions/multiple languages",
+      "source": "primary",
+      "coverage": "not_local",
+      "evidence": [],
+      "note": "audio is Stage 3 (C-10)"
+    },
+    {
+      "case": 64,
+      "title": "Video overlays/subtitles/audio",
+      "source": "primary",
+      "coverage": "not_local",
+      "evidence": [],
+      "note": "video is Stage 3 (C-10)"
+    },
+    {
+      "case": 65,
+      "title": "Live streams/continuously changing media",
+      "source": "primary",
+      "coverage": "not_local",
+      "evidence": [],
+      "note": "live streams are Stage 3 (C-10)"
+    },
+    {
+      "case": 66,
+      "title": "DNS/TLS/connection failure",
+      "source": "primary",
+      "coverage": "test",
+      "evidence": [
+        "tests/modules/content_processor/test_fetch_worker.py"
+      ],
+      "note": "transport failure retries then fails"
+    },
+    {
+      "case": 67,
+      "title": "Redirect chains/loops",
+      "source": "primary",
+      "coverage": "test",
+      "evidence": [
+        "tests/modules/content_processor/test_http_client.py"
+      ],
+      "note": "too many hops"
+    },
+    {
+      "case": 68,
+      "title": "Login/401/403/geographic block",
+      "source": "primary",
+      "coverage": "fixture",
+      "evidence": [
+        "/gated",
+        "/challenge-403"
+      ],
+      "note": ""
+    },
+    {
+      "case": 69,
+      "title": "429/rate limiting",
+      "source": "primary",
+      "coverage": "fixture",
+      "evidence": [
+        "/rate-limited"
+      ],
+      "note": ""
+    },
+    {
+      "case": 70,
+      "title": "Transient 5xx",
+      "source": "primary",
+      "coverage": "test",
+      "evidence": [
+        "tests/modules/content_processor/test_fetch_worker.py"
+      ],
+      "note": "transient 5xx retries"
+    },
+    {
+      "case": 71,
+      "title": "CAPTCHA/challenge with HTTP 200",
+      "source": "primary",
+      "coverage": "fixture",
+      "evidence": [
+        "/challenge-200"
+      ],
+      "note": ""
+    },
+    {
+      "case": 72,
+      "title": "Soft 404/empty shell/maintenance page",
+      "source": "primary",
+      "coverage": "fixture",
+      "evidence": [
+        "/soft-404"
+      ],
+      "note": ""
+    },
+    {
+      "case": 73,
+      "title": "Expired signed asset URL",
+      "source": "primary",
+      "coverage": "open",
+      "evidence": [],
+      "note": "expired signed asset URL: no fixture yet"
+    },
+    {
+      "case": 74,
+      "title": "Wrong MIME/partial download",
+      "source": "primary",
+      "coverage": "fixture",
+      "evidence": [
+        "/pdf-but-html",
+        "/truncated"
+      ],
+      "note": ""
+    },
+    {
+      "case": 75,
+      "title": "Query/hash/canonical identity",
+      "source": "primary",
+      "coverage": "test",
+      "evidence": [
+        "tests/modules/content_processor/test_normalize.py"
+      ],
+      "note": ""
+    },
+    {
+      "case": 76,
+      "title": "Facets/calendars/session URL explosion",
+      "source": "primary",
+      "coverage": "open",
+      "evidence": [],
+      "note": "facet/session URL explosion: no fixture yet"
+    },
+    {
+      "case": 77,
+      "title": "Cross-host CDN/linked download",
+      "source": "primary",
+      "coverage": "test",
+      "evidence": [
+        "tests/modules/content_processor/test_followups.py"
+      ],
+      "note": "/downloads hub, cross-host rules"
+    },
+    {
+      "case": 78,
+      "title": "robots.txt unavailable/unreachable/disallow",
+      "source": "primary",
+      "coverage": "fixture",
+      "evidence": [
+        "/private/secret"
+      ],
+      "note": ""
+    },
+    {
+      "case": 79,
+      "title": "Browser/parser crash or timeout",
+      "source": "primary",
+      "coverage": "test",
+      "evidence": [
+        "tests/modules/content_processor/test_render_worker.py"
+      ],
+      "note": "render failure retries then partial"
+    },
+    {
+      "case": 80,
+      "title": "Archive bomb/huge image/hostile document",
+      "source": "primary",
+      "coverage": "test",
+      "evidence": [
+        "tests/modules/content_processor/test_office.py"
+      ],
+      "note": "zip bomb"
+    },
+    {
+      "case": 81,
+      "title": "SSRF via seed/redirect/frame/asset",
+      "source": "primary",
+      "coverage": "test",
+      "evidence": [
+        "tests/modules/content_processor/test_ssrf.py"
+      ],
+      "note": ""
+    },
+    {
+      "case": 82,
+      "title": "Malicious page instructions or active files",
+      "source": "primary",
+      "coverage": "test",
+      "evidence": [
+        "tests/modules/content_processor/test_nli.py",
+        "tests/modules/content_processor/test_url_explorer.py"
+      ],
+      "note": "page text as data; explorer CSP"
+    },
+    {
+      "case": 83,
+      "title": "Normalization/dedup destroys meaning",
+      "source": "primary",
+      "coverage": "test",
+      "evidence": [
+        "tests/modules/content_processor/test_normalize.py"
+      ],
+      "note": "reversible normalization"
+    },
+    {
+      "case": 84,
+      "title": "robots.txt evaluation (as cited in code)",
+      "source": "unified",
+      "coverage": "test",
+      "evidence": [
+        "tests/modules/content_processor/test_robots.py"
+      ],
+      "note": "unified numbering (code: robots.txt)"
+    },
+    {
+      "case": 85,
+      "title": "unknown (unified investigation not in the repository)",
+      "source": "unified",
+      "coverage": "source_missing",
+      "evidence": [],
+      "note": "defined in the unified investigation, which is not in the repository"
+    },
+    {
+      "case": 86,
+      "title": "unknown (unified investigation not in the repository)",
+      "source": "unified",
+      "coverage": "source_missing",
+      "evidence": [],
+      "note": "defined in the unified investigation, which is not in the repository"
+    },
+    {
+      "case": 87,
+      "title": "unknown (unified investigation not in the repository)",
+      "source": "unified",
+      "coverage": "source_missing",
+      "evidence": [],
+      "note": "defined in the unified investigation, which is not in the repository"
+    },
+    {
+      "case": 88,
+      "title": "SSRF to metadata and private addresses (as cited in code)",
+      "source": "unified",
+      "coverage": "test",
+      "evidence": [
+        "tests/modules/content_processor/test_ssrf.py"
+      ],
+      "note": "unified numbering (code: SSRF to metadata addresses)"
+    },
+    {
+      "case": 89,
+      "title": "unknown (unified investigation not in the repository)",
+      "source": "unified",
+      "coverage": "source_missing",
+      "evidence": [],
+      "note": "defined in the unified investigation, which is not in the repository"
+    },
+    {
+      "case": 90,
+      "title": "critical tokens (as cited in code)",
+      "source": "unified",
+      "coverage": "open",
+      "evidence": [],
+      "note": "unified numbering (code: critical tokens, R9) - on lane/L4-rules, not merged"
+    },
+    {
+      "case": 91,
+      "title": "Input duplicates and near-duplicates: http/https, www/apex, trailing slash, path case, default port, query-param order, tracking params (utm_, gclid, fbclid, mc",
+      "source": "gap_audit",
+      "coverage": "test",
+      "evidence": [
+        "tests/modules/content_processor/test_normalize.py",
+        "tests/modules/content_processor/test_frontier.py"
+      ],
+      "note": ""
+    },
+    {
+      "case": 92,
+      "title": "Unsupported or non-fetchable inputs: mailto:, tel:, javascript:, data:, ftp:, file:, IDN/punycode, unencoded spaces or Unicode, URLs > 2,048 chars",
+      "source": "gap_audit",
+      "coverage": "test",
+      "evidence": [
+        "tests/modules/content_processor/test_normalize.py",
+        "tests/modules/content_processor/test_frontier.py"
+      ],
+      "note": ""
+    },
+    {
+      "case": 93,
+      "title": "Seed resolves to private, loopback, link-local, metadata (169.254.169.254) or rebinding DNS (TTL 0, mixed answers)",
+      "source": "gap_audit",
+      "coverage": "test",
+      "evidence": [
+        "tests/modules/content_processor/test_ssrf.py"
+      ],
+      "note": ""
+    },
+    {
+      "case": 94,
+      "title": "Fragment routes (#/pricing, #!page) in SPAs",
+      "source": "gap_audit",
+      "coverage": "test",
+      "evidence": [
+        "tests/modules/content_processor/test_normalize.py"
+      ],
+      "note": "fragment routes"
+    },
+    {
+      "case": 95,
+      "title": "Mobile (m.), AMP (/amp/, rel=amphtml), print (?print=1) variants of one page",
+      "source": "gap_audit",
+      "coverage": "open",
+      "evidence": [],
+      "note": "mobile/AMP/print variants: no fixture yet"
+    },
+    {
+      "case": 96,
+      "title": "Locale/geo auto-redirect (server sends /en-in/ based on Accept-Language or IP)",
+      "source": "gap_audit",
+      "coverage": "not_local",
+      "evidence": [],
+      "note": "locale auto-redirect depends on the real host's geo logic"
+    },
+    {
+      "case": 97,
+      "title": "Non-HTTP redirects: <meta http-equiv=refresh>, JS location assignment, <link rel=canonical> to another URL",
+      "source": "gap_audit",
+      "coverage": "fixture",
+      "evidence": [
+        "/meta-refresh"
+      ],
+      "note": ""
+    },
+    {
+      "case": 98,
+      "title": "Soft redirect to homepage or category page (HTTP 200, unrelated content)",
+      "source": "gap_audit",
+      "coverage": "fixture",
+      "evidence": [
+        "/discontinued-product"
+      ],
+      "note": ""
+    },
+    {
+      "case": 99,
+      "title": "Per-request variance (A/B, rotating recommendations, randomized order)",
+      "source": "gap_audit",
+      "coverage": "test",
+      "evidence": [
+        "tests/modules/content_processor/test_verify_rules_extended.py"
+      ],
+      "note": "V-6 volatility"
+    },
+    {
+      "case": 100,
+      "title": "Priority ordering: user-declared mandatory URLs (pricing, terms), HTML before assets, sitemaps first",
+      "source": "gap_audit",
+      "coverage": "test",
+      "evidence": [
+        "tests/modules/content_processor/test_frontier.py"
+      ],
+      "note": "mandatory priority"
+    },
+    {
+      "case": 101,
+      "title": "Recrawl / incremental mode of the same scope",
+      "source": "gap_audit",
+      "coverage": "test",
+      "evidence": [
+        "tests/modules/content_processor/test_recrawl_e2e.py"
+      ],
+      "note": ""
+    },
+    {
+      "case": 102,
+      "title": "Cross-run reuse of identical bytes (same PDF hash seen last month)",
+      "source": "gap_audit",
+      "coverage": "test",
+      "evidence": [
+        "tests/modules/content_processor/test_recrawl_units.py",
+        "tests/modules/content_processor/test_followups.py"
+      ],
+      "note": ""
+    },
+    {
+      "case": 103,
+      "title": "gzip/br/zstd encodings; unsupported encoding; truncated compressed stream; decompression bomb",
+      "source": "gap_audit",
+      "coverage": "open",
+      "evidence": [],
+      "note": "compression bombs and encodings need A-5"
+    },
+    {
+      "case": 104,
+      "title": "Chunked body cut short, Content-Length mismatch, reset mid-body",
+      "source": "gap_audit",
+      "coverage": "fixture",
+      "evidence": [
+        "/truncated"
+      ],
+      "note": ""
+    },
+    {
+      "case": 105,
+      "title": "206, 304, 204, 1xx, 3xx without Location, 2xx with empty body",
+      "source": "gap_audit",
+      "coverage": "open",
+      "evidence": [],
+      "note": "206/204/1xx need A-5; 304 is covered by recrawl"
+    },
+    {
+      "case": 106,
+      "title": "Four-way type mismatch: Content-Type vs URL extension vs magic bytes vs Content-Disposition filename",
+      "source": "gap_audit",
+      "coverage": "fixture",
+      "evidence": [
+        "/pdf-but-html"
+      ],
+      "note": ""
+    },
+    {
+      "case": 107,
+      "title": "Content negotiation (Accept, Accept-Language, Sec-CH-UA-, Vary)",
+      "source": "gap_audit",
+      "coverage": "open",
+      "evidence": [],
+      "note": "content negotiation: no fixture yet"
+    },
+    {
+      "case": 108,
+      "title": "Stale CDN copy (Age, X-Cache: HIT, stale-while-revalidate)",
+      "source": "gap_audit",
+      "coverage": "open",
+      "evidence": [],
+      "note": "stale CDN copies: no fixture yet"
+    },
+    {
+      "case": 109,
+      "title": "HTTP/3-only or Alt-Svc, HTTP/1.0 servers, legacy TLS, expired/self-signed certificates, HSTS, mixed content blocked in browser",
+      "source": "gap_audit",
+      "coverage": "not_local",
+      "evidence": [],
+      "note": "HTTP/3 and legacy TLS need real servers"
+    },
+    {
+      "case": 110,
+      "title": "Oversized responses (HTML > 10 MB, PDF > 500 MB, images > 50 MP)",
+      "source": "gap_audit",
+      "coverage": "test",
+      "evidence": [
+        "tests/modules/content_processor/test_http_client.py"
+      ],
+      "note": "body cap, limit_hit"
+    },
+    {
+      "case": 111,
+      "title": "Never-ending bodies (SSE at an HTML URL, slow-drip servers)",
+      "source": "gap_audit",
+      "coverage": "test",
+      "evidence": [
+        "tests/modules/content_processor/test_http_client.py"
+      ],
+      "note": "/slow, total timeout"
+    },
+    {
+      "case": 112,
+      "title": "Downloads triggered by JS/click, Content-Disposition: attachment on navigation, blob:/data: URLs, <a download>",
+      "source": "gap_audit",
+      "coverage": "open",
+      "evidence": [],
+      "note": "JS-triggered downloads: no fixture yet"
+    },
+    {
+      "case": 113,
+      "title": "Icon-font ligature text (Material Icons renders the word arrow_forward as an arrow; Font Awesome uses PUA code points via ::before)",
+      "source": "gap_audit",
+      "coverage": "fixture",
+      "evidence": [
+        "/pages/icon_font"
+      ],
+      "note": ""
+    },
+    {
+      "case": 114,
+      "title": "Anti-scraping font obfuscation (custom @font-face remaps glyphs so DOM text ≠ visible text; common on price and listing pages)",
+      "source": "gap_audit",
+      "coverage": "fixture",
+      "evidence": [
+        "/pages/obfuscated_font"
+      ],
+      "note": ""
+    },
+    {
+      "case": 115,
+      "title": "CSS transforms of text: text-transform, direction: rtl, unicode-bidi, writing-mode: vertical-, letter-spacing art",
+      "source": "gap_audit",
+      "coverage": "open",
+      "evidence": [],
+      "note": "CSS text transforms: no fixture yet"
+    },
+    {
+      "case": 116,
+      "title": "Collapsed-but-published content: content-visibility: auto, hidden=\"until-found\", closed <details>, popover, closed <dialog>",
+      "source": "gap_audit",
+      "coverage": "fixture",
+      "evidence": [
+        "/pages/details_collapsed"
+      ],
+      "note": ""
+    },
+    {
+      "case": 117,
+      "title": "inert and aria-hidden wrappers over visible text (modal backdrop)",
+      "source": "gap_audit",
+      "coverage": "open",
+      "evidence": [],
+      "note": "inert/aria-hidden wrappers over visible text: needs R6 with OCR to prove"
+    },
+    {
+      "case": 118,
+      "title": "Invisible code points: soft hyphen U+00AD, <wbr>, zero-width joiner/space, NBSP, ligature code points, homoglyph mixing (Cyrillic а in Latin words)",
+      "source": "gap_audit",
+      "coverage": "fixture",
+      "evidence": [
+        "/pages/soft_hyphen"
+      ],
+      "note": ""
+    },
+    {
+      "case": 119,
+      "title": "Scheme-dependent variants: prefers-color-scheme, prefers-reduced-motion, forced-colors, <picture media=…>",
+      "source": "gap_audit",
+      "coverage": "open",
+      "evidence": [],
+      "note": "prefers-color-scheme variants: no fixture yet"
+    },
+    {
+      "case": 120,
+      "title": "Math duplicates (MathML + visual spans + aria-label TeX from MathJax/KaTeX)",
+      "source": "gap_audit",
+      "coverage": "open",
+      "evidence": [],
+      "note": "math duplicates: no fixture yet"
+    },
+    {
+      "case": 121,
+      "title": "Code blocks with line-number gutters, copy buttons, diff markers",
+      "source": "gap_audit",
+      "coverage": "open",
+      "evidence": [],
+      "note": "code gutters and copy buttons: no fixture yet"
+    },
+    {
+      "case": 122,
+      "title": "Third-party widgets injecting text (chat bots, cookie banners, review carousels, ad slots, recommendation rails)",
+      "source": "gap_audit",
+      "coverage": "fixture",
+      "evidence": [
+        "/pages/third_party_widget"
+      ],
+      "note": ""
+    },
+    {
+      "case": 123,
+      "title": "Never-settling pages (clocks, tickers, auto-rotating carousels, animated counters, typing indicators)",
+      "source": "gap_audit",
+      "coverage": "test",
+      "evidence": [
+        "tests/modules/content_processor/test_verify_rules_extended.py"
+      ],
+      "note": "V-6 volatility; pages/live_noise in test_explorer"
+    },
+    {
+      "case": 124,
+      "title": "Huge DOMs (> 300k nodes), extreme nesting, snapshot beyond size limits",
+      "source": "gap_audit",
+      "coverage": "open",
+      "evidence": [],
+      "note": "huge DOMs: no fixture yet"
+    },
+    {
+      "case": 125,
+      "title": "Scroll-driven mutation (sticky headers duplicating content, parallax, scrollytelling that swaps text)",
+      "source": "gap_audit",
+      "coverage": "open",
+      "evidence": [],
+      "note": "scroll-driven mutation: no fixture yet"
+    },
+    {
+      "case": 126,
+      "title": "Content reachable only by keyboard focus or that vanishes on mouse move",
+      "source": "gap_audit",
+      "coverage": "test",
+      "evidence": [
+        "tests/modules/content_processor/test_explorer.py"
+      ],
+      "note": "pages/focus_reveal"
+    },
+    {
+      "case": 127,
+      "title": "Text drawn by WebGL, Three.js, Lottie, or video canvases",
+      "source": "gap_audit",
+      "coverage": "open",
+      "evidence": [],
+      "note": "WebGL/Lottie text needs OCR (C-8)"
+    },
+    {
+      "case": 128,
+      "title": "Broken images showing alt as visible text; low-quality placeholders (LQIP) OCR'd as blur",
+      "source": "gap_audit",
+      "coverage": "open",
+      "evidence": [],
+      "note": "broken-image alt text: no fixture yet"
+    },
+    {
+      "case": 129,
+      "title": "Declarative shadow DOM in SSR HTML (<template shadowrootmode>)",
+      "source": "gap_audit",
+      "coverage": "test",
+      "evidence": [
+        "tests/modules/content_processor/test_explorer.py"
+      ],
+      "note": "pages/shadow_dom"
+    },
+    {
+      "case": 130,
+      "title": "<slot> assigned vs fallback nodes; text duplicated across light and shadow trees",
+      "source": "gap_audit",
+      "coverage": "open",
+      "evidence": [],
+      "note": "slot fallback vs assigned nodes: no fixture yet"
+    },
+    {
+      "case": 131,
+      "title": "Web fonts failing or swapping late (font-display), altering clipping and OCR",
+      "source": "gap_audit",
+      "coverage": "open",
+      "evidence": [],
+      "note": "late web-font swaps: no fixture yet"
+    },
+    {
+      "case": 132,
+      "title": "Client-side i18n dictionaries and route manifests in bundles (_buildManifest.js, __NEXT_DATA__, __NUXT__)",
+      "source": "gap_audit",
+      "coverage": "open",
+      "evidence": [],
+      "note": "i18n dictionaries in bundles: no fixture yet"
+    },
+    {
+      "case": 133,
+      "title": "Video embeds (YouTube, Vimeo, Wistia, Loom)",
+      "source": "gap_audit",
+      "coverage": "not_local",
+      "evidence": [],
+      "note": "real third-party embed services need network access"
+    },
+    {
+      "case": 134,
+      "title": "Canvas-rendered document viewers (Scribd, Issuu, SlideShare, FlipHTML5, Calameo, flipbooks)",
+      "source": "gap_audit",
+      "coverage": "not_local",
+      "evidence": [],
+      "note": "real third-party embed services need network access"
+    },
+    {
+      "case": 135,
+      "title": "Google Docs/Sheets/Slides published embeds, Office 365 embed viewer, Box/Dropbox previews",
+      "source": "gap_audit",
+      "coverage": "not_local",
+      "evidence": [],
+      "note": "real third-party embed services need network access"
+    },
+    {
+      "case": 136,
+      "title": "Dashboards and charts (Tableau, Power BI, Looker, Datawrapper, Flourish, Highcharts, Chart.js)",
+      "source": "gap_audit",
+      "coverage": "not_local",
+      "evidence": [],
+      "note": "real third-party embed services need network access"
+    },
+    {
+      "case": 137,
+      "title": "Social embeds (X/Twitter, Instagram, TikTok, LinkedIn, Facebook comments, Disqus)",
+      "source": "gap_audit",
+      "coverage": "not_local",
+      "evidence": [],
+      "note": "real third-party embed services need network access"
+    },
+    {
+      "case": 138,
+      "title": "Maps (Google Maps, Mapbox, Leaflet)",
+      "source": "gap_audit",
+      "coverage": "not_local",
+      "evidence": [],
+      "note": "real third-party embed services need network access"
+    },
+    {
+      "case": 139,
+      "title": "Forms-as-a-service (Typeform, HubSpot, Calendly, Jotform)",
+      "source": "gap_audit",
+      "coverage": "not_local",
+      "evidence": [],
+      "note": "real third-party embed services need network access"
+    },
+    {
+      "case": 140,
+      "title": "Review/rating widgets (Trustpilot, Yotpo, Google reviews) with API pagination",
+      "source": "gap_audit",
+      "coverage": "not_local",
+      "evidence": [],
+      "note": "real third-party embed services need network access"
+    },
+    {
+      "case": 141,
+      "title": "Paywalls: hard, metered, soft (full text in DOM under an overlay)",
+      "source": "gap_audit",
+      "coverage": "fixture",
+      "evidence": [
+        "/pages/soft_paywall"
+      ],
+      "note": ""
+    },
+    {
+      "case": 142,
+      "title": "Age, region, \"healthcare professional\" gates",
+      "source": "gap_audit",
+      "coverage": "fixture",
+      "evidence": [
+        "/pages/age_gate"
+      ],
+      "note": ""
+    },
+    {
+      "case": 143,
+      "title": "Consent-gated content (video or map loads only after accept)",
+      "source": "gap_audit",
+      "coverage": "test",
+      "evidence": [
+        "tests/modules/content_processor/test_explorer.py"
+      ],
+      "note": "pages/consent_banner"
+    },
+    {
+      "case": 144,
+      "title": "Referrer/UTM/cookie-driven personalization, returning-visitor variants, cart state",
+      "source": "gap_audit",
+      "coverage": "not_local",
+      "evidence": [],
+      "note": "referrer/cookie personalization varies per visitor on real hosts"
+    },
+    {
+      "case": 145,
+      "title": "Time-based content (countdowns, business hours, \"today\", scheduled publish/unpublish)",
+      "source": "gap_audit",
+      "coverage": "open",
+      "evidence": [],
+      "note": "time-based content: no fixture yet"
+    },
+    {
+      "case": 146,
+      "title": "Live prices, stock, availability",
+      "source": "gap_audit",
+      "coverage": "not_local",
+      "evidence": [],
+      "note": "live prices change on real hosts"
+    },
+    {
+      "case": 147,
+      "title": "Server-fetch disclosures (\"Read more\", \"Show phone\", \"Load reviews\")",
+      "source": "gap_audit",
+      "coverage": "test",
+      "evidence": [
+        "tests/modules/content_processor/test_explorer.py"
+      ],
+      "note": "pages/accordion_side_effect (POST refused)"
+    },
+    {
+      "case": 148,
+      "title": "Parameter explosion (sort, filter, replytocom, page=∞, session IDs)",
+      "source": "gap_audit",
+      "coverage": "open",
+      "evidence": [],
+      "note": "parameter explosion: no fixture yet"
+    },
+    {
+      "case": 149,
+      "title": "Multi-step wizards, quizzes, configurators",
+      "source": "gap_audit",
+      "coverage": "open",
+      "evidence": [],
+      "note": "wizards are not driven (GET-only guard); a fixture is still to add"
+    },
+    {
+      "case": 150,
+      "title": "Site deploy mid-run (mixed versions across pages)",
+      "source": "gap_audit",
+      "coverage": "not_local",
+      "evidence": [],
+      "note": "a deploy mid-run needs a real changing host"
+    },
+    {
+      "case": 151,
+      "title": "Incremental updates retaining pre-redaction or prior content (/Prev xref chain, multiple %%EOF)",
+      "source": "gap_audit",
+      "coverage": "open",
+      "evidence": [],
+      "note": "incremental PDF updates: no fixture yet"
+    },
+    {
+      "case": 152,
+      "title": "Invisible text: render mode 3, clip mode 7, white-on-white, outside CropBox, < 1 pt fonts",
+      "source": "gap_audit",
+      "coverage": "test",
+      "evidence": [
+        "tests/modules/content_processor/test_pdf_structures.py"
+      ],
+      "note": "invisible text"
+    },
+    {
+      "case": 153,
+      "title": "Type3, CID fonts without ToUnicode, symbolic fonts (Wingdings checkmarks)",
+      "source": "gap_audit",
+      "coverage": "open",
+      "evidence": [],
+      "note": "Type3/CID fonts without ToUnicode: no fixture yet"
+    },
+    {
+      "case": 154,
+      "title": "Page labels vs physical index; /Rotate; mixed page sizes",
+      "source": "gap_audit",
+      "coverage": "open",
+      "evidence": [],
+      "note": "page labels and rotation: no fixture yet"
+    },
+    {
+      "case": 155,
+      "title": "Outline/bookmarks and tagged structure tree as reading-order evidence",
+      "source": "gap_audit",
+      "coverage": "open",
+      "evidence": [],
+      "note": "outline/structure tree: no fixture yet"
+    },
+    {
+      "case": 156,
+      "title": "Link annotations (URI, GoToR) as discovery edges; JavaScript/Launch actions",
+      "source": "gap_audit",
+      "coverage": "test",
+      "evidence": [
+        "tests/modules/content_processor/test_pdf_structures.py"
+      ],
+      "note": "annotations"
+    },
+    {
+      "case": 157,
+      "title": "XFA dynamic forms rendering blank outside Adobe; NeedAppearances",
+      "source": "gap_audit",
+      "coverage": "open",
+      "evidence": [],
+      "note": "XFA forms: no fixture yet"
+    },
+    {
+      "case": 158,
+      "title": "Permission flags (no-copy) with empty user password; owner-password only",
+      "source": "gap_audit",
+      "coverage": "open",
+      "evidence": [],
+      "note": "permission flags: no fixture yet"
+    },
+    {
+      "case": 159,
+      "title": "Linearized PDF partially downloaded still renders page 1",
+      "source": "gap_audit",
+      "coverage": "open",
+      "evidence": [],
+      "note": "partially downloaded linearized PDF: no fixture yet"
+    },
+    {
+      "case": 160,
+      "title": "RichMedia/3D/embedded multimedia objects",
+      "source": "gap_audit",
+      "coverage": "open",
+      "evidence": [],
+      "note": "RichMedia/3D PDF objects: no fixture yet"
+    },
+    {
+      "case": 161,
+      "title": "DOCX text boxes, shapes, SmartArt, WordArt (w:txbxContent, diagrams/data.xml) missed by body iteration",
+      "source": "gap_audit",
+      "coverage": "test",
+      "evidence": [
+        "tests/modules/content_processor/test_office.py"
+      ],
+      "note": ""
+    },
+    {
+      "case": 162,
+      "title": "DOCX hidden text (w:vanish), white/tiny fonts, cached field results (TOC, REF, MERGEFIELD), content controls, comments, footnotes/endnotes",
+      "source": "gap_audit",
+      "coverage": "test",
+      "evidence": [
+        "tests/modules/content_processor/test_office.py"
+      ],
+      "note": "hidden text, tracked changes"
+    },
+    {
+      "case": 163,
+      "title": "Embedded OLE (Excel in Word), linked external images, altChunk HTML imports",
+      "source": "gap_audit",
+      "coverage": "open",
+      "evidence": [],
+      "note": "embedded OLE: no fixture yet"
+    },
+    {
+      "case": 164,
+      "title": "XLSX very-hidden sheets, hidden rows/columns, number-format masking (;;;), white font, conditional formatting, validation lists, named ranges, pivot caches, ext",
+      "source": "gap_audit",
+      "coverage": "test",
+      "evidence": [
+        "tests/modules/content_processor/test_office.py"
+      ],
+      "note": "hidden sheet"
+    },
+    {
+      "case": 165,
+      "title": "PPTX inherited placeholder text from layouts/masters, grouped shapes, tables, chart titles/data, SmartArt, hidden slides, sections, animation-staged reveals, em",
+      "source": "gap_audit",
+      "coverage": "test",
+      "evidence": [
+        "tests/modules/content_processor/test_office.py"
+      ],
+      "note": "hidden slide"
+    },
+    {
+      "case": 166,
+      "title": "Legacy binaries (.doc, .xls, .ppt), RTF, ODF, Apple iWork, .pub, .vsd, .one",
+      "source": "gap_audit",
+      "coverage": "test",
+      "evidence": [
+        "tests/modules/content_processor/test_office.py"
+      ],
+      "note": "legacy reason"
+    },
+    {
+      "case": 167,
+      "title": "Email (.eml, .msg, .mbox), .ics",
+      "source": "gap_audit",
+      "coverage": "open",
+      "evidence": [],
+      "note": "email formats not built (C-9 rest)"
+    },
+    {
+      "case": 168,
+      "title": "Macro-enabled files and active content",
+      "source": "gap_audit",
+      "coverage": "open",
+      "evidence": [],
+      "note": "macro-enabled files: no fixture yet"
+    },
+    {
+      "case": 169,
+      "title": "HEIC/AVIF/JPEG XL/SVGZ/ICO/PSD",
+      "source": "gap_audit",
+      "coverage": "open",
+      "evidence": [],
+      "note": "HEIC/AVIF/PSD: no fixture yet"
+    },
+    {
+      "case": 170,
+      "title": "EXIF/IPTC/XMP text (captions, GPS → PII)",
+      "source": "gap_audit",
+      "coverage": "open",
+      "evidence": [],
+      "note": "EXIF/XMP text: no fixture yet"
+    },
+    {
+      "case": 171,
+      "title": "Subtitle formats (SRT/VTT/ASS/TTML), multi-language tracks, burned-in subtitles",
+      "source": "gap_audit",
+      "coverage": "not_local",
+      "evidence": [],
+      "note": "subtitle and media formats are Stage 3 (C-10)"
+    },
+    {
+      "case": 172,
+      "title": "HLS/DASH manifests; DRM (Widevine)",
+      "source": "gap_audit",
+      "coverage": "not_local",
+      "evidence": [],
+      "note": "HLS/DASH and DRM are Stage 3 (C-10)"
+    },
+    {
+      "case": 173,
+      "title": "Podcasts/audio with RSS enclosures and chapter metadata",
+      "source": "gap_audit",
+      "coverage": "not_local",
+      "evidence": [],
+      "note": "podcast audio is Stage 3 (C-10)"
+    },
+    {
+      "case": 174,
+      "title": "Archive hazards: bombs, depth, zip-slip paths, encrypted members, 7z/rar licensing",
+      "source": "gap_audit",
+      "coverage": "open",
+      "evidence": [],
+      "note": "archives not built (C-9 rest)"
+    },
+    {
+      "case": 175,
+      "title": "Markdown/RST/TeX/Jupyter (outputs incl. images), source files (code vs comments)",
+      "source": "gap_audit",
+      "coverage": "open",
+      "evidence": [],
+      "note": "Markdown/notebooks: no fixture yet"
+    },
+    {
+      "case": 176,
+      "title": "Full-content RSS/Atom/JSON Feed and sitemaps",
+      "source": "gap_audit",
+      "coverage": "open",
+      "evidence": [],
+      "note": "feeds and sitemaps need A-10"
+    },
+    {
+      "case": 177,
+      "title": "Vendor challenge signatures (Cloudflare, Akamai Bot Manager, HUMAN/PerimeterX, DataDome, Imperva, Kasada, AWS WAF, F5 Shape, Sucuri, Anubis proof-of-work)",
+      "source": "gap_audit",
+      "coverage": "fixture",
+      "evidence": [
+        "/challenge-200",
+        "/challenge-403"
+      ],
+      "note": ""
+    },
+    {
+      "case": 178,
+      "title": "Shadow blocking / degraded responses (HTTP 200 with empty data arrays, fewer listings, scrambled text, fake prices)",
+      "source": "gap_audit",
+      "coverage": "test",
+      "evidence": [
+        "tests/modules/content_processor/test_verify_rules_extended.py"
+      ],
+      "note": "R11 degradation"
+    },
+    {
+      "case": 179,
+      "title": "Behavioural traps (metronomic intervals, no asset requests, no pointer events)",
+      "source": "gap_audit",
+      "coverage": "not_local",
+      "evidence": [],
+      "note": "behavioural detection only exists on real anti-bot vendors"
+    },
+    {
+      "case": 180,
+      "title": "Honeypot links and hidden form fields",
+      "source": "gap_audit",
+      "coverage": "fixture",
+      "evidence": [
+        "/pages/honeypot"
+      ],
+      "note": ""
+    },
+    {
+      "case": 181,
+      "title": "Tarpits / infinite link mazes (anti-AI crawler traps)",
+      "source": "gap_audit",
+      "coverage": "open",
+      "evidence": [],
+      "note": "tarpit link mazes: no fixture yet"
+    },
+    {
+      "case": 182,
+      "title": "AI-crawler opt-out signals: robots.txt user-agents, noai/noimageai, TDM Reservation Protocol (tdmrep.json), X-Robots-Tag, content-signal headers",
+      "source": "gap_audit",
+      "coverage": "open",
+      "evidence": [],
+      "note": "AI opt-out signals need A-11"
+    },
+    {
+      "case": 183,
+      "title": "HTTP 402 pay-per-crawl responses",
+      "source": "gap_audit",
+      "coverage": "fixture",
+      "evidence": [
+        "/pay-per-crawl"
+      ],
+      "note": ""
+    },
+    {
+      "case": 184,
+      "title": "IP reputation (datacenter ASN, shared-proxy denylists), geo mismatch (IP country vs Accept-Language/timezone)",
+      "source": "gap_audit",
+      "coverage": "not_local",
+      "evidence": [],
+      "note": "IP reputation needs real vendors and networks"
+    },
+    {
+      "case": 185,
+      "title": "TLS/HTTP-2 fingerprint mismatch (JA3/JA4, SETTINGS order), header order/casing, missing client hints",
+      "source": "gap_audit",
+      "coverage": "test",
+      "evidence": [
+        "tests/modules/content_processor/test_impersonated_client.py"
+      ],
+      "note": "/fingerprint-wall"
+    },
+    {
+      "case": 186,
+      "title": "Automation detection surfaces (navigator.webdriver, CDP artifacts, software WebGL renderer, zero outer dimensions, untrusted events)",
+      "source": "gap_audit",
+      "coverage": "not_local",
+      "evidence": [],
+      "note": "automation detection only exists on real anti-bot vendors"
+    },
+    {
+      "case": 187,
+      "title": "Clearance cookies bound to IP + UA + TLS (cf_clearance), session expiry mid-run",
+      "source": "gap_audit",
+      "coverage": "not_local",
+      "evidence": [],
+      "note": "clearance cookies come from real vendors"
+    },
+    {
+      "case": 188,
+      "title": "Authorized login on client sites",
+      "source": "gap_audit",
+      "coverage": "not_local",
+      "evidence": [],
+      "note": "authorized login needs a client site (T0)"
+    },
+    {
+      "case": 189,
+      "title": "Block cascades: one burst bans a /24 used by other clients",
+      "source": "gap_audit",
+      "coverage": "test",
+      "evidence": [
+        "tests/modules/content_processor/test_escalation.py"
+      ],
+      "note": "circuit breaker"
+    },
+    {
+      "case": 190,
+      "title": "Legal signals (cease-and-desist, ToS clauses, robots as contract in some jurisdictions)",
+      "source": "gap_audit",
+      "coverage": "not_local",
+      "evidence": [],
+      "note": "legal signals are operator decisions"
+    },
+    {
+      "case": 191,
+      "title": "Poison URL (renderer crash, parser segfault, OOM)",
+      "source": "gap_audit",
+      "coverage": "test",
+      "evidence": [
+        "tests/modules/content_processor/test_hardening.py"
+      ],
+      "note": "K8 poison close-out"
+    },
+    {
+      "case": 192,
+      "title": "Browser memory leak, zombie processes, GPU process crash",
+      "source": "gap_audit",
+      "coverage": "not_local",
+      "evidence": [],
+      "note": "browser recycling (B-16) needs long real sessions"
+    },
+    {
+      "case": 193,
+      "title": "Disk exhaustion from evidence (full-page screenshots × states × 5,000)",
+      "source": "gap_audit",
+      "coverage": "test",
+      "evidence": [
+        "tests/modules/content_processor/test_hardening.py"
+      ],
+      "note": "K9 evidence budget"
+    },
+    {
+      "case": 194,
+      "title": "Host clock skew, DST, timezone mismatch with declared scope",
+      "source": "gap_audit",
+      "coverage": "open",
+      "evidence": [],
+      "note": "clock skew/DST: no test yet"
+    },
+    {
+      "case": 195,
+      "title": "Duplicate task delivery (at-least-once) double-counting regions",
+      "source": "gap_audit",
+      "coverage": "test",
+      "evidence": [
+        "tests/modules/content_processor/test_memory_ledger.py"
+      ],
+      "note": "idempotent enqueue"
+    },
+    {
+      "case": 196,
+      "title": "Partial writes on crash (evidence uploaded, ledger not updated)",
+      "source": "gap_audit",
+      "coverage": "not_local",
+      "evidence": [],
+      "note": "crash consistency needs Postgres (K1)"
+    },
+    {
+      "case": 197,
+      "title": "Tool-version drift mid-run (deploy during a run)",
+      "source": "gap_audit",
+      "coverage": "open",
+      "evidence": [],
+      "note": "tool-version drift: no test yet"
+    },
+    {
+      "case": 198,
+      "title": "Rate-limiter starvation between runs/tenants on the same host",
+      "source": "gap_audit",
+      "coverage": "test",
+      "evidence": [
+        "tests/modules/content_processor/test_memory_ledger.py"
+      ],
+      "note": "host slots"
+    },
+    {
+      "case": 199,
+      "title": "Wall-clock overrun (5,000 slow URLs)",
+      "source": "gap_audit",
+      "coverage": "test",
+      "evidence": [
+        "tests/modules/content_processor/test_hardening.py"
+      ],
+      "note": "K9 runtime budget"
+    },
+    {
+      "case": 200,
+      "title": "Missing per-host observability",
+      "source": "gap_audit",
+      "coverage": "open",
+      "evidence": [],
+      "note": "per-host observability (P-7) not built"
+    },
+    {
+      "case": 201,
+      "title": "Non-deterministic LLM annotations across reruns",
+      "source": "gap_audit",
+      "coverage": "not_local",
+      "evidence": [],
+      "note": "no LLM annotator runs (cost ceiling $0)"
+    },
+    {
+      "case": 202,
+      "title": "Cost blow-up on paid routes (cloud OCR on 5,000 PDFs)",
+      "source": "gap_audit",
+      "coverage": "open",
+      "evidence": [],
+      "note": "paid-route cost caps need A-7"
+    },
+    {
+      "case": 203,
+      "title": "PII in pages (staff pages, reviews, EXIF GPS)",
+      "source": "gap_audit",
+      "coverage": "open",
+      "evidence": [],
+      "note": "PII tagging not built"
+    },
+    {
+      "case": 204,
+      "title": "Copyright/TDM, raw-evidence retention, right-to-delete, cross-client isolation",
+      "source": "gap_audit",
+      "coverage": "not_local",
+      "evidence": [],
+      "note": "retention and TDM are policy and operations"
+    },
+    {
+      "case": 205,
+      "title": "Crawl pollutes client analytics (GA4, heatmaps, A/B exposure)",
+      "source": "gap_audit",
+      "coverage": "open",
+      "evidence": [],
+      "note": "analytics suppression: no fixture yet"
+    },
+    {
+      "case": 206,
+      "title": "Side-effect GET links (add-to-cart, unsubscribe, vote, logout, delete)",
+      "source": "gap_audit",
+      "coverage": "test",
+      "evidence": [
+        "tests/modules/content_processor/test_explorer.py"
+      ],
+      "note": "pages/accordion_side_effect"
+    },
+    {
+      "case": 207,
+      "title": "Credentials for authorized crawls",
+      "source": "gap_audit",
+      "coverage": "not_local",
+      "evidence": [],
+      "note": "credentials for authorized crawls need a client engagement"
+    },
+    {
+      "case": 208,
+      "title": "Audit of who authorized what",
+      "source": "gap_audit",
+      "coverage": "test",
+      "evidence": [
+        "tests/modules/content_processor/test_contracts.py"
+      ],
+      "note": "authorization validators"
+    },
+    {
+      "case": 209,
+      "title": "Template / page-type fingerprint (for theming, boilerplate and soft-redirect detection)",
+      "source": "gap_audit",
+      "coverage": "open",
+      "evidence": [],
+      "note": "template fingerprint is not persisted yet"
+    },
+    {
+      "case": 210,
+      "title": "Stable block identity across recrawls",
+      "source": "gap_audit",
+      "coverage": "test",
+      "evidence": [
+        "tests/modules/content_processor/test_recrawl_units.py"
+      ],
+      "note": ""
+    },
+    {
+      "case": 211,
+      "title": "Boilerplate labelling across the site (nav, footer, cookie text, legal footers)",
+      "source": "gap_audit",
+      "coverage": "test",
+      "evidence": [
+        "tests/modules/content_processor/test_html_source.py"
+      ],
+      "note": "roles"
+    },
+    {
+      "case": 212,
+      "title": "Claim context on blocks (entity, product/variant, effective date, locale, audience, conditions)",
+      "source": "gap_audit",
+      "coverage": "test",
+      "evidence": [
+        "tests/modules/content_processor/test_claims.py"
+      ],
+      "note": ""
+    },
+    {
+      "case": 213,
+      "title": "Language per block; mixed-language pages",
+      "source": "gap_audit",
+      "coverage": "open",
+      "evidence": [],
+      "note": "per-block language not populated"
+    },
+    {
+      "case": 214,
+      "title": "Visual-theme evidence (palette, fonts, logo, layout grid)",
+      "source": "gap_audit",
+      "coverage": "open",
+      "evidence": [],
+      "note": "visual-theme evidence not built"
+    },
+    {
+      "case": 215,
+      "title": "Lead-generation form wall around an asset",
+      "source": "feasibility",
+      "coverage": "fixture",
+      "evidence": [
+        "/pages/gated_whitepaper",
+        "/pages/newsletter_only"
+      ],
+      "note": ""
+    },
+    {
+      "case": 216,
+      "title": "Delivery pincode / location modal (marketplaces)",
+      "source": "feasibility",
+      "coverage": "fixture",
+      "evidence": [
+        "/pages/pincode_modal"
+      ],
+      "note": ""
+    },
+    {
+      "case": 217,
+      "title": "Product unavailable / unlisted with HTTP 200",
+      "source": "feasibility",
+      "coverage": "fixture",
+      "evidence": [
+        "/pages/product_unavailable"
+      ],
+      "note": ""
+    },
+    {
+      "case": 218,
+      "title": "Sponsored and recommendation interleaving in listings",
+      "source": "feasibility",
+      "coverage": "open",
+      "evidence": [],
+      "note": "sponsored interleaving: no fixture yet"
+    },
+    {
+      "case": 219,
+      "title": "Variant selectors that change price, stock and images",
+      "source": "feasibility",
+      "coverage": "open",
+      "evidence": [],
+      "note": "variant selectors need B-14"
+    },
+    {
+      "case": 220,
+      "title": "Reviews and Q&A behind load-more and login",
+      "source": "feasibility",
+      "coverage": "open",
+      "evidence": [],
+      "note": "reviews behind load-more and login: no fixture yet"
+    },
+    {
+      "case": 221,
+      "title": "Price or key facts rendered as images or obfuscated fonts",
+      "source": "feasibility",
+      "coverage": "fixture",
+      "evidence": [
+        "/pages/obfuscated_font"
+      ],
+      "note": ""
+    },
+    {
+      "case": 222,
+      "title": "Marketplace identity explosion (ASIN/PID canonical vs tracking and variant URLs)",
+      "source": "feasibility",
+      "coverage": "test",
+      "evidence": [
+        "tests/modules/content_processor/test_normalize.py"
+      ],
+      "note": "schedule key keeps variant parameters"
+    }
+  ]
+}
