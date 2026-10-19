@@ -312,7 +312,7 @@ async def test_keyboard_traversal_keeps_focus_only_text(renderer, server_url):
 
 
 async def test_keyboard_traversal_ends_without_focusable_elements(renderer, server_url):
-    _, ex = await _explore(renderer, f"{server_url}/pages/shadow_dom", EVERYTHING)
+    _, ex = await _explore(renderer, f"{server_url}/pages/frame_child", EVERYTHING)
     assert _one(ex, "keyboard").reason == "no_focusable_elements"
 
 
