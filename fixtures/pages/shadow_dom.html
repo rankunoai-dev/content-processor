@@ -3,10 +3,17 @@
 <secret-box></secret-box>
 <div id="decl"><template shadowrootmode="closed"><p>Declarative closed text: vision included.</p></template></div>
 </main>
+<site-footer style="display:contents"></site-footer>
 <script>
 customElements.define('benefit-card', class extends HTMLElement { constructor() { super();
   this.attachShadow({ mode: 'open' }).innerHTML =
     '<p>Open shadow text: wellness rewards.</p><slot></slot><p style="display:none">Hidden shadow text.</p>'; } });
 customElements.define('secret-box', class extends HTMLElement { constructor() { super();
   this.attachShadow({ mode: 'closed' }).innerHTML = '<p>Closed shadow text: travel cover.</p>'; } });
+customElements.define('footer-links', class extends HTMLElement { constructor() { super();
+  this.attachShadow({ mode: 'open' }).innerHTML =
+    '<div style="display:contents"><a href="#">Footer link: careers</a></div>'; } });
+customElements.define('site-footer', class extends HTMLElement { constructor() { super();
+  this.attachShadow({ mode: 'open' }).innerHTML =
+    '<footer><h2>Quick links</h2><footer-links></footer-links></footer>'; } });
 </script></body></html>

@@ -408,7 +408,7 @@ async def test_open_and_closed_shadow_roots_are_read(renderer, server_url):
     base, ex = await _explore(renderer, f"{server_url}/pages/shadow_dom", InteractionPolicy())
     shadow = _one(ex, "shadow_root")
     assert (shadow.status, shadow.reason) == ("visited", "composed_tree_read")
-    assert ex.composition["open_roots"] == 1
+    assert ex.composition["open_roots"] == 3
     assert ex.composition["closed_roots"] == ex.composition["closed_roots_read"] == 2
     composed = ex.states[(shadow.state_index or 0) - 1]
     dom = composed.dom_html.decode()
@@ -417,6 +417,8 @@ async def test_open_and_closed_shadow_roots_are_read(renderer, server_url):
         "Closed shadow text: travel cover.",
         "Declarative closed text: vision included.",
         "Slotted light text: dental included.",
+        "Quick links",  # display:contents host
+        "Footer link: careers",  # nested root inside it
     ):
         assert text in composed.inner_text
         assert text in dom

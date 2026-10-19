@@ -72,9 +72,35 @@ COMPOSE_JS = """
   const any = Array.from(document.querySelectorAll('*')).some(
     (el) => el.shadowRoot || el.hasAttribute('data-cp-closed'));
   if (!any) { return { open: 0, closed: [] }; }
+  // `display: contents` hosts have no box of their own; their parent decides.
+  const hostShown = (el) => (window.getComputedStyle(el).display === 'contents'
+    ? (el.parentElement ? shown(el.parentElement) : true) : shown(el));
   let open = 0;
   const closed = [];
   const texts = [];
+  // Text of one shadow root that is actually laid out: a text node counts when it has
+  // client rects and its parent is not visibility:hidden. Slotted (light) text is
+  // already in body.innerText; nested roots are collected when `ser` reaches them.
+  const laidOut = (t) => {
+    const p = t.parentElement;
+    if (!p || window.getComputedStyle(p).visibility === 'hidden') { return false; }
+    const r = document.createRange();
+    r.selectNodeContents(t);
+    return r.getClientRects().length > 0;
+  };
+  const collect = (n) => {
+    for (const c of n.childNodes) {
+      if (c.nodeType === 3) {
+        const v = c.nodeValue.trim();
+        if (v && laidOut(c)) { texts.push(v); }
+      } else if (c.nodeType === 1) {
+        const t = c.tagName.toLowerCase();
+        if (!['style', 'script', 'template', 'slot', 'noscript', 'link'].includes(t)) {
+          collect(c);
+        }
+      }
+    }
+  };
   const ser = (node) => {
     if (node.nodeType === 3) { return esc(node.nodeValue); }
     if (node.nodeType !== 1) { return ''; }
@@ -90,17 +116,10 @@ COMPOSE_JS = """
       open += 1;
       attrs += ' data-cp-shadow="open"';
       inner = Array.from(node.shadowRoot.childNodes).map(ser).join('');
-      if (shown(node)) {
-        for (const c of node.shadowRoot.children) {
-          const t = c.tagName.toLowerCase();
-          const skip = ['style', 'script', 'template', 'slot', 'link'].includes(t);
-          if (skip || !shown(c)) { continue; }
-          texts.push(c.innerText || '');
-        }
-      }
+      collect(node.shadowRoot);
     } else if (node.hasAttribute('data-cp-closed')) {
       const i = node.getAttribute('data-cp-closed');
-      closed.push({ index: Number(i), visible: shown(node) });
+      closed.push({ index: Number(i), visible: hostShown(node) });
       attrs += ' data-cp-shadow="closed"';
       inner = '\\u0000cp-closed:' + i + '\\u0000';
     } else if (tag === 'template' || tag === 'script' || tag === 'style') {
