@@ -83,4 +83,4 @@ Only Lane L0 edits `contracts.py`, `enums.py`, `workers/ports.py`, `ledger/schem
 - **Change:** new optional extra `office = ["python-docx>=1.2,<2", "openpyxl>=3.1,<4", "python-pptx>=1.0,<2"]`, installed by CI alongside `dev`. All three are pure Python with no torch and no external binaries. Revised 2026-10-19: this replaces an earlier proposal for `docling-slim[format-office]`, which was dropped because the adapter now uses these libraries directly. mypy needs `openpyxl.*` to be ignored as untyped (the adapter carries an inline `type: ignore[import-untyped]` until a stub or override is added here; `types-openpyxl` is the stub option).
 - **Not requested:** LibreOffice. `.doc`, `.xls` and `.ppt` are reported as `UNSUPPORTED` with reason `legacy_office_requires_libreoffice:<ext>`; LibreOffice is deferred until the modern formats are verified and the operator approves a system install.
 - **Why:** C-9 (Office formats, cases 63–68, 161–168)
-- **Status:** OPEN
+- **Status:** LANDED (merged to main with lane/L3-docs, 2026-10-19; `office` extra in pyproject.toml)
