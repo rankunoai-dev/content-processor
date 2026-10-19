@@ -6,7 +6,11 @@ in rounds (fetch, then render, then documents) because later stages create
 work for earlier ones (depth-1 follow-ups found in a rendered page are new
 FETCH tasks). A run stops when nothing is left, when a round makes no
 progress (everything still pending is held by Retry-After, a host delay or an
-open circuit), or at the round cap. The stop reason is reported, never hidden.
+open circuit), at the round cap, or when a run budget is reached (K9: runtime,
+requests, bytes, evidence bytes; see `scheduler/budget.py`). On a budget stop
+the run's open tasks are cancelled and each affected resource ends
+`BUDGET_EXHAUSTED` with a BUDGET_STOPPED gap, so its URL reads PARTIAL with
+the reason. The stop reason is reported, never hidden.
 """
 
 from __future__ import annotations
@@ -20,8 +24,10 @@ from pydantic import Field
 from src.core.logger import get_logger
 from src.core.schemas import StrictModel
 from src.integrations.evidence_store import EvidenceStore
-from src.modules.content_processor.contracts import RunScope, Task, UrlRecord
-from src.modules.content_processor.enums import TaskKind
+from src.modules.content_processor.contracts import RunEvent, RunScope, Task, UrlRecord
+from src.modules.content_processor.enums import EntityStatus, GapType, TaskKind
+from src.modules.content_processor.ledger.outcomes import close_out_task_resource
+from src.modules.content_processor.scheduler.budget import BudgetMeter, BudgetName
 from src.modules.content_processor.scope.frontier import FrontierPlan
 from src.modules.content_processor.verify.record import frames_from_evidence, url_records_for_run
 from src.modules.content_processor.workers.ports import LedgerPort
@@ -42,6 +48,9 @@ __all__ = [
 _logger = get_logger("content_processor.scheduler")
 
 StageName = Literal["fetch", "render", "docs"]
+StopReason = Literal[
+    "drained", "no_progress_tasks_held", "max_rounds", "task_cap", "budget_exhausted"
+]
 STAGE_ORDER: tuple[StageName, ...] = ("fetch", "render", "docs")
 STAGE_KINDS: dict[StageName, tuple[TaskKind, ...]] = {
     "fetch": (TaskKind.FETCH,),
@@ -122,8 +131,11 @@ class RunExecution(StrictModel):
     rounds: int = Field(ge=0)
     processed: dict[str, int]
     open_tasks_after: int = Field(ge=0, description="Pending or leased tasks of the run's stages")
-    stop_reason: Literal["drained", "no_progress_tasks_held", "max_rounds", "task_cap"]
+    stop_reason: StopReason
     elapsed_s: float = Field(ge=0.0)
+    budget_exhausted: BudgetName | None = None
+    budget_usage: dict[str, dict[str, float]] | None = None
+    budget_closed_out: int = Field(default=0, ge=0, description="Resources ended BUDGET_EXHAUSTED")
 
 
 class LazyRenderStage:
@@ -178,6 +190,65 @@ def _kinds(stages: Iterable[StageName]) -> list[TaskKind]:
     return [k for s in STAGE_ORDER if s in set(stages) for k in STAGE_KINDS[s]]
 
 
+async def _drive_stage(stage: Stage, opts: RunOptions, meter: BudgetMeter | None) -> int:
+    """Run one stage; with a meter, one task at a time so the budget is checked before each."""
+    if meter is None:
+        return await stage.run_until_idle(
+            max_tasks=opts.max_tasks_per_stage,
+            idle_polls=opts.idle_polls,
+            poll_s=opts.poll_s,
+            max_wait_s=opts.max_wait_s,
+        )
+    done = 0
+    while meter.exceeded() is None:
+        if opts.max_tasks_per_stage is not None and done >= opts.max_tasks_per_stage:
+            break
+        got = await stage.run_until_idle(
+            max_tasks=1,
+            idle_polls=opts.idle_polls,
+            poll_s=opts.poll_s,
+            max_wait_s=min(opts.max_wait_s, meter.remaining_runtime_s()),
+        )
+        done += got
+        if got == 0:
+            break
+    return done
+
+
+def _close_out_for_budget(
+    ledger: LedgerPort, *, run_id: str, kinds: list[TaskKind], which: BudgetName
+) -> int:
+    """Cancel the run's open tasks and end their resources BUDGET_EXHAUSTED; return the count."""
+    reason = f"budget_exhausted:{which}"
+    closed: set[str] = set()
+    for task in ledger.cancel_open_tasks(run_id, kinds, reason):
+        resource = close_out_task_resource(
+            ledger,
+            run_id=run_id,
+            host=task.host,
+            kind=task.kind,
+            payload=task.payload,
+            status=EntityStatus.BUDGET_EXHAUSTED,
+            gap_type=GapType.BUDGET_STOPPED,
+            gap_status=EntityStatus.BUDGET_EXHAUSTED,
+            reason=reason,
+            attempt=task.attempts,
+        )
+        if resource is not None:
+            closed.add(resource.resource_id)
+    ledger.append_event(
+        RunEvent(
+            run_id=run_id,
+            entity_type="run",
+            entity_id=run_id,
+            old_state=None,
+            new_state=EntityStatus.BUDGET_EXHAUSTED.value,
+            reason=reason,
+        )
+    )
+    return len(closed)
+
+
 async def execute_run(
     ledger: LedgerPort,
     *,
@@ -185,8 +256,9 @@ async def execute_run(
     stages: Mapping[StageName, Stage],
     options: RunOptions | None = None,
     reap: Callable[[], object] | None = None,
+    meter: BudgetMeter | None = None,
 ) -> RunExecution:
-    """Drive the given stages in rounds until the run's queue drains or stalls.
+    """Drive the given stages in rounds until the run's queue drains, stalls or hits a budget.
 
     Args:
         ledger: Shared ledger port; this run's `pending_count` decides when to stop.
@@ -194,6 +266,8 @@ async def execute_run(
         stages: Worker per stage name; stages missing here are not run.
         options: Round and wait limits.
         reap: Called before each round (durable ledgers reclaim expired leases).
+        meter: Run budgets (K9). With a meter the budget is checked before every
+            task; when one is reached the run stops with `budget_exhausted`.
     """
     opts = options or RunOptions()
     order = [s for s in STAGE_ORDER if s in stages and s in opts.stages]
@@ -202,21 +276,25 @@ async def execute_run(
     processed: dict[str, int] = dict.fromkeys(order, 0)
     started = time.perf_counter()
     rounds = 0
-    stop: Literal["drained", "no_progress_tasks_held", "max_rounds", "task_cap"] = "max_rounds"
+    stop: StopReason = "max_rounds"
+    exhausted: BudgetName | None = None
     while rounds < max_rounds:
+        if meter is not None and (exhausted := meter.exceeded()) is not None:
+            stop = "budget_exhausted"
+            break
         rounds += 1
         if reap is not None:
             reap()
         progress = 0
         for name in order:
-            n = await stages[name].run_until_idle(
-                max_tasks=opts.max_tasks_per_stage,
-                idle_polls=opts.idle_polls,
-                poll_s=opts.poll_s,
-                max_wait_s=opts.max_wait_s,
-            )
+            n = await _drive_stage(stages[name], opts, meter)
             processed[name] += n
             progress += n
+            if meter is not None and meter.exceeded() is not None:
+                break
+        if meter is not None and (exhausted := meter.exceeded()) is not None:
+            stop = "budget_exhausted"
+            break
         if ledger.pending_count(kinds, run_id=run_id) == 0:
             stop = "drained"
             break
@@ -226,10 +304,19 @@ async def execute_run(
         if progress == 0:
             stop = "no_progress_tasks_held"
             break
+    closed_out = 0
+    if exhausted is not None:
+        closed_out = _close_out_for_budget(ledger, run_id=run_id, kinds=kinds, which=exhausted)
     open_after = ledger.pending_count(kinds, run_id=run_id) if kinds else 0
     _logger.info(
         "run_execution_finished",
-        extra={"run_id": run_id, "rounds": rounds, "stop": stop, "open_after": open_after},
+        extra={
+            "run_id": run_id,
+            "rounds": rounds,
+            "stop": stop,
+            "open_after": open_after,
+            "budget_exhausted": exhausted,
+        },
     )
     return RunExecution(
         run_id=run_id,
@@ -239,6 +326,9 @@ async def execute_run(
         open_tasks_after=open_after,
         stop_reason=stop,
         elapsed_s=round(time.perf_counter() - started, 3),
+        budget_exhausted=exhausted,
+        budget_usage=meter.usage() if meter is not None else None,
+        budget_closed_out=closed_out,
     )
 
 

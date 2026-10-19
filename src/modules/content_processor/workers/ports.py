@@ -10,6 +10,8 @@ from collections.abc import Sequence
 from datetime import datetime
 from typing import Any, Protocol
 
+from pydantic import Field
+
 from src.core.schemas import StrictModel
 from src.modules.content_processor.contracts import (
     ContentBlock,
@@ -32,6 +34,9 @@ class RobotsCache(StrictModel):
     body: str | None
     status: int | None
     fetched_at: datetime
+    crawl_delay_s: float | None = Field(
+        default=None, ge=0.0, description="For the bot's own group; persisted by both ledgers (K7)"
+    )
 
 
 class LedgerPort(Protocol):
@@ -181,4 +186,10 @@ class LedgerPort(Protocol):
 
     def outstanding_resource_ids(self, run_id: str, kinds: Sequence[TaskKind]) -> set[str]:
         """Resource IDs with a PENDING or LEASED task of the given kinds."""
+        ...
+
+    # -- K9: run budgets ----------------------------------------------------
+
+    def cancel_open_tasks(self, run_id: str, kinds: Sequence[TaskKind], reason: str) -> list[Task]:
+        """Cancel the run's PENDING tasks of these kinds (leased ones finish); return them."""
         ...

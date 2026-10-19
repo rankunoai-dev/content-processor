@@ -22,6 +22,7 @@ from src.modules.content_processor.contracts import (
 )
 from src.modules.content_processor.enums import AccessTier, TaskKind, TaskState
 from src.modules.content_processor.governor.escalation import CircuitState, HostAccessState
+from src.modules.content_processor.governor.robots import MAX_CRAWL_DELAY_S, crawl_delay_for
 from src.modules.content_processor.ledger.sql import HOST_SLOT_KINDS
 from src.modules.content_processor.workers.ports import RobotsCache
 
@@ -237,16 +238,17 @@ class MemoryLedger:
         return self.robots.get(host)
 
     def set_robots(self, tenant_id: str, host: str, cache: RobotsCache) -> None:
-        """Store robots and derive the crawl-delay for the host."""
+        """Store robots and the crawl-delay for the host (K7).
+
+        The fetch worker passes the delay of the bot's own group; a cache without
+        one falls back to the `*` group, parsed the same way.
+        """
         self.robots[host] = cache
-        if cache.body:
-            for line in cache.body.splitlines():
-                key, _, value = line.partition(":")
-                if (
-                    key.strip().lower() == "crawl-delay"
-                    and value.strip().replace(".", "", 1).isdigit()
-                ):
-                    self._crawl_delay[host] = min(float(value.strip()), 30.0)
+        delay = cache.crawl_delay_s
+        if delay is None:
+            delay = crawl_delay_for(cache.body, "*")
+        if delay is not None:
+            self._crawl_delay[host] = min(delay, MAX_CRAWL_DELAY_S)
 
     # -- CR-002: Edges and schedule key lookup ------------------------------
 
@@ -358,6 +360,18 @@ class MemoryLedger:
             if sched_key and str(sched_key) in by_key:
                 outstanding.add(by_key[str(sched_key)])
         return outstanding
+
+    # -- K9: run budgets ----------------------------------------------------
+
+    def cancel_open_tasks(self, run_id: str, kinds: Sequence[TaskKind], reason: str) -> list[Task]:
+        """Cancel the run's PENDING tasks of these kinds (leased ones finish); return them."""
+        cancelled: list[Task] = []
+        for task in self._tasks.values():
+            if task.run_id == run_id and task.state is TaskState.PENDING and task.kind in kinds:
+                task.state = TaskState.CANCELLED
+                task.last_error = reason
+                cancelled.append(task.model_copy(deep=True))
+        return cancelled
 
     # -- reporting ----------------------------------------------------------
 

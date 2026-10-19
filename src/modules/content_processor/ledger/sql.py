@@ -12,6 +12,7 @@ from src.modules.content_processor.enums import TaskKind
 __all__ = [
     "HOST_SLOT_KINDS",
     "SQL_APPEND_EVENT",
+    "SQL_CANCEL_OPEN_TASKS",
     "SQL_CANCEL_RUN",
     "SQL_CHECKPOINT",
     "SQL_COMPLETE",
@@ -196,11 +197,19 @@ SET state = CASE WHEN t.attempts >= t.max_attempts THEN 'QUARANTINED' ELSE 'PEND
     finished_at = CASE WHEN t.attempts >= t.max_attempts THEN now() ELSE NULL END
 FROM expired e
 WHERE t.id = e.id
-RETURNING t.id, t.state, t.run_id, t.kind, t.host, t.attempts
+RETURNING t.id, t.state, t.run_id, t.kind, t.host, t.attempts, t.max_attempts, t.payload,
+          t.last_error
 """
 
 SQL_CANCEL_RUN = """
 UPDATE runs SET cancel_requested = TRUE, state = 'CANCELLING' WHERE run_id = %(run_id)s
+"""
+
+SQL_CANCEL_OPEN_TASKS = """
+UPDATE tasks
+SET state = 'CANCELLED', last_error = %(reason)s, finished_at = now()
+WHERE run_id = %(run_id)s AND state = 'PENDING' AND kind = ANY(%(kinds)s)
+RETURNING *
 """
 
 SQL_APPEND_EVENT = """
