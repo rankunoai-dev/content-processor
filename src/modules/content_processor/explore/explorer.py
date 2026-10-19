@@ -26,12 +26,13 @@ import contextlib
 import hashlib
 import time
 from typing import Any, get_args
+from urllib.parse import urlsplit
 
 from playwright.async_api import Error as PlaywrightError
 from playwright.async_api import Request, Route
 
 from src.core.logger import get_logger
-from src.integrations.browser_client import ANNOTATE_JS, SETTLE_PROBE_JS
+from src.integrations.browser_client import ANALYTICS_HOSTS, ANNOTATE_JS, SETTLE_PROBE_JS
 from src.modules.content_processor.contracts import AllowedAction, InteractionPolicy
 from src.modules.content_processor.explore.compose import (
     ClosedRoot,
@@ -76,6 +77,38 @@ _ACTION_FOR_KIND: dict[str, str] = {
 }
 _ITERATIVE = frozenset({"carousel", "load_more", "pagination"})
 _SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+# Non-GET requests to these are telemetry or consent logging: blocked, never charged
+# to the control being clicked (they also fire late, after the action that caused them).
+TELEMETRY_HOSTS: tuple[str, ...] = (
+    *ANALYTICS_HOSTS,
+    "onetrust.com",
+    "cookielaw.org",
+    "cookiebot.com",
+    "consensu.org",
+    "trustarc.com",
+    "adobedc.net",
+    "omtrdc.net",
+    "demdex.net",
+    "facebook.net",
+    "facebook.com",
+    "bat.bing.com",
+    "ads.linkedin.com",
+    "analytics.tiktok.com",
+    # real-user monitoring and error reporting
+    "nr-data.net",
+    "newrelic.com",
+    "sentry.io",
+    "datadoghq.com",
+    "datadoghq.eu",
+    "bugsnag.com",
+    "rollbar.com",
+    "dynatrace.com",
+    "quantummetric.com",
+    "contentsquare.net",
+    "glassboxdigital.io",
+    "akstat.io",
+    "go-mpulse.net",
+)
 _BODY_TEXT = "document.body ? document.body.innerText : ''"
 
 CLEAR_ANNOTATIONS_JS = """
@@ -95,6 +128,13 @@ CLEAR_ANNOTATIONS_JS = """
 }
 """
 
+# Widgets that are not the site's content: consent managers and media players.
+THIRD_PARTY_CHROME = (
+    "#onetrust-consent-sdk,#onetrust-pc-sdk,#CybotCookiebotDialog,#didomi-host,"
+    ".truste_box_overlay,#usercentrics-root,.qc-cmp2-container,.video-js,.vjs-control-bar,"
+    ".vjs-menu,.vjs-modal-dialog,.jwplayer,.plyr,.ytp-chrome-bottom"
+)
+
 DISCOVER_JS = (
     """
 () => {
@@ -105,6 +145,9 @@ DISCOVER_JS = (
   };
   const labelOf = (el) => (el.getAttribute('aria-label') || el.innerText || el.textContent || '')
     .trim().replace(/\\s+/g, ' ').slice(0, 80);
+  const CHROME = '"""
+    + THIRD_PARTY_CHROME
+    + """';
   const body = document.body;
   if (!body) { return []; }
   let next = Number(body.getAttribute('data-cp-ctl-next') || '0');
@@ -124,6 +167,7 @@ DISCOVER_JS = (
       abs: el.href || '',
       type: (el.getAttribute('type') || '').toLowerCase(),
       inNav: !!el.closest('nav,[role=menubar],[role=navigation],[role=menu]'),
+      chrome: !!el.closest(CHROME),
       expanded: el.getAttribute('aria-expanded'),
       selected: el.getAttribute('aria-selected'),
       disabled: el.disabled === true || el.getAttribute('aria-disabled') === 'true',
@@ -158,6 +202,22 @@ REVEAL_UNTIL_FOUND_JS = """
 }
 """
 
+# A plain text element in the viewport: clicking it can trigger nothing on the site.
+INERT_POINT_JS = """
+() => {
+  const busy = 'a,button,label,summary,details,input,select,textarea,[role=button],[onclick],'
+    + '[tabindex],[aria-expanded],[aria-haspopup],[contenteditable]';
+  for (const el of document.querySelectorAll('main p, main h1, main h2, p, h1, h2, h3')) {
+    if (el.closest(busy) || el.querySelector(busy)) { continue; }
+    const r = el.getBoundingClientRect();
+    if (r.width > 20 && r.height > 8 && r.top >= 0 && r.bottom <= window.innerHeight) {
+      return { x: r.left + Math.min(10, r.width / 2), y: r.top + r.height / 2 };
+    }
+  }
+  return null;
+}
+"""
+
 BLUR_JS = "() => { const a = document.activeElement; if (a && a.blur) { a.blur(); } }"
 
 
@@ -188,6 +248,9 @@ class StateExplorer:
         self._followups: list[str] = []
         self._closed: list[ClosedRoot] | None = None
         self._composition: dict[str, Any] = {}
+        self._background: set[str] = set()
+        self._acting = False
+        self._last_error = ""
 
     async def explore(self, page: Any) -> ExplorationResult:
         """Explore the page. Never raises; failures are recorded on the result."""
@@ -197,6 +260,8 @@ class StateExplorer:
             unexplored_action_kinds=sorted(self._allowed - IMPLEMENTED_ACTIONS),
         )
         unsafe: list[str] = []
+        self._background.clear()
+        self._acting = False
         self._visible.clear()
         self._info.clear()
         self._iterations.clear()
@@ -205,7 +270,15 @@ class StateExplorer:
 
         async def guard(route: Route, request: Request) -> None:
             if request.method.upper() not in _SAFE_METHODS:
-                unsafe.append(f"{request.method} {request.url}")
+                key = _endpoint(request.url)
+                if not self._acting:
+                    # Fired with no action of ours running (sensor beacons, analytics):
+                    # still blocked, but never charged to a control later.
+                    self._background.add(key)
+                if self._acting and (key in self._background or _is_telemetry(request.url)):
+                    result.background_requests_blocked += 1
+                else:
+                    unsafe.append(f"{request.method} {request.url}")
                 await route.abort("blockedbyclient")
                 return
             if request.is_navigation_request() and request.frame == page.main_frame:
@@ -216,6 +289,8 @@ class StateExplorer:
 
         await page.route("**/*", guard)
         try:
+            # A short idle window lets background beacons show themselves first.
+            await asyncio.sleep(self._settle_poll_s * 4)
             await self._loop(page, result, unsafe, started)
         except PlaywrightError as exc:
             result.error = f"PlaywrightError:{str(exc).splitlines()[0][:200]}"
@@ -328,6 +403,7 @@ class StateExplorer:
                 records[f"scroll:{acc.surface_id}"].state_index = state.index
 
         await self._frames(page, add, result)
+        await self._calibrate(page)
 
         while True:
             await self._scan(page, records, order)
@@ -351,13 +427,18 @@ class StateExplorer:
                 continue
 
             unsafe_before = len(unsafe)
-            clicked = await self._act(page, target)
-            result.actions_used += 1
+            self._acting = True
+            try:
+                clicked = await self._act(page, target)
+                result.actions_used += 1
+                if clicked:
+                    await self._settle(page)
+            finally:
+                self._acting = False
             if not clicked:
-                target.status, target.reason = "unvisited", "click_failed"
+                target.status, target.reason = "unvisited", f"click_failed:{self._last_error}"
                 await self._restore(page, target)
                 continue
-            await self._settle(page)
             if len(unsafe) > unsafe_before:
                 target.status = "unvisited"
                 target.reason = f"unsafe_side_effect:{unsafe[unsafe_before][:80]}"
@@ -380,7 +461,7 @@ class StateExplorer:
                 continue
             target.status = "visited"
             if not fresh:
-                target.reason = "no_new_visible_state"
+                _note(target, "no_new_visible_state")
 
         if "keyboard_traverse" in self._allowed and result.stop_reason is None:
             add(await self._keyboard(page, result, seen_states, new_state, deadline))
@@ -397,6 +478,24 @@ class StateExplorer:
             else:
                 rec.reason = "not_reached"
         result.controls = [records[i] for i in order]
+
+    async def _calibrate(self, page: Any) -> None:
+        """Click plain text once so interaction-triggered beacons are learned as background.
+
+        Bot-management sensors and analytics POST on every pointer event. Fired here,
+        by a click that cannot do anything on the site, they are known to be
+        background, so a later click on a real control is not charged with them.
+        """
+        point = await page.evaluate(INERT_POINT_JS)
+        if point is None:
+            return
+        x, y = float(point["x"]), float(point["y"])
+        try:
+            await page.mouse.move(x, y, steps=4)
+            await page.mouse.click(x, y)
+        except PlaywrightError:
+            return
+        await self._settle(page)
 
     # -- B-6 consent ----------------------------------------------------------------
 
@@ -422,9 +521,13 @@ class StateExplorer:
             rec.status, rec.reason = "unvisited", "click_failed"
             return rec
         await self._settle(page)
-        if await page.evaluate(CONSENT_VISIBLE_JS):
-            rec.status, rec.reason = "unvisited", "consent_overlay_persisted"
-            return rec
+        hide_deadline = time.perf_counter() + 3.0
+        while await page.evaluate(CONSENT_VISIBLE_JS):
+            if time.perf_counter() >= hide_deadline:
+                rec.status = "unvisited"
+                rec.reason = f"consent_overlay_persisted:clicked={found.get('choice')}"
+                return rec
+            await asyncio.sleep(self._settle_poll_s)
         blocked = len(unsafe) - before
         rec.status = "visited"
         rec.reason = "declared_choice:reject_non_essential" + (
@@ -550,6 +653,9 @@ class StateExplorer:
         """Decide the initial status of a newly discovered control."""
         href = str(item.get("href") or "")
         real_link = item.get("tag") == "a" and href and not href.startswith(("#", "javascript:"))
+        if item.get("chrome"):
+            rec.status, rec.reason = "excluded", "third_party_chrome"
+            return
         if rec.kind == "accordion" and item.get("inNav"):
             rec.kind = "menu"
             rec.status, rec.reason = "excluded", "site_navigation_menu"
@@ -596,8 +702,19 @@ class StateExplorer:
             if rec.kind == "hover":
                 await locator.hover(timeout=self._click_timeout_ms)
             else:
-                await locator.click(timeout=self._click_timeout_ms)
+                try:
+                    await locator.click(timeout=self._click_timeout_ms)
+                except PlaywrightError as exc:
+                    if _click_cause(exc) != "intercepted":
+                        raise
+                    # Something left open (a menu, a dialog) covers the control:
+                    # dismiss it and try once more.
+                    await page.keyboard.press("Escape")
+                    await page.evaluate(CLOSE_DIALOGS_JS)
+                    await self._settle(page)
+                    await locator.click(timeout=self._click_timeout_ms)
         except PlaywrightError as exc:
+            self._last_error = _click_cause(exc)
             _logger.info(
                 "explore_click_failed", extra={"control": rec.label, "error": str(exc)[:120]}
             )
@@ -613,10 +730,10 @@ class StateExplorer:
                 await page.keyboard.press("Escape")
                 await asyncio.sleep(self._settle_poll_s)
                 if int(await page.evaluate(CLOSE_DIALOGS_JS)) > 0:
-                    rec.reason = "dialog_left_open"
+                    _note(rec, "dialog_left_open")
                 await self._settle(page)
         except PlaywrightError:
-            rec.reason = "restore_failed"
+            _note(rec, "restore_failed")
 
     async def _exhausted_before_click(self, page: Any, rec: ControlRecord) -> bool:
         """An iterative control that vanished or was disabled is done."""
@@ -690,6 +807,37 @@ class StateExplorer:
         text = str(await page.evaluate(_BODY_TEXT))
         dom = (await page.content()).encode("utf-8")
         return text, dom
+
+
+def _click_cause(exc: Exception) -> str:
+    """Short, stable cause of a failed click, for the control's reason."""
+    text = str(exc)
+    for marker, cause in (
+        ("intercepts pointer events", "intercepted"),
+        ("not visible", "not_visible"),
+        ("outside of the viewport", "outside_viewport"),
+        ("not enabled", "disabled"),
+        ("detached", "detached"),
+        ("Timeout", "timeout"),
+    ):
+        if marker in text:
+            return cause
+    return "error"
+
+
+def _is_telemetry(url: str) -> bool:
+    host = (urlsplit(url).hostname or "").lower()
+    return any(host == h or host.endswith("." + h) for h in TELEMETRY_HOSTS)
+
+
+def _endpoint(url: str) -> str:
+    """Host and path of a request, without query or fragment."""
+    return url.split("#", 1)[0].split("?", 1)[0]
+
+
+def _note(rec: ControlRecord, note: str) -> None:
+    """Add a note to a control's reason without hiding the reason already there."""
+    rec.reason = f"{rec.reason};{note}" if rec.reason else note
 
 
 def _digest(text: str) -> str:

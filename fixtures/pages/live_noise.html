@@ -1,0 +1,22 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Annuities</title></head>
+<body><main><h1>Annuities</h1>
+<details><summary>Withdrawal limits</summary><p>Up to 10% a year without a charge.</p></details>
+<div class="video-js" style="display:none"><div class="vjs-menu-button">
+<button aria-expanded="false">Playback Rate</button></div></div></main>
+<div id="onetrust-consent-sdk">
+<div id="onetrust-banner-sdk" role="dialog" aria-label="Cookie banner"
+ style="position:fixed;inset:0;background:rgba(0,0,0,.4)">
+<p>We use cookies.</p><button id="onetrust-accept-btn-handler">Accept all</button>
+<button id="onetrust-reject-all-handler">Reject all</button></div>
+<div id="onetrust-pc-sdk" style="display:none"><div role="tablist">
+<button role="tab" aria-selected="true">Strictly necessary cookies</button>
+<button role="tab" aria-selected="false">Targeting cookies</button></div></div></div>
+<script>
+// A bot-management sensor: beacons on every click and never at idle, like the live site.
+function beacon() { fetch('/HIgHQm/r/p/sensor', { method: 'POST', body: 'x' }).catch(function () {}); }
+document.addEventListener('click', beacon, true);
+// OneTrust hides its banner after an animation, not at once.
+document.getElementById('onetrust-reject-all-handler').addEventListener('click', function () {
+  setTimeout(function () { document.getElementById('onetrust-banner-sdk').style.display = 'none'; }, 1000);
+});
+</script></body></html>

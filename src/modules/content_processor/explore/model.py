@@ -76,6 +76,12 @@ class ExplorationResult(StrictModel):
     elapsed_s: float = Field(default=0.0, ge=0.0)
     stop_reason: str | None = None
     unsafe_requests: list[str] = Field(default_factory=list)
+    background_requests_blocked: int = Field(
+        default=0,
+        ge=0,
+        description="Non-GET requests to endpoints that also fire with no action running "
+        "(sensor beacons, analytics): blocked, not charged to the control being clicked",
+    )
     followup_urls: list[str] = Field(
         default_factory=list,
         description="Pagination links that are separate URLs; the frontier owns them (B-7)",

@@ -178,7 +178,7 @@ def _cdp_html(node: dict[str, Any], host_light: list[dict[str, Any]]) -> str:
     tag = str(node.get("localName") or node.get("nodeName", "")).lower()
     if tag == "slot":
         name = _attrs(node).get("name")
-        light = [c for c in host_light if _attrs(c).get("slot") == name] if name else host_light
+        light = [c for c in host_light if (_attrs(c).get("slot") or None) == (name or None)]
         return "".join(_cdp_html(c, []) for c in (light or list(_children(node))))
     attrs = "".join(f' {k}="{html.escape(v, quote=True)}"' for k, v in _attrs(node).items())
     roots = node.get("shadowRoots", [])

@@ -433,3 +433,19 @@ async def test_virtualized_grid_declares_its_total(renderer, server_url):
     assert (grid.status, grid.reason) == ("visited", "virtualized_rows_accumulated:300/300")
     rows = ex.states[(grid.state_index or 0) - 1]
     assert "Fund row 1\n" in rows.inner_text and "Fund row 300" in rows.inner_text
+
+
+async def test_live_site_noise_is_not_charged_to_controls(renderer, server_url):
+    """Sensor beacons, consent/player chrome and a slow-hiding banner (seen on live sites)."""
+    _, ex = await _explore(renderer, f"{server_url}/pages/live_noise", EVERYTHING)
+    consent = _one(ex, "consent")
+    assert consent.status == "visited", consent.reason
+    details = _one(ex, "disclosure")
+    assert (details.status, details.reason) == ("visited", None)
+    assert "Up to 10% a year without a charge." in _texts(ex)
+    chrome = [c for c in ex.controls if c.reason == "third_party_chrome"]
+    assert {c.label for c in chrome} >= {"Playback Rate", "Targeting cookies"}
+    assert all(c.status == "excluded" for c in chrome)
+    assert ex.background_requests_blocked > 0
+    assert all("/sensor" in u for u in ex.unsafe_requests)
+    assert ex.discovery_closed
