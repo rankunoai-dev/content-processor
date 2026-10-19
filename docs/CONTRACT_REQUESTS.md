@@ -80,7 +80,7 @@ Only Lane L0 edits `contracts.py`, `enums.py`, `workers/ports.py`, `ledger/schem
 ### CR-008: Office document dependencies for C-9
 - **Lane:** L3 (anticipated by WORK_BREAKDOWN.md 3.4)
 - **File(s):** pyproject.toml
-- **Change:** new optional extra `office = ["docling-slim[format-office]>=2.140,<3"]`, installed by CI alongside `dev`. Use `docling-slim`, not `docling`: the plain `docling` package always pulls the `standard` extra, which brings torch and model weights. `docling-slim[format-office]` installs the DOCX, PPTX, XLSX, HTML, Markdown and CSV backends (about 242 MB, no torch, measured 2026-10-19 in a scratch venv). No new mypy override is expected; check with `mypy --strict` after install.
-- **External binary, not a pip dependency:** `.doc`, `.ppt` and `.xls` need LibreOffice on PATH. Without it Docling reports `LibreOffice is required` and the adapter must emit `UNSUPPORTED_FORMAT` for legacy files. LibreOffice is a system install by the operator; it is not added to `pyproject.toml`.
+- **Change:** new optional extra `office = ["python-docx>=1.2,<2", "openpyxl>=3.1,<4", "python-pptx>=1.0,<2"]`, installed by CI alongside `dev`. All three are pure Python with no torch and no external binaries. Revised 2026-10-19: this replaces an earlier proposal for `docling-slim[format-office]`, which was dropped because the adapter now uses these libraries directly. mypy needs `openpyxl.*` to be ignored as untyped (the adapter carries an inline `type: ignore[import-untyped]` until a stub or override is added here; `types-openpyxl` is the stub option).
+- **Not requested:** LibreOffice. `.doc`, `.xls` and `.ppt` are reported as `UNSUPPORTED` with reason `legacy_office_requires_libreoffice:<ext>`; LibreOffice is deferred until the modern formats are verified and the operator approves a system install.
 - **Why:** C-9 (Office formats, cases 63–68, 161–168)
 - **Status:** OPEN
