@@ -134,11 +134,16 @@ def mark_responsive_duplicates(controls: list[ControlRecord]) -> int:
     """Exclude never-visible controls that duplicate a visited one; return how many.
 
     Responsive pages ship the same tabs or accordions twice (a mobile and a
-    desktop copy) and hide one with CSS. The hidden copy can never be clicked,
-    but its content is the content its visible twin revealed. A `never_visible`
-    control is excluded as `responsive_duplicate_of:<control_id>` when a control
-    of the same kind with the same normalized, non-empty label was visited or
-    was open from the start. Without such a twin it stays an unvisited gap.
+    desktop copy) and hide one with CSS, so the hidden copy can never be
+    clicked. A `never_visible` control is excluded as
+    `responsive_duplicate_of:<control_id>` when a control of the same kind with
+    the same normalized, non-empty label was visited or was open from the start.
+    Without such a twin it stays an unvisited gap.
+
+    Assumption: a twin with the same kind and label reveals the same content.
+    A mobile copy can share a label and differ in its panel; its text is still
+    extracted as hidden-layer blocks, so nothing is lost, but that panel is not
+    separately verified as a visible state.
     """
     twins: dict[tuple[str, str], str] = {}
     for c in controls:
