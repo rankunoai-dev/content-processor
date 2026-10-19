@@ -595,6 +595,7 @@ class StateExplorer:
         await page.evaluate(BLUR_JS)
         quick = _digest(str(await page.evaluate(_BODY_TEXT)))
         first: str | None = None
+        stop_labels: list[str] = []
         presses = 0
         result.actions_used += 1
         while True:
@@ -615,7 +616,9 @@ class StateExplorer:
                     first = str(focus["id"])
                 elif str(focus["id"]) == first:
                     rec.status, rec.reason = "visited", f"focus_cycle_complete:{presses - 1}"
+                    rec.label = " | ".join(stop_labels)
                     break
+                stop_labels.append(str(focus["label"]))
             now = _digest(str(await page.evaluate(_BODY_TEXT)))
             if now == quick:
                 continue

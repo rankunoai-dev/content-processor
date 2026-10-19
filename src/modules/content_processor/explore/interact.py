@@ -113,7 +113,10 @@ CLOSE_DIALOGS_JS = """
 # Marks the focused element so a full focus cycle can be recognised.
 FOCUS_JS = """
 () => {
-  const el = document.activeElement;
+  // Focus inside an open shadow root is retargeted to the host in document.activeElement;
+  // descend through each shadow root so the innermost focused element is the stop.
+  let el = document.activeElement;
+  while (el && el.shadowRoot && el.shadowRoot.activeElement) { el = el.shadowRoot.activeElement; }
   if (!el || el === document.body || el === document.documentElement) { return null; }
   if (!el.hasAttribute('data-cp-focus')) {
     const body = document.body;

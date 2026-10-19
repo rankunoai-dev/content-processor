@@ -318,6 +318,14 @@ async def test_keyboard_traversal_ends_without_focusable_elements(renderer, serv
     assert _one(ex, "keyboard").reason == "no_focusable_elements"
 
 
+async def test_keyboard_traversal_reaches_link_in_pierced_shadow_roots(renderer, server_url):
+    # The footer link sits two open shadow roots deep; Tab order reaches it.
+    _, ex = await _explore(renderer, f"{server_url}/pages/shadow_dom", EVERYTHING)
+    kb = _one(ex, "keyboard")
+    assert kb.status == "visited"
+    assert "Footer link: careers" in kb.label.split(" | ")
+
+
 async def test_dialog_is_opened_captured_and_closed(renderer, server_url):
     _, ex = await _explore(renderer, f"{server_url}/pages/modal_info", EVERYTHING)
     dialog = _one(ex, "dialog")
