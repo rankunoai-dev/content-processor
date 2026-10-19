@@ -29,6 +29,14 @@ from src.modules.content_processor.adapters.ocr import (
     route_ocr,
     run_ocr,
 )
+from src.modules.content_processor.adapters.office import (
+    OfficeExtraction,
+    OfficeLimitError,
+    OfficeParseError,
+    detect_office_kind,
+    extract_office,
+    is_legacy_ole,
+)
 from src.modules.content_processor.adapters.pdf import PdfExtraction, extract_pdf
 from src.modules.content_processor.contracts import (
     ContentBlock,
@@ -94,6 +102,22 @@ def run_isolated(fn: Callable[..., Any], kwargs: dict[str, Any], *, timeout_s: f
             proc.kill()
         proc.join(timeout=5)
         parent.close()
+
+
+def _extract_office_safely(
+    *, data: bytes, resource_id: str, run_id: str, evidence_id: str
+) -> OfficeExtraction | str:
+    """Run the OOXML adapter; return the rejection reason as data instead of raising.
+
+    Exception types do not survive the child-process boundary, so refusals are
+    returned as strings and mapped to ledger outcomes by the caller.
+    """
+    try:
+        return extract_office(data, resource_id=resource_id, run_id=run_id, evidence_id=evidence_id)
+    except OfficeLimitError as exc:
+        return f"limit:{exc}"
+    except OfficeParseError as exc:
+        return f"parse:{exc}"
 
 
 def _sha(*parts: str) -> str:
@@ -199,7 +223,7 @@ class DocWorker:
             if task.kind is TaskKind.EXTRACT_IMAGE:
                 self._do_image(task, resource, payload, evidence_id)
             else:
-                self._do_pdf(task, resource, payload, evidence_id)
+                self._do_document(task, resource, payload, evidence_id)
         except TimeoutError as exc:
             self._gap(resource, GapType.LIMIT_HIT, EntityStatus.PARTIAL, str(exc), sha256)
             self._finish(task, resource, EntityStatus.PARTIAL, str(exc))
@@ -228,6 +252,44 @@ class DocWorker:
             self._ledger.record_gap(gap)
         reason = ";".join(["image_extracted", *extraction.warnings])
         self._finish(task, resource, self._resource_status(extraction.status), reason)
+
+    def _do_document(
+        self, task: Task, resource: Resource, payload: bytes, evidence_id: str
+    ) -> None:
+        """Dispatch by content: PDF, OOXML (DOCX/XLSX/PPTX), or legacy binary Office."""
+        if detect_office_kind(payload) is not None:
+            self._do_office(task, resource, payload, evidence_id)
+        elif is_legacy_ole(payload):
+            # .doc/.xls/.ppt need LibreOffice; not installed by design (C-9 scope).
+            ext = resource.extension_hint or "unknown"
+            reason = f"legacy_office_requires_libreoffice:{ext}"
+            self._gap(
+                resource, GapType.UNSUPPORTED_FORMAT, EntityStatus.UNSUPPORTED, reason, evidence_id
+            )
+            self._finish(task, resource, EntityStatus.UNSUPPORTED, reason)
+        else:
+            self._do_pdf(task, resource, payload, evidence_id)
+
+    def _do_office(self, task: Task, resource: Resource, payload: bytes, evidence_id: str) -> None:
+        result: OfficeExtraction | str = self._call(
+            _extract_office_safely,
+            data=payload,
+            resource_id=resource.resource_id,
+            run_id=self._run_id,
+            evidence_id=evidence_id,
+        )
+        if isinstance(result, str):
+            if result.startswith("limit:"):
+                self._gap(resource, GapType.LIMIT_HIT, EntityStatus.PARTIAL, result, evidence_id)
+                self._finish(task, resource, EntityStatus.PARTIAL, result)
+            else:
+                self._gap(
+                    resource, GapType.UNSUPPORTED_FORMAT, EntityStatus.FAILED, result, evidence_id
+                )
+                self._finish(task, resource, EntityStatus.FAILED, result)
+            return
+        self._ledger.upsert_blocks(resource.resource_id, stamp_blocks(result.blocks, resource))
+        self._finish(task, resource, result.status, ";".join(result.warnings))
 
     def _do_pdf(self, task: Task, resource: Resource, payload: bytes, evidence_id: str) -> None:
         extraction: PdfExtraction = self._call(

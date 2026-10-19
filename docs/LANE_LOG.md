@@ -287,3 +287,20 @@ git worktree add ../content-processor-lane4 -b lane/L4-verify
 - **Checked end to end:** two dry runs over `/downloads`, `/fresh` and `/pages/regions` with the docs stage: run 1 extracted 2 PDFs via the K17 hand-off; run 2 with `--baseline` judged 6 URLs unchanged (PDFs on identical bytes) and extracted none again. The fixture PDFs are blank pages, so zero text blocks is correct.
 - **Gate on `main`:** ruff and mypy --strict clean (80 files), 553 passed, 11 skipped, coverage 93.18%.
 - **Still open:** K1 (`CP_DATABASE_URL` for a disposable Postgres; the durable path and the 11 skipped tests). Lane 2 B-8 (scroll) is why every content page still ends PARTIAL under the default policy.
+
+## [2026-10-19] Lane L3 (Documents and OCR), session 3: C-9 Office (DOCX, XLSX, PPTX)
+
+- **Branch / worktree:** `lane/L3-docs` at `../content-processor-lane3`, on `main` f56a95e plus this session
+- **What landed:**
+  - `adapters/office.py`: pure-Python extraction with python-docx, openpyxl and python-pptx. No LibreOffice, no Docling, no torch.
+    - DOCX: body paragraphs and tables in document order; heading path from Heading/Title styles; headers and footers as role `chrome`; comments as `collapsed_published`; `w:vanish` text and tracked deletions as `hidden`; tracked insertions as visible text.
+    - XLSX: one table per sheet with a title block; hidden sheets as `hidden`; formulas with no cached value counted (`formula_without_cached_value:N`); row cap 5,000 per sheet, marking the document PARTIAL.
+    - PPTX: slide text and tables in order; speaker notes as `source_only`; hidden slides as `hidden`; picture alt text as `accessibility_only`.
+  - Safety before parsing: zip member count (5,000), uncompressed total (200 MB) and per-member compression ratio (100x) are checked first. Refusals return a `limit:` reason, mapped to LIMIT_HIT and PARTIAL, so a zip bomb is never retried.
+  - `workers/doc_worker.py` dispatches by content, not by the sniffed MIME type (the sniffer reports every OOXML file as `application/zip`): PDF, then OOXML, then legacy OLE (`.doc`/`.xls`/`.ppt`, reported UNSUPPORTED with reason `legacy_office_requires_libreoffice:<ext>`). Parse errors are FAILED, not retried.
+  - Tests: `test_office.py` (20 tests, including the zip bomb, tracked changes, hidden text, hidden sheet and slide, and the legacy reason). Fixtures are built in code by `office_builders.py`.
+- **Gate:** ruff clean, `mypy --strict src fixtures` clean (81 files), tests pass, coverage 93.1%.
+- **Available to other lanes:** `extract_office()`; `OfficeExtraction.unit_count` (sections, sheets or slides). New gap reason `legacy_office_requires_libreoffice:<ext>`.
+- **Open contract requests:** CR-008 (revised to python-docx, openpyxl and python-pptx; reviewed on the lane branch).
+- **Not done:** LibreOffice path for legacy formats (waiting on operator approval); archives and email (rest of C-9); C-10 audio and video.
+- **Environment note:** `python-pptx` 1.0.2 was installed into the machine's global Python for this work. CI will need it from the `office` extra once CR-008 lands.
