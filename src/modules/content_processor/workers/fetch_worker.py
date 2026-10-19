@@ -20,7 +20,6 @@ classifier can fail a wrong payload closed (K15).
 from __future__ import annotations
 
 import asyncio
-import hashlib
 from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from email.utils import parsedate_to_datetime
@@ -55,8 +54,8 @@ from src.modules.content_processor.enums import (
 from src.modules.content_processor.governor.block_classifier import classify_response
 from src.modules.content_processor.governor.escalation import Action, ActionKind, HostAccessState
 from src.modules.content_processor.governor.gates import detect_gates
-from src.modules.content_processor.governor.robots import evaluate_robots
-from src.modules.content_processor.ledger.keys import task_key
+from src.modules.content_processor.governor.robots import crawl_delay_for, evaluate_robots
+from src.modules.content_processor.ledger.keys import resource_id_for, task_key
 from src.modules.content_processor.provenance import stamp_blocks
 from src.modules.content_processor.recrawl import (
     Baseline,
@@ -119,7 +118,7 @@ def extraction_kind_for(media_type: str) -> TaskKind | None:
 
 
 def _resource_id(run_id: str, schedule_key: str) -> str:
-    return "res-" + hashlib.sha256(f"{run_id}\x1f{schedule_key}".encode()).hexdigest()[:16]
+    return resource_id_for(run_id, schedule_key)
 
 
 Expectation = tuple[str, str | None]
@@ -822,7 +821,12 @@ class FetchWorker:
             if status is not None and status < 400 and len(result.body) < 512_000
             else None
         )
-        cache = RobotsCache(body=body, status=status, fetched_at=datetime.now(UTC))
+        cache = RobotsCache(
+            body=body,
+            status=status,
+            fetched_at=datetime.now(UTC),
+            crawl_delay_s=crawl_delay_for(body, BOT_PRODUCT_NAME),
+        )
         if status is not None and status < 500:
             # Only definitive answers are cached; transient failures are retried.
             self._ledger.set_robots(self._scope.tenant_id, host, cache)

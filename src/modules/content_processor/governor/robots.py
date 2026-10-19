@@ -14,7 +14,10 @@ from urllib.robotparser import RobotFileParser
 from src.core.schemas import StrictModel
 from src.modules.content_processor.enums import RobotsPolicy
 
-__all__ = ["RobotsVerdict", "evaluate_robots"]
+__all__ = ["MAX_CRAWL_DELAY_S", "RobotsVerdict", "crawl_delay_for", "evaluate_robots"]
+
+# A host cannot stall the run indefinitely: longer requests are honoured at this cap.
+MAX_CRAWL_DELAY_S = 30.0
 
 
 class RobotsVerdict(StrictModel):
@@ -98,3 +101,19 @@ def evaluate_robots(
         crawl_delay_s=crawl_delay,
         reason=f"robots_disallow:{source}",
     )
+
+
+def crawl_delay_for(robots_body: str | None, user_agent_token: str) -> float | None:
+    """Crawl-delay from the group matching `user_agent_token` (else `*`), capped.
+
+    The same parser `evaluate_robots` uses, so the delay a ledger stores is the
+    one the policy decision saw. None when there is no body or no directive.
+    """
+    if not robots_body:
+        return None
+    parser = RobotFileParser()
+    parser.parse(robots_body.splitlines())
+    delay = parser.crawl_delay(user_agent_token)
+    if delay is None:
+        return None
+    return min(max(float(delay), 0.0), MAX_CRAWL_DELAY_S)

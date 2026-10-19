@@ -30,9 +30,20 @@ from src.modules.content_processor.contracts import (
     State,
     Task,
 )
-from src.modules.content_processor.enums import AccessTier, TaskKind, TaskState
+from src.modules.content_processor.enums import (
+    AccessTier,
+    EntityStatus,
+    GapType,
+    TaskKind,
+    TaskState,
+)
 from src.modules.content_processor.governor.escalation import CircuitState, HostAccessState
+from src.modules.content_processor.governor.robots import MAX_CRAWL_DELAY_S, crawl_delay_for
 from src.modules.content_processor.ledger import sql
+from src.modules.content_processor.ledger.outcomes import (
+    ACQUISITION_KINDS,
+    close_out_task_resource,
+)
 from src.modules.content_processor.workers.ports import RobotsCache
 
 __all__ = ["TaskLedger", "new_run_id", "storage_keys"]
@@ -262,14 +273,74 @@ class TaskLedger:
         return TaskState(row["state"]) if row else None
 
     def reap(self) -> list[dict[str, Any]]:
-        """Reclaim expired leases. Returns the affected rows for event emission."""
+        """Reclaim expired leases and make every outcome visible (K8).
+
+        Each reclaimed lease gets a task event (`LEASED → PENDING` for a retry,
+        `LEASED → QUARANTINED` at max attempts). A quarantined task is poison:
+        its resource is closed out so the URL does not vanish from the status
+        stream. A FETCH/UNLOCK resource still in flight becomes
+        `FAILED poison:<kind>:<last error>` with an ACQUISITION_FAILED gap; for a
+        later stage (render, documents) the already-acquired resource keeps its
+        status and a PARTIAL gap records the lost stage.
+
+        Returns:
+            The reclaimed rows (id, state, run_id, kind, host, attempts,
+            max_attempts, payload, last_error).
+        """
         with self._conn.cursor() as cur:
             cur.execute(sql.SQL_REAP)
             rows = cur.fetchall()
         self._conn.commit()
         for row in rows:
-            _logger.warning("task_reclaimed", extra=dict(row))
+            _logger.warning(
+                "task_reclaimed",
+                extra={k: row[k] for k in ("id", "state", "run_id", "kind", "host", "attempts")},
+            )
+            self.append_event(
+                RunEvent(
+                    run_id=row["run_id"],
+                    entity_type="task",
+                    entity_id=str(row["id"]),
+                    old_state=TaskState.LEASED.value,
+                    new_state=row["state"],
+                    reason="lease_expired",
+                    attempt=int(row["attempts"]),
+                )
+            )
+            if row["state"] == TaskState.QUARANTINED.value:
+                self._close_out_poison(row)
         return rows
+
+    def _close_out_poison(self, row: dict[str, Any]) -> None:
+        kind = TaskKind(row["kind"])
+        reason = f"poison:{kind.value}:{row['last_error'] or 'lease_expired'}"[:500]
+        acquisition = kind in ACQUISITION_KINDS
+        close_out_task_resource(
+            self,
+            run_id=row["run_id"],
+            host=row["host"],
+            kind=kind,
+            payload=row["payload"] or {},
+            status=EntityStatus.FAILED,
+            gap_type=GapType.ACQUISITION_FAILED,
+            gap_status=EntityStatus.FAILED if acquisition else EntityStatus.PARTIAL,
+            reason=reason,
+            attempt=int(row["attempts"]),
+        )
+
+    def cancel_open_tasks(self, run_id: str, kinds: Sequence[TaskKind], reason: str) -> list[Task]:
+        """Cancel this run's pending tasks of these kinds; return them (K9).
+
+        Leased tasks finish normally; only work not yet started is cancelled.
+        """
+        with self._conn.cursor() as cur:
+            cur.execute(
+                sql.SQL_CANCEL_OPEN_TASKS,
+                {"run_id": run_id, "kinds": [k.value for k in kinds], "reason": reason[:2000]},
+            )
+            rows = cur.fetchall()
+        self._conn.commit()
+        return [_row_to_task(row) for row in rows]
 
     def task_counts(self, run_id: str) -> dict[str, int]:
         """Counts by state for one run."""
@@ -464,14 +535,24 @@ class TaskLedger:
         if row is None or row["robots_fetched_at"] is None:
             return None
         payload = json.loads(row["robots_cache"] or "{}")
+        delay_ms = row["crawl_delay_ms"]
         return RobotsCache(
             body=payload.get("body"),
             status=payload.get("status"),
             fetched_at=row["robots_fetched_at"],
+            crawl_delay_s=delay_ms / 1000.0 if delay_ms is not None else None,
         )
 
     def set_robots(self, tenant_id: str, host: str, cache: RobotsCache) -> None:
-        """Store the robots.txt fetch result for the host."""
+        """Store the robots.txt fetch result and its crawl-delay for the host (K7).
+
+        `SQL_SET_ROBOTS` also raises the host's `base_delay_ms` to the crawl-delay,
+        which the slot lease uses to space requests to that host.
+        """
+        delay = cache.crawl_delay_s
+        if delay is None:
+            delay = crawl_delay_for(cache.body, "*")
+        delay_ms = round(min(delay, MAX_CRAWL_DELAY_S) * 1000) if delay is not None else None
         with self._conn.cursor() as cur:
             cur.execute(
                 sql.SQL_SET_ROBOTS,
@@ -480,7 +561,7 @@ class TaskLedger:
                     "host": host,
                     "robots_cache": json.dumps({"body": cache.body, "status": cache.status}),
                     "fetched_at": cache.fetched_at,
-                    "crawl_delay_ms": None,
+                    "crawl_delay_ms": delay_ms,
                 },
             )
         self._conn.commit()

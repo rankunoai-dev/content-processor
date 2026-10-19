@@ -62,6 +62,12 @@ from src.modules.content_processor.scheduler import (
     foreign_open_tasks,
     write_run_outputs,
 )
+from src.modules.content_processor.scheduler.budget import (
+    BudgetMeter,
+    MeteredEvidenceStore,
+    MeteredFetcher,
+    MeteredRenderer,
+)
 from src.modules.content_processor.scheduler.reports import badge_summary, records_path_for
 from src.modules.content_processor.scope.frontier import FrontierPlan, build_frontier
 from src.modules.content_processor.scope.ssrf import IpClass, check_host
@@ -181,8 +187,18 @@ async def _drive(
     reap: Any = None,
     baseline: Baseline | None = None,
 ) -> RunExecution:
-    """Build the workers for the requested stages, drive them, close everything."""
-    t1, escalation = build_fetchers(scope)
+    """Build the workers for the requested stages, drive them, close everything.
+
+    Every fetcher, the renderer and the evidence store go through the run's
+    budget meter (K9), seeded with the bytes the ledger already recorded for
+    this run (a resumed durable run).
+    """
+    seed = sum(r.payload_bytes or 0 for r in ledger.list_resources(run_id))
+    meter = BudgetMeter(scope.budgets, seed_bytes=seed)
+    evidence = MeteredEvidenceStore(evidence, meter)
+    raw_t1, raw_escalation = build_fetchers(scope)
+    t1 = MeteredFetcher(raw_t1, meter)
+    escalation = [MeteredFetcher(f, meter) for f in raw_escalation]
     stages: dict[StageName, Stage] = {}
     render_stage: LazyRenderStage | None = None
     if "fetch" in stage_names:
@@ -197,7 +213,7 @@ async def _drive(
             baseline=baseline,
         )
     if "render" in stage_names:
-        renderer = build_renderer(scope)
+        renderer = MeteredRenderer(build_renderer(scope), meter)
 
         def make_render_worker() -> Stage:
             return RenderWorker(
@@ -221,7 +237,9 @@ async def _drive(
             locale=scope.locale,
         )
     try:
-        return await execute_run(ledger, run_id=run_id, stages=stages, options=options, reap=reap)
+        return await execute_run(
+            ledger, run_id=run_id, stages=stages, options=options, reap=reap, meter=meter
+        )
     finally:
         if render_stage is not None:
             await render_stage.close()
