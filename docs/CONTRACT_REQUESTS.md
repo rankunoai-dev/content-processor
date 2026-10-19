@@ -86,7 +86,7 @@ Only Lane L0 edits `contracts.py`, `enums.py`, `workers/ports.py`, `ledger/schem
 - **Status:** LANDED (merged to main with lane/L3-docs, 2026-10-19; `office` extra in pyproject.toml)
 
 
-### CR-008: Interaction policy for the B-4 to B-12 explorer
+### CR-009: Interaction policy for the B-4 to B-12 explorer
 - **Lane:** L2
 - **File(s):** contracts.py (`AllowedAction`, `InteractionPolicy`, `_default_actions`)
 - **Change:**
