@@ -357,3 +357,12 @@ git worktree add ../content-processor-lane4 -b lane/L4-verify
 - **Found on the live John Hancock seed (B-8 code, default policy):** 34 of 34 rendered pages PARTIAL. Scroll is no longer the cause. The unvisited controls are 136 tabs and 134 accordions `never_visible`, 65 accordions `click_failed`, and 1 accordion `unsafe_side_effect:POST`. The `never_visible` controls look like responsive duplicates (mobile and desktop copies of the same tabs); `click_failed` is consistent with an overlay intercepting clicks, which the B-6 consent step now addresses.
 - **Proposed:** CR-009 (carousel action, consent choice, default actions: operator decision).
 - **Next for L2:** decide how a never-visible duplicate control is accounted for: it is not a gap when an equivalent visible control was visited and its content verified. B-13 canvas, B-14 to B-16.
+
+## [2026-10-19] Lane L0 (Integrator), session 6: merged Lane 2 (B-4 to B-12)
+
+- **Branch:** `main`, fast-forwarded to `f7a8506` from `lane/L2-explorer` (rebased twice, onto L3's C-9 merge and then onto L5's O-5; conflicts only in this file and `CONTRACT_REQUESTS.md`, append blocks, both kept).
+- **What is now on `main`:** B-8 scroll and lazy load; B-9 virtualized rows; B-4 carousels; B-5 hover and keyboard; B-6 dialogs and consent (reject non-essential, never accept); B-7 pagination and load-more (GET only, real next URLs as follow-ups); B-11 frames (`frame_path` for R3); B-12 shadow DOM (open roots and closed roots via CDP). Live-site fixes: background telemetry not charged to controls, consent and media-player chrome excluded, intercepted clicks retried once, shadow text from laid-out text nodes.
+- **Contract requests:** L2's interaction-policy request renumbered to **CR-009** (CR-008 is L3's Office dependencies). Still PROPOSED: `advance_carousel`, `consent_choice`, and the operator's decision on the default actions.
+- **Gate on the merged tree:** ruff and mypy --strict clean (87 files), 661 passed, 11 skipped, coverage 93%.
+- **Live John Hancock (all read-only actions, real Chrome, $0):** discovery closes on every rendered page (0 unvisited controls, down from 270 never-visible and 65 failed clicks). The two pages checked after the shadow-text fix reached VERIFIED_WITHIN_SCOPE; images remain PARTIAL until an OCR engine is installed (C-8).
+- **Still open:** K1 (`CP_DATABASE_URL`); CR-009 decision; a full 34-URL John Hancock run on the merged code.
