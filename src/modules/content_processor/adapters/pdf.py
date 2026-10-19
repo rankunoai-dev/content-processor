@@ -34,6 +34,10 @@ from src.modules.content_processor.adapters.pdf_extras import (
 from src.modules.content_processor.contracts import ContentBlock, Provenance
 from src.modules.content_processor.enums import ContentLayer, EntityStatus
 
+# PyMuPDF >= 1.26 prints a 'Consider using the pymupdf_layout package' banner to
+# stdout on first use; that corrupts the CLI's JSON output (K18).
+pymupdf.no_recommend_layout()  # type: ignore[no-untyped-call]
+
 __all__ = ["PdfExtraction", "PdfImageRegion", "extract_pdf"]
 
 _logger = get_logger("content_processor.pdf")

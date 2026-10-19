@@ -276,3 +276,14 @@ git worktree add ../content-processor-lane4 -b lane/L4-verify
 - **Gate:** ruff, mypy --strict clean (80 files), 534 passed, 9 skipped, coverage 93.10%.
 - **Measured:** fixture scope twice with real Chromium: run 1 rendered 17 pages in 87 s; run 2 with the baseline found 15 unchanged, rendered 2, took 33 s; no reused verdict changed.
 - **Limits:** HTML change is judged on server HTML (pure-SPA data changes look unchanged); sitemap lastmod and XMP/EXIF dates not read yet.
+
+## [2026-10-19] Lane L0 (Integrator), session 5: merged K16/K17/CR-007 and provenance/recrawl; K18
+
+- **Branch:** `main`
+- **What landed:**
+  - `fix/k16-k17-cr007` fast-forwarded as `0dc8878` (gate on the branch: 501 passed, 11 skipped, 93.05%). CR-007 marked LANDED.
+  - `feature/provenance-recrawl` rebased onto `0dc8878` (conflicts only in this file and `fixtures/server.py`, append blocks, both kept) and fast-forwarded as `4570cc1`. Gate on the merged tree: 552 passed, 11 skipped, 93.18%.
+  - K18 found during the post-merge check: PyMuPDF 1.28 prints a `pymupdf_layout` recommendation to stdout on first use, which broke JSON parsing of every CLI run that extracted a PDF. Fixed with `pymupdf.no_recommend_layout()` at import in `adapters/pdf.py`, plus a subprocess regression test asserting empty stdout.
+- **Checked end to end:** two dry runs over `/downloads`, `/fresh` and `/pages/regions` with the docs stage: run 1 extracted 2 PDFs via the K17 hand-off; run 2 with `--baseline` judged 6 URLs unchanged (PDFs on identical bytes) and extracted none again. The fixture PDFs are blank pages, so zero text blocks is correct.
+- **Gate on `main`:** ruff and mypy --strict clean (80 files), 553 passed, 11 skipped, coverage 93.18%.
+- **Still open:** K1 (`CP_DATABASE_URL` for a disposable Postgres; the durable path and the 11 skipped tests). Lane 2 B-8 (scroll) is why every content page still ends PARTIAL under the default policy.
