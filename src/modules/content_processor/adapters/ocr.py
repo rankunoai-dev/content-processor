@@ -319,7 +319,7 @@ def run_ocr(
                 h = float(data["height"][i])
                 spans.append(OcrSpan(text=text, bbox=(x, y, x + w, y + h), confidence=conf))
 
-        mean_conf = sum(confidences) / len(confidences) if confidences else 1.0
+        mean_conf = sum(confidences) / len(confidences) if confidences else 0.0
         full_text = " ".join(words)
 
         return OcrResult(

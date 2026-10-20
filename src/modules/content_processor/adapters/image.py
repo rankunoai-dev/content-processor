@@ -217,6 +217,32 @@ def extract_image(
             warnings=["ocr_engine_missing"],
         )
 
+    if ocr_res.error:
+        # The engine ran but failed: nothing was read, so this is not "no content".
+        gaps.append(
+            Gap(
+                gap_id=f"gap-{hashlib.sha256(f'{resource_id}|ocr_error'.encode()).hexdigest()[:12]}",
+                run_id=run_id,
+                resource_id=resource_id,
+                gap_type=GapType.UNSUPPORTED_FORMAT,
+                status=EntityStatus.PARTIAL,
+                reason=f"ocr_error:{ocr_res.error[:120]};image_content_unextracted",
+                evidence_ids=[evidence_id],
+                retry_eligible=True,
+            )
+        )
+        return ImageExtraction(
+            blocks=blocks,
+            gaps=gaps,
+            metadata=metadata,
+            width=width,
+            height=height,
+            image_format=img_format,
+            is_visual_only=False,
+            status=EntityStatus.PARTIAL,
+            warnings=["ocr_error"],
+        )
+
     if ocr_res.text.strip():
         status = EntityStatus.VERIFIED_EXTRACTED
         if ocr_res.confidence < OCR_CONFIDENCE_FLOOR:

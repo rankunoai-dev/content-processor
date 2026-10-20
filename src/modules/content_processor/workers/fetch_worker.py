@@ -230,6 +230,16 @@ class FetchWorker:
         resource = self._base_resource(task)
         tenant = self._scope.tenant_id
         host_state = self._ledger.load_host_state(tenant, host)
+        gate = host_state.can_attempt()  # an expired open circuit becomes HALF_OPEN
+        if gate.kind is ActionKind.CIRCUIT_OPEN:
+            self._ledger.fail(
+                task.id or 0,
+                self._worker_id,
+                "circuit_open",
+                retry=True,
+                not_before=gate.not_before,
+            )
+            return
         fetcher = self._fetcher_for(host_state.tier)
         depth = int(task.payload.get("depth", 0))
         self._remember_expectation(task)

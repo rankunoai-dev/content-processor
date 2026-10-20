@@ -88,20 +88,41 @@ def load_scope(path: str) -> RunScope:
     return RunScope.model_validate(json.loads(Path(path).read_text(encoding="utf-8")))
 
 
-def host_checker_for(scope: RunScope) -> Any:
-    """Egress checker honouring the development-only private allowance."""
+class EgressGuard:
+    """Egress checker that remembers the addresses each check approved (case 93).
 
-    def check(host: str) -> tuple[bool, str]:
+    Called like the plain checker (`guard(host) -> (allowed, reason)`); the T1
+    fetcher reads `pinned(host)` right after a successful check and connects to
+    those addresses, so a DNS answer that changes after the check is never used.
+    """
+
+    def __init__(self, scope: RunScope) -> None:
+        """Bind the scope's development-only private allowance."""
+        self._allow_private = scope.egress_allow_private
+        self._approved: dict[str, list[str]] = {}
+
+    def __call__(self, host: str) -> tuple[bool, str]:
+        """Check `host`; remember the resolved addresses when it is allowed."""
         decision = check_host(host)
         if decision.allowed:
+            self._approved[host.lower()] = list(decision.resolved)
             return True, decision.reason
-        if scope.egress_allow_private and all(
+        if self._allow_private and all(
             c in (IpClass.LOOPBACK, IpClass.PRIVATE) for c in decision.classes
         ):
+            self._approved[host.lower()] = list(decision.resolved)
             return True, "allowed_private_fixture"
+        self._approved.pop(host.lower(), None)
         return False, decision.reason
 
-    return check
+    def pinned(self, host: str) -> list[str]:
+        """Addresses the last check approved for `host` (empty when denied or unchecked)."""
+        return list(self._approved.get(host.lower(), []))
+
+
+def host_checker_for(scope: RunScope) -> EgressGuard:
+    """Egress checker honouring the development-only private allowance."""
+    return EgressGuard(scope)
 
 
 def _database_url() -> str:
@@ -124,8 +145,10 @@ def _accept_language(scope: RunScope) -> str:
 def build_fetchers(scope: RunScope) -> tuple[Any, list[Any]]:
     """T1 fetcher plus T2 when the scope's ceiling allows it and curl_cffi is installed."""
     limits = FetchLimits(max_bytes=min(scope.budgets.max_bytes, 50 * 1024 * 1024))
+    guard = host_checker_for(scope)
     t1 = HttpFetcher(
-        host_checker=host_checker_for(scope),
+        host_checker=guard,
+        pinner=guard.pinned,
         user_agent=user_agent_for(scope),
         accept_language=_accept_language(scope),
         limits=limits,

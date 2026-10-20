@@ -21,7 +21,11 @@ from src.modules.content_processor.contracts import (
     Task,
 )
 from src.modules.content_processor.enums import AccessTier, TaskKind, TaskState
-from src.modules.content_processor.governor.escalation import CircuitState, HostAccessState
+from src.modules.content_processor.governor.escalation import (
+    CircuitState,
+    HostAccessState,
+    initial_host_ceiling,
+)
 from src.modules.content_processor.governor.robots import MAX_CRAWL_DELAY_S, crawl_delay_for
 from src.modules.content_processor.ledger.sql import HOST_SLOT_KINDS
 from src.modules.content_processor.workers.ports import RobotsCache
@@ -223,7 +227,9 @@ class MemoryLedger:
 
     def load_host_state(self, tenant_id: str, host: str) -> HostAccessState:
         """Create a default state on first sight."""
-        return self.hosts.setdefault(host, HostAccessState(host=host, ceiling=self._ceiling))
+        return self.hosts.setdefault(
+            host, HostAccessState(host=host, ceiling=initial_host_ceiling(self._ceiling))
+        )
 
     def save_host_state(
         self, tenant_id: str, state: HostAccessState, *, retry_after_until: datetime | None = None

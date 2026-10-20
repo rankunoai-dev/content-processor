@@ -59,7 +59,7 @@ __all__ = [
 
 Bucket = Literal["context_matched", "context_unknown", "context_differs"]
 _BUCKET_ORDER: dict[str, int] = {"context_matched": 0, "context_unknown": 1, "context_differs": 2}
-_STRONG_FIELDS = ("geography", "audience", "period", "conditions")
+_STRONG_FIELDS = ("geography", "audience", "period", "conditions", "codes")
 _WEAK_FIELDS = ("entity", "product_or_variant")
 _BAND_ORDER = {"high": 0, "medium": 1, "low": 2}
 REVIEWER_DECISIONS: frozenset[str] = frozenset(
@@ -250,8 +250,8 @@ def _negation_flags(a: Claim, b: Claim, subject: float, config: ContradictionCon
 
 
 def _date_flags(a: Claim, b: Claim, subject: float, config: ContradictionConfig) -> list[str]:
-    if subject < config.same_subject_jaccard:
-        return []
+    if subject < config.same_subject_jaccard or a.as_of or b.as_of:
+        return []  # "as of" values are snapshots in time, not effective dates (K19)
     flags: list[str] = []
     ca, cb = a.context, b.context
     if ca.effective_from and cb.effective_from and ca.effective_from != cb.effective_from:
@@ -265,12 +265,23 @@ def _date_flags(a: Claim, b: Claim, subject: float, config: ContradictionConfig)
 
 
 def _period(claim: Claim) -> tuple[date, date] | None:
+    if claim.as_of:
+        return (claim.as_of, claim.as_of)
     ctx = claim.context
     if ctx.effective_from or ctx.effective_to:
         return (ctx.effective_from or date.min, ctx.effective_to or date.max)
     if claim.years:
         return (date(min(claim.years), 1, 1), date(max(claim.years), 12, 31))
     return None
+
+
+def _compare_codes(left: frozenset[str], right: frozenset[str]) -> str:
+    """Entity codes (tickers, plan codes): disjoint sets are different entities."""
+    if not left or not right:
+        return "unknown"
+    if left & right:
+        return "match"
+    return f"differs({','.join(sorted(left))}|{','.join(sorted(right))})"
 
 
 def _compare(left: str | None, right: str | None) -> str:
@@ -288,8 +299,12 @@ def _context(a: Claim, b: Claim) -> tuple[dict[str, str], Bucket]:
         "audience": _compare(ca.audience, cb.audience),
         "conditions": _compare("; ".join(ca.conditions), "; ".join(cb.conditions)),
     }
+    fields["codes"] = _compare_codes(a.codes, b.codes)
     pa, pb = _period(a), _period(b)
-    if pa is None or pb is None:
+    if a.years and b.years and a.years.isdisjoint(b.years):
+        # Different years named on each side: different editions (yearly notices), K19.
+        fields["period"] = f"differs({min(a.years)}|{min(b.years)})"
+    elif pa is None or pb is None:
         fields["period"] = "unknown"
     elif pa[0] <= pb[1] and pb[0] <= pa[1]:
         fields["period"] = "match"
