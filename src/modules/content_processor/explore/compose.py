@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import contextlib
 import html
-from collections.abc import Iterator
+from collections.abc import Collection, Iterator
 from typing import Any
 from urllib.parse import urljoin
 
@@ -305,8 +305,13 @@ async def compose_page(target: Any, closed: list[ClosedRoot] | None) -> Composed
     )
 
 
-async def capture_frames(page: Any, annotate: list[str]) -> list[FrameCapture]:
-    """Read every child frame on its own; `annotate` scripts run inside each frame first."""
+async def capture_frames(
+    page: Any, annotate: list[str], skip: Collection[str] = ()
+) -> list[FrameCapture]:
+    """Read every child frame on its own; `annotate` scripts run inside each frame first.
+
+    Frames whose path is in `skip` (already read in an earlier pass) are left out.
+    """
     out: list[FrameCapture] = []
     main = page.main_frame
     page_origin = _origin(page.url)
@@ -329,6 +334,8 @@ async def capture_frames(page: Any, annotate: list[str]) -> list[FrameCapture]:
             kind = "same_origin" if _origin(frame.url or path) == page_origin else "cross_origin"
         else:
             path, kind = frame.url or f"frame:{n}", "blank"
+        if path in skip:
+            continue
         capture = FrameCapture(
             frame_path=path,
             kind=kind,

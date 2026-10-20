@@ -546,7 +546,22 @@ class StateExplorer:
     # -- B-11 frames ----------------------------------------------------------------
 
     async def _frames(self, page: Any, add: Any, result: ExplorationResult) -> None:
-        frames = await capture_frames(page, [CLEAR_ANNOTATIONS_JS, ANNOTATE_JS])
+        scripts = [CLEAR_ANNOTATIONS_JS, ANNOTATE_JS]
+        frames = await capture_frames(page, scripts)
+        for _ in range(2):
+            # Widgets such as stock tickers replace their iframe while we read it: the
+            # old frame is detached, and its replacement may not be laid out yet (zero
+            # size, so it looks hidden). Look again for what was not read.
+            unsettled = [f for f in frames if f.hidden or (f.error and "detached" in f.error)]
+            if not unsettled:
+                break
+            await self._settle(page)
+            read = {f.frame_path for f in frames if not f.hidden and not f.error}
+            again = await capture_frames(page, scripts, skip=read)
+            if any(not f.hidden and not f.error for f in again):
+                frames = [f for f in frames if f not in unsettled] + again
+            elif all(f.hidden for f in unsettled):
+                break  # still hidden after settling: tracking pixels, not a race
         report: list[dict[str, Any]] = []
         for n, fc in enumerate(frames):
             rec = ControlRecord(

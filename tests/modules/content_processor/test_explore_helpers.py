@@ -6,10 +6,22 @@ from typing import Any
 
 import pytest
 
-from src.modules.content_processor.explore.compose import _cdp_html, _cdp_text, _closed_hosts
+from src.modules.content_processor.contracts import InteractionPolicy
+from src.modules.content_processor.explore import explorer as explorer_module
+from src.modules.content_processor.explore.compose import (
+    FrameCapture,
+    _cdp_html,
+    _cdp_text,
+    _closed_hosts,
+)
 from src.modules.content_processor.explore.deep import deep
-from src.modules.content_processor.explore.explorer import _click_cause, _is_telemetry, _note
-from src.modules.content_processor.explore.model import ControlRecord
+from src.modules.content_processor.explore.explorer import (
+    StateExplorer,
+    _click_cause,
+    _is_telemetry,
+    _note,
+)
+from src.modules.content_processor.explore.model import ControlRecord, ExplorationResult
 
 
 @pytest.mark.parametrize(
@@ -111,3 +123,74 @@ def test_deep_rewrites_queries_and_dotted_closest() -> None:
     assert "__cpClosest(c.parentElement, 'n')" in body
     assert "__cpClosest(a, 'm')" in body
     assert "document.querySelector" not in body
+
+
+class _FakePage:
+    async def evaluate(self, *_: object) -> None:
+        return None
+
+
+async def test_frames_replaced_while_being_read_are_read_again(monkeypatch) -> None:
+    """A ticker swaps its iframe: pass 1 sees it detached or not laid out, pass 2 reads it."""
+    passes = [
+        [
+            FrameCapture(
+                frame_path="https://x.example/a",
+                kind="cross_origin",
+                error="Frame has been detached.",
+            ),
+            FrameCapture(frame_path="srcdoc:3", kind="srcdoc", hidden=True),
+            FrameCapture(
+                frame_path="https://x.example/kept",
+                kind="cross_origin",
+                text="Kept text.",
+                html="<p>Kept text.</p>",
+            ),
+        ],
+        [
+            FrameCapture(
+                frame_path="https://x.example/a",
+                kind="cross_origin",
+                text="Ticker A.",
+                html="<p>Ticker A.</p>",
+            ),
+            FrameCapture(
+                frame_path="srcdoc:4", kind="srcdoc", text="Ticker B.", html="<p>Ticker B.</p>"
+            ),
+        ],
+    ]
+    skips: list[set[str]] = []
+
+    async def fake_capture(page: object, scripts: object, skip: object = ()) -> list[FrameCapture]:
+        skips.append(set(skip))  # type: ignore[arg-type]
+        return passes.pop(0) if passes else []
+
+    monkeypatch.setattr(explorer_module, "capture_frames", fake_capture)
+    explorer = StateExplorer(InteractionPolicy(), settle_max_s=0, settle_poll_s=0)
+    result = ExplorationResult()
+    added: list[ControlRecord] = []
+    await explorer._frames(_FakePage(), added.append, result)
+    texts = {s.frame_path: s.inner_text for s in result.states}
+    assert texts == {
+        "https://x.example/kept": "Kept text.",
+        "https://x.example/a": "Ticker A.",
+        "srcdoc:4": "Ticker B.",
+    }
+    assert all(c.status == "visited" for c in added), added
+    assert skips[1] == {"https://x.example/kept"}  # already read, not read again
+
+
+async def test_frames_that_stay_hidden_are_tracking_pixels(monkeypatch) -> None:
+    pixel = FrameCapture(frame_path="https://ads.example/px", kind="cross_origin", hidden=True)
+    calls: list[int] = []
+
+    async def fake_capture(page: object, scripts: object, skip: object = ()) -> list[FrameCapture]:
+        calls.append(1)
+        return [pixel]
+
+    monkeypatch.setattr(explorer_module, "capture_frames", fake_capture)
+    explorer = StateExplorer(InteractionPolicy(), settle_max_s=0, settle_poll_s=0)
+    added: list[ControlRecord] = []
+    await explorer._frames(_FakePage(), added.append, ExplorationResult())
+    assert len(calls) == 2  # one look again, then accepted as hidden
+    assert [(c.status, c.reason) for c in added] == [("excluded", "hidden_frame")]
