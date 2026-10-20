@@ -51,11 +51,11 @@ describe('gap reasons become sentences', () => {
   const cases: [string, string, RegExp][] = [
     ['UNVISITED_STATE', 'unvisited_tab:policy_disallows:hover_info:Pricing', /The "Pricing" tab wasn't opened because it needs hovering, which is turned off for this run/],
     ['UNVISITED_STATE', 'unvisited_accordion:never_visible:Filter icon Cookie list', /"Filter icon Cookie list" expandable section .* never appeared on screen/],
-    ['UNVISITED_STATE', 'unvisited_dialog:dialog_left_open:Life insurance', /opened but would not close again/],
+    ['UNVISITED_STATE', 'unvisited_dialog:dialog_left_open:Life insurance', /The "Life insurance" pop-up window opened but would not close again, so its content was not kept/],
     ['UNVISITED_STATE', 'unvisited_accordion:click_failed:Sign in', /"Sign in" .* clicking it did not work\./],
     ['UNVISITED_STATE', 'unvisited_hover:click_failed:intercepted:Menu', /something on the page \(such as an overlay\) was in the way/],
     ['UNVISITED_STATE', 'unvisited_accordion:unsafe_side_effect:POST https://www.example.com/a/b:Region', /"Region" expandable section .* \(a POST request\)/],
-    ['UNVISITED_STATE', 'unvisited_load_more:unsafe_side_effect:POST http://127.0.0.1:8765/reviews:Show more', /"Show more" "Load more" button/],
+    ['UNVISITED_STATE', 'unvisited_load_more:unsafe_side_effect:POST http://127.0.0.1:8765/reviews:Show more', /The "Show more" button wasn't opened/],
     ['UNVISITED_STATE', 'unvisited_scroll_surface:scroll_budget_exhausted:page', /stopped scrolling the page/],
     ['DISCOVERY_OPEN', 'discovery_open:unvisited_controls=3:remaining_controls=3', /3 clickable parts of the page/],
     ['DISCOVERY_OPEN', 'discovery_open:not_rendered:remaining_controls=0', /wasn't opened in a real browser/],

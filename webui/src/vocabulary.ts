@@ -303,7 +303,7 @@ const CONTROL_KINDS: Record<string, { one: string; many: string }> = {
   keyboard: { one: 'keyboard-only control', many: 'keyboard-only controls' },
   dialog: { one: 'pop-up window', many: 'pop-up windows' },
   consent: { one: 'cookie notice', many: 'cookie notices' },
-  load_more: { one: '"Load more" button', many: '"Load more" buttons' },
+  load_more: { one: 'button', many: '"Load more" buttons' },
   pagination: { one: 'next-page link', many: 'next-page links' },
   frame: { one: 'embedded frame', many: 'embedded frames' },
   shadow_root: { one: 'embedded component', many: 'embedded components' },
@@ -454,16 +454,21 @@ export function describeReason(gapType: string, reason: string): ReasonText {
     label = label.trim();
     const because = causes(cause);
     const named = label ? `The "${label}" ${kind.one}` : `A ${kind.one}`;
+    const stuckOpen = cause === 'dialog_left_open';
     const sentence = kindKey === 'scroll_surface'
       ? `We stopped scrolling ${label === 'page' ? 'the page' : label ? `"${label}"` : 'an area'} before reaching the end, because ${because}.`
-      : `${named} wasn't opened because ${because}.`;
+      : stuckOpen
+        ? `${named} opened but would not close again, so its content was not kept.`
+        : `${named} wasn't opened because ${because}.`;
     return {
       sentence,
       group: `unvisited:${kindKey}:${cause}`,
       groupSentence: (n) =>
         n === 1 || kindKey === 'scroll_surface'
           ? sentence
-          : `${n} ${kind.many} weren't opened because ${causes(cause, true)}.`,
+          : stuckOpen
+            ? `${n} ${kind.many} opened but would not close again, so their content was not kept.`
+            : `${n} ${kind.many} weren't opened because ${causes(cause, true)}.`,
       label: label || undefined,
     };
   }
