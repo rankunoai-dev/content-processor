@@ -34,6 +34,7 @@ from typing import Any
 from pydantic import Field
 
 from src.core.schemas import StrictModel
+from src.modules.content_processor.explore.deep import deep
 from src.modules.content_processor.explore.model import ControlRecord
 
 __all__ = [
@@ -59,7 +60,7 @@ SURFACES_JS = """
   if (!body) { return out; }
   let next = Number(body.getAttribute('data-cp-scroll-next') || '0');
   const candidates = [];
-  for (const el of body.querySelectorAll('*')) {
+  for (const el of document.querySelectorAll('*')) {
     const cs = window.getComputedStyle(el);
     if (!/(auto|scroll)/.test(cs.overflowY)) { continue; }
     if (el.scrollHeight <= el.clientHeight + 40 || el.clientHeight < 60) { continue; }
@@ -155,6 +156,15 @@ RESET_JS = """
   window.scrollTo(0, 0);
 }
 """
+
+
+# Every document query in these scripts also covers open shadow roots.
+SURFACES_JS = deep(SURFACES_JS)
+STEP_JS = deep(STEP_JS)
+METRICS_JS = deep(METRICS_JS)
+TEXT_JS = deep(TEXT_JS)
+ROWS_JS = deep(ROWS_JS)
+RESET_JS = deep(RESET_JS)
 
 
 class ScrollSurfaceResult(StrictModel):

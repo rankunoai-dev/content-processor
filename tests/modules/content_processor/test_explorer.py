@@ -467,3 +467,22 @@ async def test_live_site_noise_is_not_charged_to_controls(renderer, server_url):
     assert ex.background_requests_blocked > 0
     assert all("/sensor" in u for u in ex.unsafe_requests)
     assert ex.discovery_closed
+
+
+async def test_controls_inside_shadow_roots_are_discovered_and_opened(renderer, server_url):
+    """Accordions built as web components are discovered and opened.
+
+    Regression from the live John Hancock run: the button lives in an open shadow
+    root, so discovery never saw it and the page wrongly reported discovery closed.
+    """
+    base, ex = await _explore(renderer, f"{server_url}/pages/shadow_accordion", InteractionPolicy())
+    accordions = [c for c in ex.controls if c.kind == "accordion"]
+    assert {c.label for c in accordions} == {
+        "Is online form submission safe?",
+        "How long does it take?",
+    }
+    assert all(c.status == "visited" for c in accordions), accordions
+    assert "Your electronic signature is unique" not in base.inner_text
+    assert "Your electronic signature is unique, documented and encrypted." in _texts(ex)
+    assert "Most forms are processed within two business days." in _texts(ex)
+    assert ex.discovery_closed

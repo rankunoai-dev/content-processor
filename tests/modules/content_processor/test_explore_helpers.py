@@ -7,6 +7,7 @@ from typing import Any
 import pytest
 
 from src.modules.content_processor.explore.compose import _cdp_html, _cdp_text, _closed_hosts
+from src.modules.content_processor.explore.deep import deep
 from src.modules.content_processor.explore.explorer import _click_cause, _is_telemetry, _note
 from src.modules.content_processor.explore.model import ControlRecord
 
@@ -97,3 +98,16 @@ def test_open_root_inside_tree_is_walked_for_closed_roots() -> None:
     outer["shadowRoots"] = [open_root]
     hosts = [h for h, _ in _closed_hosts(_el("body", outer))]
     assert hosts == [inner_host]
+
+
+def test_deep_rewrites_queries_and_dotted_closest() -> None:
+    js = deep(
+        "(id) => { const a = document.querySelector(id); "
+        "const b = document.querySelectorAll('x'); "
+        "return c.parentElement.closest('n') || a.closest('m'); }"
+    )
+    body = js.split("return null;\n  };")[-1]
+    assert "__cpOne(id)" in body and "__cpAll('x')" in body
+    assert "__cpClosest(c.parentElement, 'n')" in body
+    assert "__cpClosest(a, 'm')" in body
+    assert "document.querySelector" not in body

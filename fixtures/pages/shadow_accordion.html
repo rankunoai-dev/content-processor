@@ -1,0 +1,28 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>E-signature help</title></head>
+<body><main><h1>How to use e-signature</h1>
+<p>Sign forms online in a few minutes.</p>
+<content-accordion title="Is online form submission safe?"></content-accordion>
+<content-accordion title="How long does it take?"></content-accordion>
+</main>
+<script>
+// Like the live site: the toggle button and the hidden body are inside an open shadow root.
+var answers = {
+  'Is online form submission safe?': 'Your electronic signature is unique, documented and encrypted.',
+  'How long does it take?': 'Most forms are processed within two business days.'
+};
+customElements.define('content-accordion', class extends HTMLElement {
+  constructor() {
+    super();
+    var title = this.getAttribute('title');
+    var root = this.attachShadow({ mode: 'open' });
+    root.innerHTML = '<button type="button" aria-expanded="false" aria-controls="body">' + title
+      + '</button><div id="body" hidden><p>' + answers[title] + '</p></div>';
+    var button = root.querySelector('button'), body = root.querySelector('#body');
+    button.addEventListener('click', function () {
+      var open = button.getAttribute('aria-expanded') === 'true';
+      button.setAttribute('aria-expanded', String(!open));
+      body.hidden = open;
+    });
+  }
+});
+</script></body></html>

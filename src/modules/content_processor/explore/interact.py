@@ -15,6 +15,8 @@
 
 from __future__ import annotations
 
+from src.modules.content_processor.explore.deep import deep
+
 __all__ = [
     "CAROUSEL_TEXT_JS",
     "CLOSE_DIALOGS_JS",
@@ -186,3 +188,11 @@ DISCOVER_DIALOG_JS = """
     if (t && (t.tagName === 'DIALOG' || t.getAttribute('role') === 'dialog')) { tag(el, 'dialog'); }
   });
 """
+
+
+# Every document query in these scripts also covers open shadow roots.
+CONSENT_JS = deep(CONSENT_JS)
+CONSENT_VISIBLE_JS = deep(CONSENT_VISIBLE_JS)
+CAROUSEL_TEXT_JS = deep(CAROUSEL_TEXT_JS)
+CONTROL_STATE_JS = deep(CONTROL_STATE_JS)
+CLOSE_DIALOGS_JS = deep(CLOSE_DIALOGS_JS)

@@ -40,6 +40,7 @@ from src.modules.content_processor.explore.compose import (
     compose_page,
     read_closed_roots,
 )
+from src.modules.content_processor.explore.deep import deep
 from src.modules.content_processor.explore.interact import (
     CAROUSEL_TEXT_JS,
     CLOSE_DIALOGS_JS,
@@ -220,6 +221,11 @@ INERT_POINT_JS = """
 """
 
 BLUR_JS = "() => { const a = document.activeElement; if (a && a.blur) { a.blur(); } }"
+
+
+# Every document query in these scripts also covers open shadow roots.
+DISCOVER_JS = deep(DISCOVER_JS)
+REVEAL_UNTIL_FOUND_JS = deep(REVEAL_UNTIL_FOUND_JS)
 
 
 class StateExplorer:
