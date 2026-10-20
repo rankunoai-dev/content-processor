@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import re
 from pathlib import Path
 
 from fastapi import FastAPI, Request, Response
@@ -199,6 +200,51 @@ def logo_png() -> Response:
 def hotlink_png() -> Response:
     """An image URL that answers with an HTML page (hot-link protection)."""
     return HTMLResponse("<html><body><p>Hot-linking is not allowed.</p></body></html>")
+
+
+SERVICES = Path(__file__).with_name("services")
+_SAFE_NAME = re.compile(r"^[a-z0-9][a-z0-9-]*$")
+
+
+@app.get("/services/{name}")
+def service_page(name: str) -> Response:
+    """Interlinked service pages on one template with shared static assets (grouping fixture)."""
+    if not _SAFE_NAME.match(name) or not (SERVICES / f"{name}.html").is_file():
+        return PlainTextResponse("no such fixture", status_code=404)
+    return FileResponse(SERVICES / f"{name}.html", media_type="text/html; charset=utf-8")
+
+
+@app.get("/services-archive/{name}")
+def service_archive_page(name: str) -> Response:
+    """Same path prefix family as /services but a different template: a prefix-collision case."""
+    target = SERVICES / "archive" / f"{name}.html"
+    if not _SAFE_NAME.match(name) or not target.is_file():
+        return PlainTextResponse("no such fixture", status_code=404)
+    return FileResponse(target, media_type="text/html; charset=utf-8")
+
+
+@app.get("/services-blocked")
+def service_blocked() -> Response:
+    """A bot-manager style 403 page: an error screen that must never join a template group."""
+    return FileResponse(
+        SERVICES / "blocked.html", status_code=403, media_type="text/html; charset=utf-8"
+    )
+
+
+@app.get("/services-assets/{name}")
+def service_asset(name: str) -> Response:
+    """Shared CSS, JS, font and logo that every service page references."""
+    types = {
+        "theme.css": "text/css",
+        "bundle.js": "application/javascript",
+        "vendor.js": "application/javascript",
+        "inter.woff2": "font/woff2",
+    }
+    if name == "logo.png":
+        return Response(content=_TINY_PNG, media_type="image/png")
+    if name not in types:
+        return PlainTextResponse("no such fixture", status_code=404)
+    return FileResponse(SERVICES / "assets" / name, media_type=types[name])
 
 
 @app.get("/fingerprint-wall")

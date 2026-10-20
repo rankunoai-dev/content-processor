@@ -135,10 +135,15 @@ class MeteredRenderer:
         """Stop the wrapped renderer."""
         await self._inner.stop()
 
-    async def render(self, url: str, on_page: PageHook | None = None) -> RenderResult:
+    async def render(
+        self, url: str, on_page: PageHook | None = None, asset_store: Any = None
+    ) -> RenderResult:
         """Render through the wrapped renderer and count the request and its bytes."""
         self._meter.requests += 1
-        result: RenderResult = await self._inner.render(url, on_page=on_page)
+        if asset_store is None:
+            result: RenderResult = await self._inner.render(url, on_page=on_page)
+        else:
+            result = await self._inner.render(url, on_page=on_page, asset_store=asset_store)
         self._meter.bytes_received += len(result.dom_html) + len(result.screenshot_jpeg)
         return result
 

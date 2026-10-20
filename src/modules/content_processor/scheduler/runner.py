@@ -28,6 +28,7 @@ from src.modules.content_processor.contracts import RunEvent, RunScope, Task, Ur
 from src.modules.content_processor.enums import EntityStatus, GapType, TaskKind
 from src.modules.content_processor.ledger.outcomes import close_out_task_resource
 from src.modules.content_processor.scheduler.budget import BudgetMeter, BudgetName
+from src.modules.content_processor.scheduler.grouping import RunGroups
 from src.modules.content_processor.scope.frontier import FrontierPlan
 from src.modules.content_processor.verify.detectors import default_detector
 from src.modules.content_processor.verify.record import frames_from_evidence, url_records_for_run
@@ -137,6 +138,9 @@ class RunExecution(StrictModel):
     budget_exhausted: BudgetName | None = None
     budget_usage: dict[str, dict[str, float]] | None = None
     budget_closed_out: int = Field(default=0, ge=0, description="Resources ended BUDGET_EXHAUSTED")
+    group_stats: list[dict[str, Any]] | None = Field(
+        default=None, description="Per template group: members and asset-cache counters"
+    )
 
 
 class LazyRenderStage:
@@ -258,6 +262,7 @@ async def execute_run(
     options: RunOptions | None = None,
     reap: Callable[[], object] | None = None,
     meter: BudgetMeter | None = None,
+    grouping: RunGroups | None = None,
 ) -> RunExecution:
     """Drive the given stages in rounds until the run's queue drains, stalls or hits a budget.
 
@@ -269,6 +274,8 @@ async def execute_run(
         reap: Called before each round (durable ledgers reclaim expired leases).
         meter: Run budgets (K9). With a meter the budget is checked before every
             task; when one is reached the run stops with `budget_exhausted`.
+        grouping: Groups fetched pages and gives grouped pages an asset cache.
+            Refreshed after each fetch stage.
     """
     opts = options or RunOptions()
     order = [s for s in STAGE_ORDER if s in stages and s in opts.stages]
@@ -291,6 +298,8 @@ async def execute_run(
             n = await _drive_stage(stages[name], opts, meter)
             processed[name] += n
             progress += n
+            if grouping is not None and name == "fetch":
+                grouping.refresh()
             if meter is not None and meter.exceeded() is not None:
                 break
         if meter is not None and (exhausted := meter.exceeded()) is not None:
@@ -330,6 +339,7 @@ async def execute_run(
         budget_exhausted=exhausted,
         budget_usage=meter.usage() if meter is not None else None,
         budget_closed_out=closed_out,
+        group_stats=grouping.stats() if grouping is not None else None,
     )
 
 
