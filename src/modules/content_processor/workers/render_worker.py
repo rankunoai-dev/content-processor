@@ -17,7 +17,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
 
 from src.core.logger import get_logger
-from src.integrations.browser_client import PageHook, RenderResult
+from src.integrations.browser_client import AssetStore, PageHook, RenderResult
 from src.integrations.evidence_store import EvidenceStore
 from src.modules.content_processor.adapters.html_source import extract_html_source, match_key
 from src.modules.content_processor.contracts import (
@@ -56,7 +56,12 @@ class Renderer(Protocol):
 
     tier_name: str
 
-    async def render(self, url: str, on_page: PageHook | None = None) -> RenderResult:
+    async def render(
+        self,
+        url: str,
+        on_page: PageHook | None = None,
+        asset_store: AssetStore | None = None,
+    ) -> RenderResult:
         """Render one URL, running `on_page` on the live page before it closes."""
         ...
 
@@ -86,8 +91,14 @@ class RenderWorker:
         run_id: str,
         worker_id: str,
         explorer_factory: Callable[[InteractionPolicy], Explorer] | None = None,
+        asset_store_for: Callable[[str], AssetStore | None] | None = None,
     ) -> None:
-        """Bind the worker to one run."""
+        """Bind the worker to one run.
+
+        `asset_store_for(url)` returns the group-scoped asset store for a page, or None when
+        the page is not in a grouped template (see scheduler.grouping). Without it, rendering
+        is unchanged.
+        """
         self._explorer_factory = explorer_factory or _default_explorer
         self._ledger = ledger
         self._renderer = renderer
@@ -95,6 +106,7 @@ class RenderWorker:
         self._scope = scope
         self._run_id = run_id
         self._worker_id = worker_id
+        self._asset_store_for = asset_store_for
 
     async def run_until_idle(
         self,
@@ -161,7 +173,11 @@ class RenderWorker:
         async def explore_hook(page: Any) -> None:
             holder["result"] = await explorer.explore(page)
 
-        result = await self._renderer.render(url, on_page=explore_hook)
+        store = self._asset_store_for(url) if self._asset_store_for is not None else None
+        if store is None:
+            result = await self._renderer.render(url, on_page=explore_hook)
+        else:
+            result = await self._renderer.render(url, on_page=explore_hook, asset_store=store)
         exploration = holder.get("result")
         if not result.rendered:
             action = host_state.record_transient_failure()

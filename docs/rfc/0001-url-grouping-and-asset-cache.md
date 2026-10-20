@@ -197,3 +197,16 @@ Asset requests fall from 20 to 5 (75%). Total origin requests fall 62%. Wall-clo
 **Timing.** Static extraction for this group took 0.38 s in one run and 0.89 s in another for 20 pages (variance between runs; measured, not modelled). The saving from reuse is therefore small on this site, and the render path remains the dominant cost.
 
 **Edge cases tested:** navigation and footer shared; unique article text not shared; share threshold (80% strict, 60% loose); near-identical disclaimer not shared; short strings ignored; single-page group shares nothing; reuse cache computes once per distinct text.
+
+## 11. Addendum: scheduler integration
+
+**Wired, opt-in** (`--group-assets` on `dry-run`, `run` and `work`):
+
+- `scheduler/grouping.py` `RunGroups`: after each fetch stage, groups the run's fetched HTML and hands each grouped page its group's `AssetCache`. Singletons, shells and excluded pages get no cache. The raw evidence store is used, so grouping reads do not count against the run's evidence budget.
+- Budget: 32 MiB per group and 128 MiB across the run. A group that would exceed the remaining budget renders without a cache, and the run reports it as `over_budget`.
+- `integrations/browser_client.py` `BrowserRenderer.render(..., asset_store=...)`: the static-asset path runs after the host and analytics checks, so the store can only replace a request the policy already allowed. Renderers without the parameter still work (the parameter is forwarded only when a store is given).
+- `RunExecution.group_stats`: per group, members, origin requests, cache hits, stored bytes, and the reason a group had no cache.
+
+**Not yet** (CR-010): render tasks are leased in enqueue order, so a group's pages are not rendered back to back. Cache hits therefore depend on how leases interleave. Group-ordered leasing is the next change, and needs a ledger contract change.
+
+**Tests:** `test_scheduler_grouping.py` covers grouping from ledger and evidence, the budget limit, non-HTML and missing evidence, the scheduler refresh after fetch, the unchanged path without grouping, the render worker's store wiring, and a real browser render that hits the store on pages 2 to 4.

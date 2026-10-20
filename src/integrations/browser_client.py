@@ -13,7 +13,7 @@ from __future__ import annotations
 import asyncio
 import time
 from collections.abc import Awaitable, Callable
-from typing import Any
+from typing import Any, Protocol
 from urllib.parse import urlsplit
 
 from playwright.async_api import (
@@ -32,7 +32,40 @@ from pydantic import Field
 from src.core.logger import get_logger
 from src.core.schemas import StrictModel
 
-__all__ = ["BrowserRenderer", "CapturedResponse", "PageHook", "RenderLimits", "RenderResult"]
+__all__ = [
+    "AssetStore",
+    "BrowserRenderer",
+    "CapturedResponse",
+    "PageHook",
+    "RenderLimits",
+    "RenderResult",
+]
+
+_STATIC_RESOURCE_TYPES = frozenset({"stylesheet", "script", "font", "image"})
+
+
+class AssetStore(Protocol):
+    """Group-scoped store for static sub-resources (implemented by grouping.AssetCache).
+
+    Declared here, not imported, because integrations must not depend on modules.
+    """
+
+    def lookup(self, url: str, resource_type: str, method: str) -> Any:
+        """Return a stored response (with status, headers and body) or None."""
+        ...
+
+    def record_origin(
+        self,
+        url: str,
+        resource_type: str,
+        method: str,
+        status: int,
+        headers: dict[str, str],
+        body: bytes,
+    ) -> None:
+        """Account for an origin response and keep it when cacheable."""
+        ...
+
 
 _logger = get_logger("integrations.browser_client")
 
@@ -232,7 +265,12 @@ class BrowserRenderer:
             await self.stop()
             await self.start()
 
-    async def render(self, url: str, on_page: PageHook | None = None) -> RenderResult:
+    async def render(
+        self,
+        url: str,
+        on_page: PageHook | None = None,
+        asset_store: AssetStore | None = None,
+    ) -> RenderResult:
         """Render `url` with a fresh context. Never raises.
 
         `on_page` runs on the live page after the base DOM, text and screenshot are
@@ -243,7 +281,7 @@ class BrowserRenderer:
         await self._recycle_if_needed()
         try:
             async with asyncio.timeout(self._limits.max_page_time_s):
-                result = await self._render_inner(url, on_page)
+                result = await self._render_inner(url, on_page, asset_store)
         except TimeoutError:
             result = RenderResult(
                 requested_url=url, final_url=url, transport_error="render_timeout"
@@ -259,7 +297,10 @@ class BrowserRenderer:
         return result
 
     async def _render_inner(  # noqa: C901 - one pipeline
-        self, url: str, on_page: PageHook | None = None
+        self,
+        url: str,
+        on_page: PageHook | None = None,
+        asset_store: AssetStore | None = None,
     ) -> RenderResult:
         assert self._browser is not None  # noqa: S101 - start() precondition
         context = await self._browser.new_context(
@@ -285,6 +326,25 @@ class BrowserRenderer:
                 blocked.append(f"{request.url} (analytics_suppressed)")
                 await route.abort("blockedbyclient")
                 return
+            # Host checks above run first: the store can only replace a request the policy allowed.
+            if asset_store is not None and request.resource_type in _STATIC_RESOURCE_TYPES:
+                hit = asset_store.lookup(request.url, request.resource_type, request.method)
+                if hit is not None:
+                    await route.fulfill(status=hit.status, headers=hit.headers, body=hit.body)
+                    return
+                if request.method.upper() == "GET":
+                    response = await route.fetch()
+                    body = await response.body()
+                    asset_store.record_origin(
+                        request.url,
+                        request.resource_type,
+                        request.method,
+                        response.status,
+                        dict(response.headers),
+                        body,
+                    )
+                    await route.fulfill(response=response)
+                    return
             await route.continue_()
 
         async def on_response(response: Response) -> None:

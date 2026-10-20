@@ -68,6 +68,7 @@ from src.modules.content_processor.scheduler.budget import (
     MeteredFetcher,
     MeteredRenderer,
 )
+from src.modules.content_processor.scheduler.grouping import RunGroups
 from src.modules.content_processor.scheduler.reports import badge_summary, records_path_for
 from src.modules.content_processor.scope.frontier import FrontierPlan, build_frontier
 from src.modules.content_processor.scope.ssrf import IpClass, check_host
@@ -209,6 +210,7 @@ async def _drive(
     worker_prefix: str,
     reap: Any = None,
     baseline: Baseline | None = None,
+    group_assets: bool = False,
 ) -> RunExecution:
     """Build the workers for the requested stages, drive them, close everything.
 
@@ -218,6 +220,9 @@ async def _drive(
     """
     seed = sum(r.payload_bytes or 0 for r in ledger.list_resources(run_id))
     meter = BudgetMeter(scope.budgets, seed_bytes=seed)
+    # Grouping reads page bodies for analysis; it uses the raw store so it does not draw on the
+    # run's evidence budget.
+    grouping = RunGroups(ledger, evidence, run_id=run_id) if group_assets else None
     evidence = MeteredEvidenceStore(evidence, meter)
     raw_t1, raw_escalation = build_fetchers(scope)
     t1 = MeteredFetcher(raw_t1, meter)
@@ -246,6 +251,7 @@ async def _drive(
                 scope=scope,
                 run_id=run_id,
                 worker_id=f"{worker_prefix}-render",
+                asset_store_for=grouping.asset_store_for if grouping is not None else None,
             )
 
         render_stage = LazyRenderStage(ledger, renderer, make_render_worker, run_id=run_id)
@@ -261,7 +267,13 @@ async def _drive(
         )
     try:
         return await execute_run(
-            ledger, run_id=run_id, stages=stages, options=options, reap=reap, meter=meter
+            ledger,
+            run_id=run_id,
+            stages=stages,
+            options=options,
+            reap=reap,
+            meter=meter,
+            grouping=grouping,
         )
     finally:
         if render_stage is not None:
@@ -382,6 +394,7 @@ async def _dryrun(args: argparse.Namespace) -> int:
         options=_options(args, stages),
         worker_prefix="dry",
         baseline=baseline,
+        group_assets=getattr(args, "group_assets", False),
     )
     report = {
         "run_id": run_id,
@@ -479,6 +492,7 @@ async def _durable(args: argparse.Namespace, *, create: bool) -> int:
             worker_prefix=args.worker_id,
             reap=ledger.reap,
             baseline=baseline,
+            group_assets=getattr(args, "group_assets", False),
         )
         report = {
             "run_id": run_id,
@@ -574,6 +588,11 @@ def _add_drive_options(p: argparse.ArgumentParser) -> None:
     p.add_argument("--stages", default=None, help="comma list of fetch,render,docs")
     p.add_argument("--no-render", action="store_true", help="skip the T3 render stage")
     p.add_argument("--no-docs", action="store_true", help="skip the document/OCR stage")
+    p.add_argument(
+        "--group-assets",
+        action="store_true",
+        help="group pages by template and share static assets within each group",
+    )
     p.add_argument("--max-tasks", type=int, default=None, help="per stage, single round")
     p.add_argument("--max-rounds", type=int, default=10)
     p.add_argument("--max-wait", type=float, default=60.0, help="seconds to wait for held tasks")

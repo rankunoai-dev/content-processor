@@ -95,3 +95,10 @@ Only Lane L0 edits `contracts.py`, `enums.py`, `workers/ports.py`, `ledger/schem
   3. Decision needed from the operator: whether `_default_actions()` should add `hover_info`, `open_informational_dialog` and `paginate_get` (all read-only, under the GET-only, no-navigation guard). Under today's default (`scroll`, `expand_disclosure`, `select_tab`), a page with a tooltip, an informational dialog or an in-page "Load more" ends PARTIAL with `policy_disallows:<action>`. That is honest, but it is a policy choice, not a capability limit. `keyboard_traverse` costs up to `4 x max_actions_per_url` key presses per page and should stay opt-in.
 - **Why:** B-4, B-6 and the default-policy verdicts. The explorer implements every `AllowedAction` now; these change only how a scope declares them.
 - **Status:** item 3 LANDED (operator decision 2026-10-19: hover_info, open_informational_dialog and paginate_get on by default; keyboard_traverse stays opt-in; see ARCHITECTURE.md §19). Items 1 and 2 PROPOSED: they need the matching explorer change, so L2 lands them with its wiring.
+
+### CR-010: Group-ordered leasing for RENDER tasks
+- **Lane:** L0 (ledger), requested by the URL grouping work (RFC 0001)
+- **File(s):** ports.py, ledger/memory.py, ledger/tasks.py
+- **Change:** `lease()` accepts an optional `group_key: Callable[[Task], str | None]` (or a `group_of: Mapping[str, str]` keyed by URL). When given, ready tasks of the same group are preferred over tasks of other groups, so a group's pages render back to back and its asset cache is reused. Additive: the parameter defaults to None and keeps the current enqueue order.
+- **Why:** the scheduler's `RunGroups` (scheduler/grouping.py) builds groups after the fetch stage, after RENDER tasks already exist. Without ordering, cache hits depend on how leases happen to interleave. Measured effect on the local services fixture is still to be quantified with interleaved leasing.
+- **Status:** OPEN

@@ -57,6 +57,11 @@ class AssetCache:
         """Number of stored assets."""
         return len(self._store)
 
+    @property
+    def stored_bytes(self) -> int:
+        """Bytes currently held for this group."""
+        return self._stored_bytes
+
     def lookup(self, url: str, resource_type: str, method: str) -> CachedAsset | None:
         """Return a stored asset for a cacheable GET, counting the hit."""
         if not self._is_cacheable_request(resource_type, method):
