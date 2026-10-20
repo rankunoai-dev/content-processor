@@ -16,8 +16,8 @@ from __future__ import annotations
 
 import hashlib
 import re
-from collections.abc import Iterable, Sequence
-from dataclasses import dataclass, field
+from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import dataclass, field, replace
 from datetime import date, datetime
 
 from src.modules.content_processor.contracts import ClaimContext, ContentBlock, UrlRecord
@@ -28,6 +28,7 @@ __all__ = [
     "Claim",
     "Quantity",
     "claims_from_records",
+    "codes_of",
     "extract_claims",
     "split_sentences",
     "terms_of",
@@ -124,7 +125,7 @@ _DATE = (
     r"(?:(?P<d2>\d{1,2}),?\s+)?(?P<y>(?:19|20)\d{2})"
 )
 _FROM_CUE = re.compile(
-    r"\b(?:effective(?: from| as of)?|from|as of|since|starting(?: from| on)?|beginning|"
+    r"\b(?:effective(?: from| as of)?|from|since|starting(?: from| on)?|beginning|"
     rf"valid from)\s+{_DATE}",
     re.IGNORECASE,
 )
@@ -132,7 +133,23 @@ _UNTIL_CUE = re.compile(
     rf"\b(?:until|till|through|ending|ends on|valid until|expires on|up to)\s+{_DATE}",
     re.IGNORECASE,
 )
+# "As of <date>" states a value at a point in time (K19): two different "as of"
+# dates are two snapshots, never a date conflict. "Effective as of" stays a start.
+_AS_OF = re.compile(
+    r"(?:(?<!effective )\bas of|\b(?:year|period|quarter|month|to[- ]date)\s+through)"
+    rf"\s+{_DATE}",
+    re.IGNORECASE,
+)
 _YEAR = re.compile(r"\b(?:19|20)\d{2}\b")
+# Short all-capital codes (tickers, plan or product codes): two claims about
+# different codes are about different entities (K19). Common acronyms are not codes.
+_CODE = re.compile(r"\b[A-Z][A-Z0-9]{1,4}\b")
+_NOT_CODE_TEXT = (
+    "US USA UK EU UAE NAV USD GBP EUR INR CAD AUD JPY FAQ PDF CEO CFO COO CTO LLC INC LTD "
+    "PLC NYSE AMEX CNW PR AM PM ID TV OK FY YTD QTD ET PT CT GMT UTC APR APY ATM VAT GST "
+    "HTML URL API TBD NA NB PS"
+)
+_NOT_CODES = frozenset(_NOT_CODE_TEXT.split())
 _GEOGRAPHY: dict[str, str] = {
     "us": "US",
     "u.s.": "US",
@@ -238,6 +255,10 @@ class Claim:
     negated: bool
     years: frozenset[int]
     terms: frozenset[str] = field(default_factory=frozenset)
+    as_of: date | None = None
+    """Point in time the claim states a value for ("as of March 31, 2025")."""
+    codes: frozenset[str] = field(default_factory=frozenset)
+    """Entity codes: the claim's own, else the codes its page repeats."""
 
 
 def split_sentences(text: str) -> list[tuple[int, int]]:
@@ -403,9 +424,42 @@ def extract_claims(record: UrlRecord, block: ContentBlock) -> list[Claim]:
                 negated=negated,
                 years=frozenset(years),
                 terms=terms_of(sentence),
+                as_of=_as_of(sentence),
+                codes=codes_of(sentence),
             )
         )
     return claims
+
+
+def _as_of(text: str) -> date | None:
+    match = _AS_OF.search(text)
+    return _date_from(match, end_of_period=False) if match else None
+
+
+def _is_code(token: str) -> bool:
+    return token not in _NOT_CODES and token.lower() not in _STOPWORDS
+
+
+def codes_of(text: str) -> frozenset[str]:
+    """Short all-capital codes in `text`, minus common acronyms."""
+    return frozenset(c for c in _CODE.findall(text) if _is_code(c))
+
+
+def _page_codes(record: UrlRecord) -> frozenset[str]:
+    """Codes a page repeats (at least twice): the page's own entities."""
+    counts: dict[str, int] = {}
+    for block in record.blocks:
+        for code in _CODE.findall(block.normalized_text):
+            counts[code] = counts.get(code, 0) + 1
+    return frozenset(c for c, n in counts.items() if n >= 2 and _is_code(c))
+
+
+def _with_page_codes(claim: Claim, page_codes: Mapping[str, frozenset[str]]) -> Claim:
+    """A claim without its own code inherits the codes its page repeats."""
+    if claim.codes:
+        return claim
+    inherited = page_codes.get(claim.url, frozenset())
+    return replace(claim, codes=inherited) if inherited else claim
 
 
 def claims_from_records(
@@ -413,7 +467,9 @@ def claims_from_records(
 ) -> list[Claim]:
     """Claims from every URL's corpus blocks (R1 layers; boilerplate roles excluded)."""
     claims: list[Claim] = []
+    page_codes: dict[str, frozenset[str]] = {}
     for record in records:
+        page_codes[record.requested_url] = _page_codes(record)
         for block in record.blocks:
             if (
                 block.normalized_text
@@ -422,4 +478,4 @@ def claims_from_records(
                 and block.dedupe_of is None
             ):
                 claims.extend(extract_claims(record, block))
-    return claims
+    return [_with_page_codes(c, page_codes) for c in claims]

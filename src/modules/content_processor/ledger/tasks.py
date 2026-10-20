@@ -37,7 +37,12 @@ from src.modules.content_processor.enums import (
     TaskKind,
     TaskState,
 )
-from src.modules.content_processor.governor.escalation import CircuitState, HostAccessState
+from src.modules.content_processor.governor.escalation import (
+    CIRCUIT_OPEN_FOR,
+    CircuitState,
+    HostAccessState,
+    initial_host_ceiling,
+)
 from src.modules.content_processor.governor.robots import MAX_CRAWL_DELAY_S, crawl_delay_for
 from src.modules.content_processor.ledger import sql
 from src.modules.content_processor.ledger.outcomes import (
@@ -121,7 +126,7 @@ class TaskLedger:
                     {
                         "tenant_id": scope.tenant_id,
                         "host": host.lower(),
-                        "tier_ceiling": scope.access_tier_ceiling.value,
+                        "tier_ceiling": initial_host_ceiling(scope.access_tier_ceiling).value,
                         "max_concurrency": 1,
                     },
                 )
@@ -137,7 +142,7 @@ class TaskLedger:
                 {
                     "tenant_id": tenant_id,
                     "host": host.lower(),
-                    "tier_ceiling": ceiling.value,
+                    "tier_ceiling": initial_host_ceiling(ceiling).value,
                     "max_concurrency": max_concurrency,
                 },
             )
@@ -191,7 +196,15 @@ class TaskLedger:
             if slot_kinds:
                 cur.execute(
                     sql.SQL_LEASE_WITH_SLOT,
-                    {"kinds": slot_kinds, "worker": worker, "ttl_s": self._ttl, "run_id": run_id},
+                    {
+                        "kinds": slot_kinds,
+                        "worker": worker,
+                        "ttl_s": self._ttl,
+                        "run_id": run_id,
+                        # an open circuit is leased again once its open period ends; the
+                        # worker's can_attempt() then probes it as HALF_OPEN
+                        "circuit_open_s": CIRCUIT_OPEN_FOR.total_seconds(),
+                    },
                 )
                 row = cur.fetchone()
             if row is None and plain_kinds:

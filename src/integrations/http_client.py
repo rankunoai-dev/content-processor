@@ -13,14 +13,16 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import importlib.util
 import time
 from abc import ABC, abstractmethod
-from collections.abc import AsyncGenerator, AsyncIterator, Callable
+from collections.abc import AsyncGenerator, AsyncIterator, Callable, Iterable, Sequence
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass
-from typing import Literal, Protocol
+from typing import Any, Literal, Protocol
 from urllib.parse import urljoin, urlsplit
 
+import httpcore
 import httpx
 from pydantic import Field
 from selectolax.parser import HTMLParser
@@ -35,6 +37,8 @@ __all__ = [
     "FetchResult",
     "Fetcher",
     "HostChecker",
+    "Pinner",
+    "PinningBackend",
     "Hop",
     "HttpFetcher",
     "RawResponse",
@@ -44,6 +48,8 @@ _logger = get_logger("integrations.http_client")
 
 HopKind = Literal["http", "meta", "canonical_hint"]
 HostChecker = Callable[[str], tuple[bool, str]]
+# IPs the egress check just approved for a host; the T1 client connects to them (case 93).
+Pinner = Callable[[str], Sequence[str]]
 """Returns (allowed, reason) for a hostname. Wired to the SSRF classifier."""
 
 _REDIRECT_STATUSES = frozenset({301, 302, 303, 307, 308})
@@ -122,6 +128,79 @@ def _canonical_hint(body: bytes, base_url: str) -> str | None:
     return None
 
 
+def accept_encoding() -> str:
+    """Encodings this client can decode: `br` only when a brotli decoder is installed.
+
+    httpx decodes brotli through `brotli` or `brotlicffi`; advertising `br`
+    without one lets a server answer with bytes that are never decoded.
+    """
+    if any(importlib.util.find_spec(m) is not None for m in ("brotli", "brotlicffi")):
+        return "gzip, deflate, br"
+    return "gzip, deflate"
+
+
+class PinningBackend(httpcore.AsyncNetworkBackend):
+    """Connects to the IP approved for a host instead of resolving it again.
+
+    httpcore passes the URL's host to `connect_tcp` and uses it separately for
+    TLS SNI and certificate verification, so only the TCP target changes.
+    A host with no pin (no check ran, or the check returned no address) is
+    refused rather than resolved, so nothing reaches an unchecked address.
+    """
+
+    def __init__(self, inner: httpcore.AsyncNetworkBackend) -> None:
+        """Wrap the default backend."""
+        self._inner = inner
+        self._pins: dict[str, list[str]] = {}
+
+    def pin(self, host: str, addresses: Sequence[str]) -> None:
+        """Pin `host` to its approved addresses, tried in order (or clear it)."""
+        if addresses:
+            self._pins[host.lower()] = list(addresses)
+        else:
+            self._pins.pop(host.lower(), None)
+
+    async def connect_tcp(
+        self,
+        host: str,
+        port: int,
+        timeout: float | None = None,
+        local_address: str | None = None,
+        socket_options: Iterable[Any] | None = None,
+    ) -> httpcore.AsyncNetworkStream:
+        """Open TCP to the first pinned address for `host` that accepts the connection."""
+        targets = self._pins.get(host.lower())
+        if not targets:
+            raise httpcore.ConnectError(f"egress_not_pinned:{host}")
+        last: Exception | None = None
+        for target in targets:
+            try:
+                return await self._inner.connect_tcp(
+                    target,
+                    port,
+                    timeout=timeout,
+                    local_address=local_address,
+                    socket_options=socket_options,
+                )
+            except (httpcore.ConnectError, httpcore.ConnectTimeout, OSError) as exc:
+                last = exc
+        assert last is not None  # noqa: S101 - targets is non-empty
+        raise last
+
+    async def connect_unix_socket(
+        self,
+        path: str,
+        timeout: float | None = None,
+        socket_options: Iterable[Any] | None = None,
+    ) -> httpcore.AsyncNetworkStream:
+        """Unix sockets are never used for egress."""
+        raise httpcore.ConnectError("egress_unix_socket_refused")
+
+    async def sleep(self, seconds: float) -> None:
+        """Delegate."""
+        await self._inner.sleep(seconds)
+
+
 class Fetcher(Protocol):
     """What a worker needs from an acquisition tier."""
 
@@ -163,6 +242,9 @@ class ChainFetcher(ABC):
         """Bind the egress checker and the caps shared by every tier."""
         self._check = host_checker
         self._limits = limits or FetchLimits()
+
+    def _pin(self, host: str) -> None:  # noqa: B027 - optional hook, default no-op
+        """Connect the next request for `host` to the IPs just checked (no-op by default)."""
 
     @abstractmethod
     def _open(
@@ -209,6 +291,7 @@ class ChainFetcher(ABC):
                 return FetchResult(
                     requested_url=url, final_url=current, hops=hops, egress_denied=reason
                 )
+            self._pin(host)
             try:
                 extra = first_headers if not hops else None
                 async with self._open(current, extra) as response:
@@ -322,9 +405,23 @@ class HttpFetcher(ChainFetcher):
         accept_language: str = "en-US,en;q=0.9",
         limits: FetchLimits | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
+        pinner: Pinner | None = None,
     ) -> None:
-        """Build the client with a fixed header profile (case 107)."""
+        """Build the client with a fixed header profile (case 107).
+
+        With `pinner` (and the default transport) every connection goes to an IP
+        the egress check approved, never to a fresh DNS answer, which closes
+        the rebinding window between check and connect (case 93). The URL,
+        `Host` header, TLS SNI and certificate check keep the real host name.
+        """
         super().__init__(host_checker=host_checker, limits=limits)
+        self._pinner = pinner
+        self._pinning: PinningBackend | None = None
+        if pinner is not None and transport is None:
+            pinned = httpx.AsyncHTTPTransport()
+            self._pinning = PinningBackend(pinned._pool._network_backend)  # noqa: SLF001
+            pinned._pool._network_backend = self._pinning  # noqa: SLF001
+            transport = pinned
         timeout = httpx.Timeout(
             connect=self._limits.connect_timeout_s,
             read=self._limits.read_timeout_s,
@@ -339,9 +436,14 @@ class HttpFetcher(ChainFetcher):
                 "User-Agent": user_agent,
                 "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
                 "Accept-Language": accept_language,
-                "Accept-Encoding": "gzip, deflate, br",
+                "Accept-Encoding": accept_encoding(),
             },
         )
+
+    def _pin(self, host: str) -> None:
+        if self._pinning is None or self._pinner is None:
+            return
+        self._pinning.pin(host, self._pinner(host))
 
     async def aclose(self) -> None:
         """Close pooled connections."""

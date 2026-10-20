@@ -54,6 +54,7 @@ __all__ = [
 
 HOST_SLOT_KINDS: frozenset[TaskKind] = frozenset({TaskKind.FETCH, TaskKind.RENDER, TaskKind.UNLOCK})
 
+
 SQL_INSERT_RUN = """
 INSERT INTO runs (run_id, tenant_id, scope_hash, scope, profile, tool_versions, cost_ceiling_usd)
 VALUES (%(run_id)s, %(tenant_id)s, %(scope_hash)s, %(scope)s::jsonb, %(profile)s,
@@ -113,7 +114,8 @@ WITH candidate AS (
       AND (%(run_id)s::text IS NULL OR t.run_id = %(run_id)s::text)
       AND NOT r.cancel_requested
       AND NOT h.legal_hold
-      AND h.circuit_state <> 'OPEN'
+      AND (h.circuit_state <> 'OPEN' OR h.circuit_opened_at IS NULL
+           OR h.circuit_opened_at <= now() - make_interval(secs => %(circuit_open_s)s))
       AND h.in_flight < h.max_concurrency
       AND h.next_allowed_at <= now()
       AND (h.retry_after_until IS NULL OR h.retry_after_until <= now())

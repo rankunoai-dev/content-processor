@@ -22,9 +22,34 @@ from src.modules.content_processor.enums import (
     tier_rank,
 )
 
-__all__ = ["Action", "ActionKind", "CircuitState", "HostAccessState"]
+__all__ = [
+    "FREE_TIER_CEILING",
+    "Action",
+    "ActionKind",
+    "CircuitState",
+    "HostAccessState",
+    "initial_host_ceiling",
+]
 
 CIRCUIT_OPEN_FOR = timedelta(minutes=15)
+# Highest tier a host may use without an operator approval for that host
+# (ARCHITECTURE.md section 19). The scope ceiling is the most a host may ever be
+# approved for, not what it starts with.
+FREE_TIER_CEILING = AccessTier.T3_FIDELITY_BROWSER
+
+
+def initial_host_ceiling(scope_ceiling: AccessTier) -> AccessTier:
+    """A new host's ceiling: the scope ceiling, capped at the free tiers.
+
+    Raising one host into a paid tier is an explicit approval (A-8), so an
+    escalation past T3 always returns NEEDS_APPROVAL first, even when the
+    scope would allow T4 or T5.
+    """
+    if tier_rank(scope_ceiling) <= tier_rank(FREE_TIER_CEILING):
+        return scope_ceiling
+    return FREE_TIER_CEILING
+
+
 ESCALATION_COOLDOWN = timedelta(seconds=60)
 DECAY_AFTER_CLEAN = 200
 CONSECUTIVE_FAILURES_TO_OPEN = 5
