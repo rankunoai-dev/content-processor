@@ -11,7 +11,7 @@ from fixtures.server import app
 from src.integrations.http_client import HttpFetcher
 from src.modules.content_processor import cli
 from src.modules.content_processor.enums import AccessTier, UrlBadge
-from tests.modules.content_processor.l5_factory import record
+from tests.modules.content_processor.l5_factory import record, report_path
 
 ROOT = Path(__file__).resolve().parents[3]
 FIXTURE_SCOPE = ROOT / "fixtures" / "scopes" / "local_fixtures.json"
@@ -89,11 +89,11 @@ def test_report_subcommand_executes_successfully(tmp_path, capsys):
     stdout = capsys.readouterr().out
     manifest = json.loads(stdout)
     assert manifest["requested_urls"] == 2
-    assert (out_dir / "manifest.json").exists()
-    assert (out_dir / "r1_url_content.csv").exists()
-    assert (out_dir / "r1_url_content.xlsx").exists()
-    assert (out_dir / "review_queue.csv").exists()
-    assert (out_dir / "explorer.html").exists()
+    assert report_path(out_dir, "manifest.json").exists()
+    assert report_path(out_dir, "r1_url_content.csv").exists()
+    assert report_path(out_dir, "r1_url_content.xlsx").exists()
+    assert report_path(out_dir, "review_queue.csv").exists()
+    assert report_path(out_dir, "explorer.html").exists()
 
 
 def _make_mini_scope(tmp_path: Path) -> Path:
@@ -163,9 +163,9 @@ def test_dryrun_assembles_records_and_writes_reports_bundle(tmp_path, monkeypatc
 
     reports_dir = tmp_path / "dry_run_reports"
     assert reports_dir.is_dir()
-    assert (reports_dir / "manifest.json").exists()
-    assert (reports_dir / "r1_url_content.csv").exists()
-    assert (reports_dir / "explorer.html").exists()
+    assert report_path(reports_dir, "manifest.json").exists()
+    assert report_path(reports_dir, "r1_url_content.csv").exists()
+    assert report_path(reports_dir, "explorer.html").exists()
 
 
 def test_dryrun_with_explicit_reports_dir(tmp_path, monkeypatch, settings):
@@ -187,8 +187,8 @@ def test_dryrun_with_explicit_reports_dir(tmp_path, monkeypatch, settings):
     )
     assert rc == 0
     assert custom_reports.is_dir()
-    assert (custom_reports / "manifest.json").exists()
-    assert (custom_reports / "explorer.html").exists()
+    assert report_path(custom_reports, "manifest.json").exists()
+    assert report_path(custom_reports, "explorer.html").exists()
 
 
 def test_dryrun_stdout_only(tmp_path, monkeypatch, settings, capsys):

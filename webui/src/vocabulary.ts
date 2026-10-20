@@ -1175,15 +1175,16 @@ export const DOWNLOADS = {
   other: 'Other file from the run',
 } as const;
 
+// Report files are named `<run>_<report>` (older runs: just `<report>`).
 const FILE_DESCRIPTIONS: { match: RegExp; title: string; text: string }[] = [
-  { match: /^r1_url_content\./, title: 'Page content', text: 'One row per page: its status, word count, issues and all of its captured text.' },
-  { match: /^review_queue\./, title: 'Review list', text: 'Pages that need a decision, with empty columns for your action and notes.' },
-  { match: /^r2_overlap\./, title: 'Duplicate content (workbook)', text: 'Both duplicate-content sheets: groups of similar pages and page pairs.' },
-  { match: /^r2a_overlap_groups\./, title: 'Duplicate content: groups', text: 'Each group of similar pages, one row per page, with how much text it shares.' },
-  { match: /^r2b_overlap_pairs\./, title: 'Duplicate content: pairs', text: 'Every pair of similar pages with similarity scores and shared passages.' },
-  { match: /^r4_contradictions\./, title: 'Contradictions', text: 'Statements that may disagree, side by side, with a column for your decision.' },
-  { match: /^explorer\.html$/, title: 'Offline page viewer', text: 'The older single-file viewer for this run; opens in a browser without this server.' },
-  { match: /^manifest\.json$/, title: 'Report summary', text: 'Counts and settings used to make these reports (for engineers).' },
+  { match: /(?:^|_)r1_url_content\./, title: 'Page content', text: 'One row per page: its status, word count, issues and all of its captured text.' },
+  { match: /(?:^|_)review_queue\./, title: 'Review list', text: 'Pages that need a decision, with empty columns for your action and notes.' },
+  { match: /(?:^|_)r2_overlap\./, title: 'Duplicate content (workbook)', text: 'Both duplicate-content sheets: groups of similar pages and page pairs.' },
+  { match: /(?:^|_)r2a_overlap_groups\./, title: 'Duplicate content: groups', text: 'Each group of similar pages, one row per page, with how much text it shares.' },
+  { match: /(?:^|_)r2b_overlap_pairs\./, title: 'Duplicate content: pairs', text: 'Every pair of similar pages with similarity scores and shared passages.' },
+  { match: /(?:^|_)r4_contradictions\./, title: 'Contradictions', text: 'Statements that may disagree, side by side, with a column for your decision.' },
+  { match: /(?:^|_)explorer\.html$/, title: 'Offline page viewer', text: 'The older single-file viewer for this run; opens in a browser without this server.' },
+  { match: /(?:^|_)manifest\.json$/, title: 'Report summary', text: 'Counts and settings used to make these reports (for engineers).' },
 ];
 
 const FILE_KINDS: Record<string, string> = {

@@ -10,8 +10,18 @@ from pathlib import Path
 import pytest
 
 from src.modules.content_processor.enums import ContentLayer, GapType, UrlBadge
-from src.modules.content_processor.export.bundle import write_run_reports
-from src.modules.content_processor.export.commands import cmd_report, load_records, register
+from src.modules.content_processor.export.bundle import (
+    bundle_file_name,
+    report_file,
+    run_file_prefix,
+    write_run_reports,
+)
+from src.modules.content_processor.export.commands import (
+    cmd_report,
+    load_records,
+    register,
+    run_name_for,
+)
 from src.modules.content_processor.export.reports import (
     r1_rows,
     r1_table,
@@ -20,7 +30,7 @@ from src.modules.content_processor.export.reports import (
     suggested_action,
 )
 from src.modules.content_processor.export.tabular import XLSX_CELL_LIMIT
-from tests.modules.content_processor.l5_factory import block, gap, record, words
+from tests.modules.content_processor.l5_factory import block, gap, record, report_path, words
 
 BASE = "https://example.com/"
 
@@ -128,35 +138,41 @@ def test_bundle_writes_every_report_and_a_manifest(tmp_path: Path):
         sorted(p.name for p in out.iterdir())
         == manifest["files"]
         == [
-            "explorer.html",
-            "manifest.json",
-            "r1_url_content.csv",
-            "r1_url_content.jsonl",
-            "r1_url_content.xlsx",
-            "r2_overlap.xlsx",
-            "r2a_overlap_groups.csv",
-            "r2b_overlap_pairs.csv",
-            "r4_contradictions.csv",
-            "r4_contradictions.jsonl",
-            "r4_contradictions.xlsx",
-            "review_queue.csv",
-            "review_queue.jsonl",
-            "review_queue.xlsx",
+            "run-l5_explorer.html",
+            "run-l5_manifest.json",
+            "run-l5_r1_url_content.csv",
+            "run-l5_r1_url_content.jsonl",
+            "run-l5_r1_url_content.xlsx",
+            "run-l5_r2_overlap.xlsx",
+            "run-l5_r2a_overlap_groups.csv",
+            "run-l5_r2b_overlap_pairs.csv",
+            "run-l5_r4_contradictions.csv",
+            "run-l5_r4_contradictions.jsonl",
+            "run-l5_r4_contradictions.xlsx",
+            "run-l5_review_queue.csv",
+            "run-l5_review_queue.jsonl",
+            "run-l5_review_queue.xlsx",
         ]
     )
     assert manifest["requested_urls"] == 7 and manifest["r1_rows"] == 7
     assert manifest["review_rows"] == 3 and manifest["run_id"] == "run-l5"
+    assert manifest["run_name"] == "run-l5", "no _reports folder: the run id names the files"
     assert manifest["badges"]["VERIFIED_WITHIN_SCOPE"] == 3
     assert manifest["overlap"]["pairs"] == 1 and manifest["overlap"]["groups"] == 1
-    assert json.loads((out / "manifest.json").read_text(encoding="utf-8")) == manifest
-    jsonl = [json.loads(x) for x in (out / "r1_url_content.jsonl").read_text("utf-8").splitlines()]
+    assert json.loads(report_path(out, "manifest.json").read_text(encoding="utf-8")) == manifest
+    jsonl = [
+        json.loads(x)
+        for x in report_path(out, "r1_url_content.jsonl").read_text("utf-8").splitlines()
+    ]
     assert len(jsonl) == 7
-    pairs = list(csv.DictReader((out / "r2b_overlap_pairs.csv").open(encoding="utf-8-sig")))
+    pairs = list(
+        csv.DictReader(report_path(out, "r2b_overlap_pairs.csv").open(encoding="utf-8-sig"))
+    )
     assert [(p["url_a"], p["url_b"], p["jaccard_pct"]) for p in pairs] == [
         (BASE + "dup1", BASE + "dup2", "100.0")
     ]
-    html = (out / "explorer.html").read_text(encoding="utf-8")
-    assert 'href="r1_url_content.xlsx"' in html
+    html = report_path(out, "explorer.html").read_text(encoding="utf-8")
+    assert 'href="run-l5_r1_url_content.xlsx"' in html
 
 
 def test_bundle_on_an_empty_run(tmp_path: Path):
@@ -184,3 +200,32 @@ def test_load_records_names_the_bad_line(tmp_path: Path):
     path.write_text('{"run_id": "x"}\n', encoding="utf-8")
     with pytest.raises(ValueError, match=r"bad.jsonl:1: not a UrlRecord"):
         load_records(path)
+
+
+def test_every_file_carries_the_run_name(tmp_path: Path):
+    named = write_run_reports(_records(), tmp_path / "jh2_reports")
+    assert named["run_name"] == "jh2"
+    assert all(name.startswith("jh2_") for name in named["files"])
+    assert sorted(p.name for p in (tmp_path / "jh2_reports").iterdir()) == named["files"]
+    explicit = write_run_reports(_records(), tmp_path / "shared", run_name="Run 7/Oct")
+    assert explicit["run_name"] == "Run_7_Oct"
+    assert (tmp_path / "shared" / "Run_7_Oct_r1_url_content.xlsx").is_file()
+    # Two runs written into one folder no longer overwrite each other.
+    write_run_reports(_records(), tmp_path / "shared", run_name="other")
+    assert (tmp_path / "shared" / "Run_7_Oct_manifest.json").is_file()
+    assert (tmp_path / "shared" / "other_manifest.json").is_file()
+    html = (tmp_path / "jh2_reports" / "jh2_explorer.html").read_text(encoding="utf-8")
+    assert 'href="jh2_r1_url_content.xlsx"' in html
+
+
+def test_naming_helpers(tmp_path: Path):
+    assert run_file_prefix("jh2") == "jh2" and run_file_prefix(" ../x y ") == "x_y"
+    assert run_file_prefix("///") == "run"
+    assert bundle_file_name("jh2", "manifest.json") == "jh2_manifest.json"
+    assert report_file(tmp_path, "jh2", "manifest.json") is None
+    (tmp_path / "manifest.json").write_text("{}", encoding="utf-8")
+    assert report_file(tmp_path, "jh2", "manifest.json") == tmp_path / "manifest.json"
+    (tmp_path / "jh2_manifest.json").write_text("{}", encoding="utf-8")
+    assert report_file(tmp_path, "jh2", "manifest.json") == tmp_path / "jh2_manifest.json"
+    assert run_name_for(Path("exports/jh2.records.jsonl")) == "jh2"
+    assert run_name_for(Path("a.jsonl")) == "a" and run_name_for(Path("plain.txt")) == "plain"

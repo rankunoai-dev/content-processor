@@ -328,7 +328,8 @@ def _finish(
     if bundle_dir is None and out:
         bundle_dir = Path(out).parent / f"{Path(out).stem}_reports"
     if bundle_dir is not None:
-        manifest = write_run_reports(records, bundle_dir, run_id=run_id)
+        run_name = Path(out).stem if out else None
+        manifest = write_run_reports(records, bundle_dir, run_id=run_id, run_name=run_name)
         full["reports"] = {"dir": str(bundle_dir), "manifest": manifest}
     if out:
         full["records"] = {"path": str(records_path_for(Path(out))), "count": len(records)}

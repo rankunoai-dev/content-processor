@@ -29,7 +29,16 @@ from src.modules.content_processor.analysis.overlap import OverlapConfig
 from src.modules.content_processor.contracts import UrlRecord
 from src.modules.content_processor.export.bundle import write_run_reports
 
-__all__ = ["cmd_report", "load_records", "register"]
+__all__ = ["cmd_report", "load_records", "register", "run_name_for"]
+
+
+def run_name_for(records_path: Path) -> str:
+    """The run's name from its records file: `exports/jh2.records.jsonl` -> `jh2`."""
+    name = records_path.name
+    for suffix in (".records.jsonl", ".jsonl"):
+        if name.endswith(suffix) and len(name) > len(suffix):
+            return name[: -len(suffix)]
+    return records_path.stem
 
 
 def load_records(path: Path) -> list[UrlRecord]:
@@ -73,6 +82,7 @@ def cmd_report(args: argparse.Namespace) -> int:
             records,
             Path(args.out),
             run_id=args.run,
+            run_name=args.run_name or run_name_for(Path(args.records)),
             overlap=config,
             contradictions=ContradictionConfig(threshold=args.contradiction_threshold / 100.0),
             judge=judge,
@@ -91,6 +101,11 @@ def register(subparsers: Any) -> None:
     parser.add_argument("--records", required=True, help="UrlRecord JSONL file")
     parser.add_argument("--out", required=True, help="output directory")
     parser.add_argument("--run", default=None, help="run id (defaults to the records' run id)")
+    parser.add_argument(
+        "--run-name",
+        default=None,
+        help="prefix of every report file (default: the records file name, x.records.jsonl -> x)",
+    )
     parser.add_argument("--threshold", type=float, default=80.0, help="overlap %% (default 80)")
     parser.add_argument("--metric", choices=["jaccard", "containment"], default="jaccard")
     parser.add_argument("--shingle-size", type=int, default=5)
