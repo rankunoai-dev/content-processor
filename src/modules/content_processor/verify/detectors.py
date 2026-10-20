@@ -33,6 +33,7 @@ __all__ = [
     "TextRegionDetector",
     "default_detector",
     "evidence_problems",
+    "group_lines",
     "pdf_regions_from_evidence",
     "screenshot_sha",
 ]
@@ -72,15 +73,67 @@ class OcrRegionDetector:
         self._runner = ocr_runner
 
     def detect(self, image: bytes) -> list[DetectedRegion] | None:
-        """Spans at or above the confidence floor; None when no engine ran."""
+        """Text lines at or above the confidence floor; None when no engine ran.
+
+        Tesseract reports single words; R6 judges phrases, so words are grouped
+        into lines: same baseline band and a horizontal gap under two glyph
+        heights. A line's confidence is its weakest word's.
+        """
         result = run_ocr(image, psm=11, ocr_runner=self._runner)
         if not result.engine_available or result.error:
             return None
-        return [
-            DetectedRegion(text=s.text, bbox=s.bbox, confidence=s.confidence)
+        words = [
+            DetectedRegion(text=s.text.strip(), bbox=s.bbox, confidence=s.confidence)
             for s in result.spans
             if s.text.strip() and s.confidence >= self._min_confidence
         ]
+        return group_lines(words)
+
+
+def group_lines(words: Sequence[DetectedRegion]) -> list[DetectedRegion]:
+    """Merge word boxes into line regions, in reading order.
+
+    Two passes: words whose vertical centres fall inside a row's band form one
+    row (glyph heights differ, so tops alone are unreliable); each row is then
+    read left to right and split where the gap exceeds two glyph heights.
+    """
+    rows: list[list[DetectedRegion]] = []
+    for word in sorted(words, key=lambda w: (w.bbox[1] + w.bbox[3]) / 2):
+        centre = (word.bbox[1] + word.bbox[3]) / 2
+        for row in rows:
+            top = min(w.bbox[1] for w in row)
+            bottom = max(w.bbox[3] for w in row)
+            if top <= centre <= bottom:
+                row.append(word)
+                break
+        else:
+            rows.append([word])
+    lines: list[list[DetectedRegion]] = []
+    for row in rows:
+        row.sort(key=lambda w: w.bbox[0])
+        current = [row[0]]
+        for word in row[1:]:
+            height = max(word.bbox[3] - word.bbox[1], current[-1].bbox[3] - current[-1].bbox[1])
+            if word.bbox[0] - current[-1].bbox[2] <= 2 * max(height, 1.0):
+                current.append(word)
+            else:
+                lines.append(current)
+                current = [word]
+        lines.append(current)
+    regions = [
+        DetectedRegion(
+            text=" ".join(w.text for w in line),
+            bbox=(
+                min(w.bbox[0] for w in line),
+                min(w.bbox[1] for w in line),
+                max(w.bbox[2] for w in line),
+                max(w.bbox[3] for w in line),
+            ),
+            confidence=min(w.confidence for w in line),
+        )
+        for line in lines
+    ]
+    return sorted(regions, key=lambda r: (round(r.bbox[1]), r.bbox[0]))
 
 
 def default_detector() -> TextRegionDetector | None:

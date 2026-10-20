@@ -70,6 +70,7 @@ from src.modules.content_processor.verify.rules_extended import (
     rule_r13_layer_hygiene,
     rule_volatility,
     uncovered_pdf_regions,
+    unmapped_visual_lines,
 )
 from src.modules.content_processor.verify.status import derive_status_vector, derive_url_badge
 
@@ -185,6 +186,20 @@ def derive_discovery(
             remaining_controls=0,
             unknown_state_space=False,
             stop_reason=str(stop) if stop else "closed_within_scope",
+        )
+    if (
+        target.status in CONTENT_STATUSES
+        and target.sniffed_mime is not None
+        and target.sniffed_mime != "text/html"
+        and not unvisited
+    ):
+        # Images, PDFs and Office files have no interactive states to explore:
+        # their inventory is what the adapter read (gaps carry anything missed).
+        return DiscoveryState(
+            closed_within_scope=True,
+            remaining_controls=0,
+            unknown_state_space=False,
+            stop_reason="static_document",
         )
     if target.status not in CONTENT_STATUSES:
         stop_reason = "not_acquired"
@@ -496,6 +511,10 @@ def _ocr_warnings(
         warnings.append(
             "r6:detector_unavailable" if detector_name is None else "r6:screenshot_unavailable"
         )
+    elif visual_regions is not None:
+        lone = unmapped_visual_lines(visual_regions, blocks)
+        if len(lone) == 1:  # below the gap threshold: reported, not blocking
+            warnings.append(f"r6:unmapped_line:{lone[0][:60]}")
     if pdf_regions is not None and not ocr_available:
         uncovered = uncovered_pdf_regions(pdf_regions, blocks)
         if uncovered:

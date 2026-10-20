@@ -1,0 +1,97 @@
+# Quality gate for every push and pull request (WORK_BREAKDOWN §4.3, release gate V-7).
+#
+# gate               required: ruff, mypy --strict, pytest with the 85% coverage floor,
+#                    and the V-7 release gate (zero false VERIFIED_WITHIN_SCOPE) as its
+#                    own step. Same checks as scripts/verify.ps1.
+# ledger-integration the Postgres integration and chaos suites (K1) against a disposable
+#                    service container. Non-blocking until it has been seen green once;
+#                    then delete `continue-on-error` to make it required.
+
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: System packages (Tesseract OCR with OSD)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-osd
+
+      - name: Python packages
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev,browser,docs,unblock,office]"
+
+      - name: Chromium for the browser tests
+        run: python -m playwright install --with-deps chromium
+
+      - name: Format
+        run: ruff format --check .
+
+      - name: Lint
+        run: ruff check .
+
+      - name: Types
+        run: mypy --strict src fixtures
+
+      - name: Release gate V-7 (zero false VERIFIED_WITHIN_SCOPE)
+        run: pytest tests/modules/content_processor/test_verify_release_gate.py tests/modules/content_processor/test_fixture_manifest.py
+
+      - name: Tests with coverage (floor 85%)
+        run: pytest --cov=src --cov-report=term
+
+  ledger-integration:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    continue-on-error: true  # K1: never run against a real database yet; make required once green
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: cp
+          POSTGRES_PASSWORD: cp_ci_only
+          POSTGRES_DB: content_processor_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U cp -d content_processor_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      CP_DATABASE_URL: postgresql://cp:cp_ci_only@localhost:5432/content_processor_test
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Python packages
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Ledger integration and chaos tests
+        run: pytest -m "integration or chaos" tests/modules/content_processor/test_ledger_integration.py -v

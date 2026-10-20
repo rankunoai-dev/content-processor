@@ -11,10 +11,12 @@ from __future__ import annotations
 
 import importlib
 import io
+import os
 import shutil
 import unicodedata
 from collections import Counter
 from collections.abc import Sequence
+from pathlib import Path
 from typing import Any
 
 from PIL import Image
@@ -31,6 +33,9 @@ __all__ = [
     "SCRIPT_TO_PACKS",
     "detect_script_from_text",
     "installed_packs",
+    "ocr_engine_info",
+    "tessdata_dir",
+    "tesseract_cmd",
     "is_ocr_available",
     "route_ocr",
     "run_ocr",
@@ -175,20 +180,66 @@ def select_ocr_packs(
     return candidates[:3]
 
 
+_WINDOWS_ENGINE = Path("C:/Program Files/Tesseract-OCR/tesseract.exe")
+
+
+def tesseract_cmd() -> str | None:
+    """The Tesseract executable: `CP_TESSERACT_CMD`, then PATH, then the standard installs.
+
+    The UB-Mannheim Windows installer does not add itself to PATH, so its
+    default location is checked explicitly (C-1).
+    """
+    candidates = [os.environ.get("CP_TESSERACT_CMD"), shutil.which("tesseract")]
+    candidates += [str(_WINDOWS_ENGINE), "/usr/bin/tesseract", "/opt/homebrew/bin/tesseract"]
+    for candidate in candidates:
+        if candidate and Path(candidate).is_file():
+            return candidate
+    return None
+
+
+def tessdata_dir() -> str | None:
+    """Language-pack folder: `CP_TESSDATA_DIR`, else the per-user pack folder, else the engine's.
+
+    Packs beyond the installer's `eng`/`osd` live in a user-writable folder
+    (`%LOCALAPPDATA%/content-processor/tessdata` on Windows), so adding the
+    core set needs no administrator rights. Returned with forward slashes so
+    pytesseract's non-POSIX config split keeps it intact.
+    """
+    candidates = [os.environ.get("CP_TESSDATA_DIR")]
+    local = os.environ.get("LOCALAPPDATA")
+    if local:
+        candidates.append(str(Path(local) / "content-processor" / "tessdata"))
+    for candidate in candidates:
+        if candidate and Path(candidate).is_dir():
+            return Path(candidate).as_posix()
+    return None
+
+
+def _config(extra: str = "") -> str:
+    """Tesseract options, with `--tessdata-dir` when a pack folder is configured."""
+    folder = tessdata_dir()
+    parts = [f'--tessdata-dir "{folder}"' if " " in (folder or "") else f"--tessdata-dir {folder}"]
+    return " ".join([*(parts if folder else []), extra]).strip()
+
+
 def _tesseract() -> Any:
-    """Load pytesseract lazily; it ships no type information."""
-    return importlib.import_module("pytesseract")
+    """Load pytesseract lazily (it ships no type information) and point it at the engine."""
+    module = importlib.import_module("pytesseract")
+    cmd = tesseract_cmd()
+    if cmd is not None:
+        module.pytesseract.tesseract_cmd = cmd
+    return module
 
 
 def is_ocr_available() -> bool:
-    """Check if the Tesseract OCR executable is available in PATH or system."""
-    if shutil.which("tesseract") is not None:
-        return True
+    """True when a Tesseract executable is installed and answers a version probe."""
+    if tesseract_cmd() is None:
+        return False
     try:
         _tesseract().get_tesseract_version()
-        return True
-    except Exception:
+    except Exception:  # noqa: BLE001 - any probe failure means "not usable"
         return False
+    return True
 
 
 def installed_packs() -> list[str] | None:
@@ -196,10 +247,23 @@ def installed_packs() -> list[str] | None:
     if not is_ocr_available():
         return None
     try:
-        langs = _tesseract().get_languages(config="")
+        langs = _tesseract().get_languages(config=_config())
     except Exception:  # noqa: BLE001 - treat any probe failure as "unknown"
         return None
     return [str(lang) for lang in langs if lang != "osd"]
+
+
+def ocr_engine_info() -> dict[str, Any]:
+    """What a run's OCR can do, for run reports: engine, version, pack folder, packs."""
+    if not is_ocr_available():
+        return {"available": False, "reason": "ocr_engine_missing:tesseract"}
+    return {
+        "available": True,
+        "engine": tesseract_cmd(),
+        "version": str(_tesseract().get_tesseract_version()),
+        "tessdata": tessdata_dir(),
+        "packs": installed_packs(),
+    }
 
 
 def detect_script_osd(image_bytes: bytes, *, osd_runner: Any = None) -> str | None:
@@ -210,7 +274,7 @@ def detect_script_osd(image_bytes: bytes, *, osd_runner: Any = None) -> str | No
         else:
             if not is_ocr_available():
                 return None
-            raw = _tesseract().image_to_osd(Image.open(io.BytesIO(image_bytes)))
+            raw = _tesseract().image_to_osd(Image.open(io.BytesIO(image_bytes)), config=_config())
     except Exception:  # noqa: BLE001 - OSD fails on tiny or blank crops; fall back to hints
         return None
     text = str(raw)
@@ -295,7 +359,7 @@ def run_ocr(
 
         image = Image.open(io.BytesIO(image_bytes))
         lang_str = "+".join(packs) if packs else "eng"
-        config = f"--psm {psm}"
+        config = _config(f"--psm {psm}")
 
         data = pytesseract.image_to_data(
             image, lang=lang_str, config=config, output_type=output_dict

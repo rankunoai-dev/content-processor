@@ -340,3 +340,17 @@ def test_url_records_without_plan_reports_ledger_resources_only():
     ledger.upsert_resource(_res(), "h")
     records = url_records_for_run(ledger, run_id=RUN, outstanding={"res-1"})
     assert [r.badge for r in records] == [UrlBadge.RUNNING]
+
+
+def test_static_documents_have_nothing_to_explore():
+    image = _res(
+        sniffed_mime="image/png", status=S.EXTRACTED_UNVERIFIED, status_reason="image_extracted"
+    )
+    state = derive_discovery(image, {}, [])
+    assert state.closed_within_scope and state.stop_reason == "static_document"
+    pdf = _res(sniffed_mime="application/pdf", status_reason="pdf_extracted")
+    rec = _record(target=pdf, summaries={}, blocks=[_block(1)])
+    assert rec.badge is UrlBadge.VERIFIED_WITHIN_SCOPE
+    assert not any(g.gap_type is GapType.DISCOVERY_OPEN for g in rec.gaps)
+    html = derive_discovery(_res(status_reason="source_extracted"), {}, [])
+    assert not html.closed_within_scope and html.stop_reason == "not_rendered"

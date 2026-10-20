@@ -108,10 +108,16 @@ def test_r6_regions_found_in_any_block_map_and_unknown_text_is_a_gap():
     ]
     mapped = [_region("Eligibility applies only"), _region("Chat with us"), _region("Menu")]
     assert rule_r6_visual_regions(RUN, _res(), regions=mapped, blocks=blocks) == []
-    unknown = [_region("Limited offer ends Friday"), _region("annual plans only")]
+    unknown = [
+        _region("Limited offer ends Friday"),
+        _region("Free shipping for members"),
+        _region("annual plans only"),
+    ]
     (gap,) = rule_r6_visual_regions(RUN, _res(), regions=unknown, blocks=blocks)
     assert (gap.gap_type, gap.status) == (GapType.LOW_CONFIDENCE, S.EXTRACTED_UNVERIFIED)
-    assert gap.reason.startswith("visual_text_unextracted:regions=1:Limited offer")
+    assert gap.reason.startswith("visual_text_unextracted:regions=2:Limited offer")
+    lone = [_region("Limited offer ends Friday")]
+    assert rule_r6_visual_regions(RUN, _res(), regions=lone, blocks=blocks) == []
     assert rule_r6_visual_regions(RUN, _res(), regions=None, blocks=blocks) == []
 
 
@@ -140,8 +146,14 @@ def test_ocr_region_detector_uses_sparse_mode_and_filters_confidence():
     assert OcrRegionDetector(ocr_runner=missing).detect(b"img") is None
 
 
-def test_default_detector_is_none_without_tesseract():
-    assert default_detector() is None  # this machine has no OCR engine (C-1)
+def test_default_detector_follows_engine_availability(monkeypatch):
+    from src.modules.content_processor.verify import detectors
+
+    monkeypatch.setattr(detectors, "is_ocr_available", lambda: False)
+    assert default_detector() is None
+    monkeypatch.setattr(detectors, "is_ocr_available", lambda: True)
+    detector = default_detector()
+    assert isinstance(detector, OcrRegionDetector) and detector.name == "tesseract_psm11"
 
 
 def test_screenshot_sha_reads_the_latest_rendered_event():
@@ -380,10 +392,12 @@ def test_missing_detector_warns_and_does_not_block():
 
 
 def test_r6_gap_lowers_the_badge_when_a_detector_ran():
-    rec = _record(
-        visual_regions=[_region("Unextracted promotional banner text")], detector_name="f"
-    )
+    two = [_region("Unextracted promotional banner text"), _region("Another hidden offer line")]
+    rec = _record(visual_regions=two, detector_name="f")
     assert rec.badge is UrlBadge.NEEDS_REVIEW
+    one = _record(visual_regions=two[:1], detector_name="f")
+    assert one.badge is UrlBadge.VERIFIED_WITHIN_SCOPE
+    assert "r6:unmapped_line:Unextracted promotional banner text" in one.warnings
 
 
 def test_r8_without_ocr_warns_and_with_ocr_reviews():
@@ -487,3 +501,29 @@ def test_run_level_wiring_reads_screenshots_and_builds_baselines(tmp_path: Path)
         by_url[f"http://h/p{i}"].badge is UrlBadge.VERIFIED_WITHIN_SCOPE for i in range(1, 12)
     )
     assert all("r6:detector_unavailable" not in r.warnings for r in records)
+
+
+def test_r6_ignores_ocr_noise_consent_text_and_clipped_words():
+    from src.modules.content_processor.verify.rules_extended import unmapped_visual_lines
+
+    blocks = [
+        _block(1, "Individual annuities and contact us for financial professionals."),
+        _block(2, "John Hancock 2026"),
+    ]
+    regions = [
+        _region("Individual annuiti Contac us"),  # OCR-clipped words of page text
+        _region("1026 John Hanca"),  # digits ignored, clipped name: under 3 real words
+        _region("cookies that are strictly necessary for"),  # consent banner
+        _region("garbled smudge text here", conf=0.5),  # low-confidence OCR line
+    ]
+    assert unmapped_visual_lines(regions, blocks) == []
+
+
+def test_r13_ignores_accessibility_hints_and_non_main_blocks():
+    blocks = [
+        _block(1, "(opens in a new tab)"),
+        _block(2, "(opens in a new tab)", layer=ContentLayer.THIRD_PARTY_CHROME, role="chrome"),
+        _block(3, "Chat with us now!", role="unknown"),
+        _block(4, "Chat with us now!", layer=ContentLayer.THIRD_PARTY_CHROME, role="chrome"),
+    ]
+    assert rule_r13_layer_hygiene(RUN, _res(), blocks=blocks) == []

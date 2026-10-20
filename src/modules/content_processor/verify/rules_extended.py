@@ -47,6 +47,7 @@ __all__ = [
     "rule_r12_limits",
     "rule_r13_layer_hygiene",
     "rule_volatility",
+    "unmapped_visual_lines",
     "uncovered_pdf_regions",
 ]
 
@@ -57,6 +58,16 @@ _ICON_LIGATURE = re.compile(r"^[a-z]+(?:_[a-z]+)+$")
 _MAIN_ROLES = frozenset({"main", "unknown"})
 _SAMPLES = 3
 R6_MIN_REGION_CHARS = 8
+R6_MIN_WORDS = 3
+R6_MIN_UNMAPPED = 2
+R6_MIN_LINE_CONFIDENCE = 0.8
+R6_PREFIX = 4
+_CONSENT_TEXT = re.compile(
+    r"cooki|consent|necessar|privacy|preferenc|opt[- ]?out|tracking|advertis", re.IGNORECASE
+)
+_A11Y_HINT = re.compile(
+    r"^\(?(opens|open|links?) (in|to) (a )?new (tab|window)\)?\.?$", re.IGNORECASE
+)
 R6_TOKEN_COVERAGE = 0.6
 R7_MIN_MISSING_WORDS = 20
 R7_MISSING_SHARE = 0.25
@@ -117,6 +128,58 @@ def _samples(texts: Sequence[str]) -> str:
 # -- R6 ----------------------------------------------------------------------------
 
 
+def _seen(word: str, vocabulary: set[str], by_prefix: Mapping[str, list[str]]) -> bool:
+    """Exact match, or an OCR-truncated form of a page word sharing its first letters.
+
+    OCR on small screenshot text often clips words ("annuiti", "Contac",
+    "Hanca"); a word counts as seen when it shares at least `R6_PREFIX`
+    leading letters with a longer page word.
+    """
+    if word in vocabulary:
+        return True
+    if len(word) < R6_PREFIX:
+        return False
+    for token in by_prefix.get(word[:R6_PREFIX], ()):
+        common = 0
+        for a, b in zip(word, token, strict=False):
+            if a != b:
+                break
+            common += 1
+        if common >= R6_PREFIX and len(word) <= len(token):
+            return True
+    return False
+
+
+def unmapped_visual_lines(
+    regions: Sequence[DetectedRegion], blocks: Sequence[ContentBlock]
+) -> list[str]:
+    """Screenshot text lines that match no block of the page (the R6 measure).
+
+    A line maps when most of its words occur in any block of the page (any
+    layer: a third-party or hidden block is an explicit reason), allowing for
+    OCR-clipped words. Not judged: lines read below `R6_MIN_LINE_CONFIDENCE`,
+    lines with fewer than `R6_MIN_WORDS` real words, and consent-banner text
+    (the consent widget is left out of the content by design; the base
+    screenshot is taken before the explorer answers it).
+    """
+    vocabulary = {t for b in blocks for t in _tokens(b.normalized_text)}
+    by_prefix: dict[str, list[str]] = {}
+    for token in vocabulary:
+        if len(token) >= R6_PREFIX:
+            by_prefix.setdefault(token[:R6_PREFIX], []).append(token)
+    unmapped: list[str] = []
+    for region in regions:
+        if region.confidence < R6_MIN_LINE_CONFIDENCE or _CONSENT_TEXT.search(region.text):
+            continue
+        words = [w for w in _tokens(region.text) if len(w) >= 3 and not w.isdigit()]
+        if len(words) < R6_MIN_WORDS or len("".join(words)) < R6_MIN_REGION_CHARS:
+            continue
+        covered = sum(1 for w in words if _seen(w, vocabulary, by_prefix)) / len(words)
+        if covered < R6_TOKEN_COVERAGE:
+            unmapped.append(region.text.strip())
+    return unmapped
+
+
 def rule_r6_visual_regions(
     run_id: str,
     target: Resource,
@@ -126,23 +189,15 @@ def rule_r6_visual_regions(
 ) -> list[Gap]:
     """R6: text the screenshot shows must map to an extraction or an explicit reason.
 
-    A region maps when most of its words occur in any block of the page (any
-    layer: a third-party or hidden block is an explicit reason). Short regions
-    (single words, icons) are not judged. `regions=None` means the detector
-    did not run; the record warns about it and no gap is raised.
+    A review gap needs at least `R6_MIN_UNMAPPED` unmapped lines: missed
+    content spans lines, while a single stray line is usually OCR noise or
+    overlay text, which the record reports as a warning instead.
+    `regions=None` means the detector did not run (the record warns).
     """
     if regions is None:
         return []
-    vocabulary = {t for b in blocks for t in _tokens(b.normalized_text)}
-    unmapped: list[str] = []
-    for region in regions:
-        words = _tokens(region.text)
-        if len("".join(words)) < R6_MIN_REGION_CHARS or len(words) < 2:
-            continue
-        covered = sum(1 for w in words if w in vocabulary) / len(words)
-        if covered < R6_TOKEN_COVERAGE:
-            unmapped.append(region.text.strip())
-    if not unmapped:
+    unmapped = unmapped_visual_lines(regions, blocks)
+    if len(unmapped) < R6_MIN_UNMAPPED:
         return []
     return [
         _gap(
@@ -414,7 +469,7 @@ def rule_r13_layer_hygiene(
         text = block.normalized_text.strip()
         if _ICON_LIGATURE.match(text) or (text and not _PUA.sub("", text).strip()):
             icons.append(block.block_id)
-        elif block.role in _MAIN_ROLES and _norm(text) in chrome:
+        elif block.role == "main" and _norm(text) in chrome and not _A11Y_HINT.match(text):
             leaked.append(block.block_id)
     gaps: list[Gap] = []
     for kind, ids in (("icon_artifact", icons), ("third_party_chrome", leaked)):
