@@ -36,7 +36,10 @@ __all__ = [
     "SourceExtraction",
     "block_channel",
     "extract_html_source",
+    "STRUCK_MARKER",
     "match_key",
+    "without_struck_markers",
+    "without_struck_text",
 ]
 
 TOOL_VERSION = "html_source/1b"
@@ -218,13 +221,30 @@ def block_channel(state_id: str) -> str:
 _UNSCRIPT = str.maketrans("⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎", "0123456789+-=()0123456789+-=()")
 
 
+STRUCK_MARKER = "~~"
+"""Wraps struck-out text (`<del>`, `<s>`, `<strike>`): "Price ~~$200~~ $150"."""
+_STRUCK_TAGS = frozenset({"del", "s", "strike"})
+_STRUCK_SPAN = re.compile(r"~~.*?~~", re.DOTALL)
+
+
+def without_struck_markers(text: str) -> str:
+    """The text as a browser shows it: struck words kept, `~~` markers removed."""
+    return text.replace(STRUCK_MARKER, "")
+
+
+def without_struck_text(text: str) -> str:
+    """The text with struck-out passages removed (what the page currently states)."""
+    return " ".join(_STRUCK_SPAN.sub(" ", text).split())
+
+
 def match_key(text: str) -> str:
     """Comparison form for matching blocks against visible text.
 
-    Normalized, case-folded, and with super/subscript digits folded to plain
-    ones: blocks keep "$120¹" for the reader, while `innerText` shows "$1201".
+    Normalized, case-folded, super/subscript digits folded to plain ones and
+    struck-text markers removed: blocks keep "$120¹" and "~~$200~~" for the
+    reader, while `innerText` shows "$1201" and "$200".
     """
-    return normalize_text(text)[0].translate(_UNSCRIPT).casefold()
+    return normalize_text(without_struck_markers(text))[0].translate(_UNSCRIPT).casefold()
 
 
 def normalize_text(raw: str) -> tuple[str, list[str]]:
@@ -426,6 +446,21 @@ class _Walker:
                 # Case 90: "$120<sup>1</sup>" must not read as "$1201" (R9 critical tokens).
                 self.append_text(shifted, ctx)
                 return
+        if tag in _STRUCK_TAGS and ctx.layer is not ContentLayer.ICON_ARTIFACT:
+            if (node.text(deep=True) or "").strip():
+                # A struck-out old price stays visible but marked: "Price ~~$200~~ $150".
+                # Children are walked into a side buffer so their own handling
+                # (superscripts, nested inline markup) applies inside the markers.
+                saved, saved_ctx = self.buffer, self.buffer_ctx
+                self.buffer, self.buffer_ctx = [], ctx
+                self.walk(node, ctx, flush_end=False)
+                struck = "".join(self.buffer)
+                self.buffer, self.buffer_ctx = saved, saved_ctx
+                lead = struck[: len(struck) - len(struck.lstrip())]
+                tail = struck[len(struck.rstrip()) :]
+                marked = f"{lead}{STRUCK_MARKER}{struck.strip()}{STRUCK_MARKER}{tail}"
+                self.append_text(marked, ctx)
+            return
         if ctx.layer is ContentLayer.ICON_ARTIFACT:
             text = node.text(deep=True) or ""
             n, ops = normalize_text(text)

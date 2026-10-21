@@ -26,7 +26,7 @@ import re
 from collections.abc import Iterable, Mapping, Sequence
 from typing import Any
 
-from src.modules.content_processor.adapters.html_source import normalize_text
+from src.modules.content_processor.adapters.html_source import match_key
 from src.modules.content_processor.contracts import ContentBlock, Gap, Resource
 from src.modules.content_processor.enums import ContentLayer, EntityStatus, GapType
 from src.modules.content_processor.verify.detectors import (
@@ -103,7 +103,8 @@ def _gap(
 
 
 def _norm(text: str) -> str:
-    return normalize_text(text)[0].casefold()
+    # Same comparison form as reconcile: struck-text markers and super/subscripts folded.
+    return match_key(text)
 
 
 def _squash(text: str) -> str:

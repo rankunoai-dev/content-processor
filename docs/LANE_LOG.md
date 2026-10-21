@@ -474,3 +474,15 @@ git worktree add ../content-processor-lane4 -b lane/L4-verify
 - **Gate:** ruff and mypy --strict clean (97 files), 778 passed and 11 skipped, coverage 93.82%; web app typecheck, lint, 46 vitest tests and build pass.
 - **Note for anyone reading report folders by hand or from scripts:** use `report_file()` or the `manifest.json` `files` list; fixed names only exist in folders written before this change.
 - **Not done:** `docs/guide/GUIDE.md` (CLAUDE.md asks for a guide update on user-visible changes) is not on any branch yet, only uncommitted in the main worktree, so this change still needs a line in the guide once it is committed.
+
+## [2026-10-21] Struck-out text kept and marked (operator decision: inline marker)
+
+- **Branch / worktree:** `feat/struck-text` at `../content-processor-strike` (on `main` `ea12e07`, after K22). `adapters/html_source.py` handed over by the Lane 2 session.
+- **Decision (operator, 2026-10-21):** `<del>$200</del> $150` is recorded as `Price ~~$200~~ $150`: both amounts kept, the old one marked.
+- **What landed:**
+  - `adapters/html_source.py`: `<del>`, `<s>`, `<strike>` are walked into a side buffer (so superscripts and nested inline markup keep their handling: `~~$1¹~~`) and appended as `~~…~~`, whitespace kept outside the markers; empty struck tags add nothing. Helpers `STRUCK_MARKER`, `without_struck_markers()` (what the browser shows) and `without_struck_text()` (what the page currently states). `match_key()` drops the markers, so a marked block verifies against `innerText`.
+  - `verify/rules_extended.py`: R6/R7/R13 compare through `match_key()` (they used their own `normalize+casefold`, which would not have removed the markers; flagged by the Lane 2 session).
+  - `analysis/claims.py`: quantities and negations are read from the sentence without struck passages; the quote stays verbatim. A struck old price no longer produces a numeric contradiction; a struck "not" no longer negates the claim.
+- **Gate:** ruff format and check clean, mypy strict clean (107 files), 843 passed and 11 skipped, coverage 94.07%.
+- **Merge note:** `docs/guide/GUIDE.md` and the binary `Content_Processor_Guide.docx` are also changed by `fix/k20-evidence-volume`; whichever merges second keeps both GUIDE.md entries and re-runs `python scripts/build_guide.py` instead of merging the .docx.
+- **Not done:** the analyst web app shows `~~` as text; rendering it as a strike-through is a small `webui` follow-up.

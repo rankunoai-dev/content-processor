@@ -20,6 +20,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import date, datetime
 
+from src.modules.content_processor.adapters.html_source import without_struck_text
 from src.modules.content_processor.contracts import ClaimContext, ContentBlock, UrlRecord
 from src.modules.content_processor.export.content import DEFAULT_LAYERS
 
@@ -392,8 +393,11 @@ def extract_claims(record: UrlRecord, block: ContentBlock) -> list[Claim]:
     claims: list[Claim] = []
     for start, end in split_sentences(text):
         sentence = text[start:end]
-        quantities = _quantities(sentence)
-        negated = bool(_NEGATION.search(sentence))
+        # A struck-out passage ("~~$200~~") is what the page no longer says: it is
+        # quoted verbatim but never read as a current amount or negation.
+        current = without_struck_text(sentence)
+        quantities = _quantities(current)
+        negated = bool(_NEGATION.search(current))
         years = {int(y) for y in _YEAR.findall(sentence)}
         context = _context(sentence, block)
         if not _is_claim(sentence, quantities, negated, years, context):
