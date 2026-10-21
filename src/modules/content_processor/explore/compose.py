@@ -88,11 +88,27 @@ COMPOSE_JS = """
     r.selectNodeContents(t);
     return r.getClientRects().length > 0;
   };
+  // Text nodes in the same block run on ("of <em>Longer.</em>, host" stays one
+  // line); a new block starts a new line, as innerText does.
+  const inlineDisplay = (d) => d === 'inline' || d === 'contents' || d.startsWith('inline');
+  const blockOf = (t) => {
+    let el = t.parentElement;
+    while (el && inlineDisplay(window.getComputedStyle(el).display)) { el = el.parentElement; }
+    return el;
+  };
+  let lastBlock;
   const collect = (n) => {
     for (const c of n.childNodes) {
       if (c.nodeType === 3) {
-        const v = c.nodeValue.trim();
-        if (v && laidOut(c)) { texts.push(v); }
+        if (!laidOut(c)) { continue; }
+        const block = blockOf(c);
+        const v = c.nodeValue.replace(/\\s+/g, ' ');
+        if (texts.length && block === lastBlock) {
+          texts[texts.length - 1] += v;
+        } else if (v.trim()) {
+          texts.push(v.trimStart());  // keep a trailing space: "of " + "Longer."
+          lastBlock = block;
+        }
       } else if (c.nodeType === 1) {
         const t = c.tagName.toLowerCase();
         if (!['style', 'script', 'template', 'slot', 'noscript', 'link'].includes(t)) {

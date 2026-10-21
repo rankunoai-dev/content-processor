@@ -101,9 +101,18 @@ _BLOCK_TAGS = frozenset(
 _LINE_BREAK_TAGS = frozenset({"br"})
 
 
-def _is_block_boundary(tag: str) -> bool:
-    """Block elements, line breaks and custom elements (whole components) end a block."""
-    return tag in _BLOCK_TAGS or tag in _LINE_BREAK_TAGS or "-" in tag
+def _is_block_boundary(tag: str, attrs: dict[str, str | None]) -> bool:
+    """Block elements, line breaks and custom elements (whole components) end a block.
+
+    In rendered DOMs the browser annotator also marks inline elements that CSS lays
+    out as blocks (`data-cp-block`); source HTML has no such marks.
+    """
+    return (
+        tag in _BLOCK_TAGS
+        or tag in _LINE_BREAK_TAGS
+        or "-" in tag
+        or attrs.get("data-cp-block") == "1"
+    )
 
 
 _SKIP_TAGS = frozenset({"style", "svg", "math", "canvas", "head", "link", "meta"})
@@ -366,7 +375,7 @@ class _Walker:
             self.spa_root = True
 
         ctx = self.context_for(tag, attrs, parent)
-        is_block = _is_block_boundary(tag)
+        is_block = _is_block_boundary(tag, attrs)
         if is_block:
             self.flush()
         heading = _HEADING.match(tag)

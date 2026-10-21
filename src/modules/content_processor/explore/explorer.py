@@ -115,7 +115,7 @@ _BODY_TEXT = "document.body ? document.body.innerText : ''"
 
 CLEAR_ANNOTATIONS_JS = """
 () => {
-  const marked = '[data-cp-hidden],[data-cp-icon],[data-cp-collapsed]';
+  const marked = '[data-cp-hidden],[data-cp-icon],[data-cp-collapsed],[data-cp-block]';
   const found = [];
   const collect = (root) => {
     found.push(...root.querySelectorAll(marked));
@@ -126,6 +126,7 @@ CLEAR_ANNOTATIONS_JS = """
     el.removeAttribute('data-cp-hidden');
     el.removeAttribute('data-cp-icon');
     el.removeAttribute('data-cp-collapsed');
+    el.removeAttribute('data-cp-block');
   }
 }
 """
@@ -235,7 +236,7 @@ class StateExplorer:
         self,
         policy: InteractionPolicy,
         *,
-        max_explore_s: float = 45.0,
+        max_explore_s: float = 90.0,
         click_timeout_s: float = 3.0,
         settle_max_s: float = 3.0,
         settle_poll_s: float = 0.25,

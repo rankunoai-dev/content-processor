@@ -1,0 +1,14 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Press release</title>
+<style>.sr-line { display: block; } .chip { display: inline-block; }</style></head>
+<body><main><h1>Press release</h1>
+<p>To learn more visit www.example.com<span class="sr-line">(opens in a new tab)</span>.</p>
+<p>Plans start at <span class="chip">$12</span> a month.</p>
+<podcast-card></podcast-card>
+</main>
+<script>
+// Like the live podcast pages: an inline <em> inside a shadow-root paragraph.
+customElements.define('podcast-card', class extends HTMLElement { constructor() { super();
+  this.attachShadow({ mode: 'open' }).innerHTML =
+    '<p>In the eleventh episode of <em>Longer. Healthier. Better.</em>, host David discusses food.</p>';
+} });
+</script></body></html>

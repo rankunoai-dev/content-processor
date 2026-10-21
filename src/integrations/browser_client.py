@@ -95,7 +95,13 @@ ANNOTATE_JS = """
   const iconFonts = new RegExp(['material icons', 'material symbols', 'font ?awesome',
     'glyphicon', 'icomoon', 'bootstrap-icons', 'feather', 'ionicons',
     'simple-line-icons'].join('|'), 'i');
-  let hidden = 0, icons = 0, total = 0;
+  let hidden = 0, icons = 0, total = 0, blocks = 0;
+  const inlineTags = new Set(['span', 'a', 'em', 'strong', 'b', 'i', 'u', 'small', 'abbr',
+    'cite', 'code', 'time', 'mark', 'font', 'label', 'q', 's', 'del', 'ins', 'bdi', 'bdo',
+    'data', 'var', 'kbd', 'samp', 'sup', 'sub', 'img', 'big', 'tt']);
+  const blockDisplay = new Set(['block', 'flex', 'grid', 'table', 'table-row', 'table-cell',
+    'table-caption', 'table-row-group', 'table-header-group', 'table-footer-group',
+    'list-item', 'flow-root']);
   const root = document.documentElement;
   const docRect = { w: root.scrollWidth, h: root.scrollHeight };
   // Walk the composed tree: elements inside open shadow roots are marked too.
@@ -127,8 +133,17 @@ ANNOTATE_JS = """
     if (tag === 'details' && !el.hasAttribute('open')) {
       el.setAttribute('data-cp-collapsed', '1');
     }
+    // An inline element the page lays out as a block is a line of its own in the
+    // browser ("com<span style=display:block>(opens in a new tab)</span>."): mark
+    // it so the extractor ends a block there too (K22). Only inline-by-default tags
+    // are marked (block tags already end blocks), and inline-block/flex/grid render
+    // inline, so they are not.
+    if (inlineTags.has(tag) && blockDisplay.has(cs.display)) {
+      el.setAttribute('data-cp-block', '1');
+      blocks += 1;
+    }
   }
-  return { total, hidden, icons };
+  return { total, hidden, icons, blocks };
 }
 """
 
@@ -457,7 +472,18 @@ class BrowserRenderer:
         stable_polls = 0
         last_change = time.perf_counter()
         deadline = last_change + self._limits.settle_window_s
-        while time.perf_counter() < deadline:
+        extended = False
+        while True:
+            if time.perf_counter() >= deadline:
+                # The window closed while the page was already quiet (late hydration,
+                # unchanged since): allow once just enough time to confirm the quiet
+                # period. A page that keeps changing still runs out.
+                if extended or stable_polls == 0:
+                    break
+                extended = True
+                deadline = last_change + self._limits.settle_min_quiet_s
+                deadline += self._limits.poll_interval_s * 2
+                continue
             try:
                 probe = await page.evaluate(SETTLE_PROBE_JS)
             except PlaywrightError:
@@ -477,10 +503,16 @@ class BrowserRenderer:
                         "polls": len(series),
                         "quiet_s": round(quiet_for, 2),
                         "series": series[-6:],
+                        "window_extended": extended,
                     }
             else:
                 stable_polls = 0
                 last_change = now
             series.append(point)
             await asyncio.sleep(self._limits.poll_interval_s)
-        return {"stable": False, "polls": len(series), "series": series[-6:]}
+        return {
+            "stable": False,
+            "polls": len(series),
+            "series": series[-6:],
+            "window_extended": extended,
+        }

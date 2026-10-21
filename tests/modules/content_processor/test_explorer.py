@@ -486,3 +486,32 @@ async def test_controls_inside_shadow_roots_are_discovered_and_opened(renderer, 
     assert "Your electronic signature is unique, documented and encrypted." in _texts(ex)
     assert "Most forms are processed within two business days." in _texts(ex)
     assert ex.discovery_closed
+
+
+async def test_captured_state_blocks_match_the_visible_text(renderer, server_url):
+    """K22 follow-up: CSS-only line breaks and inline text in shadow roots.
+
+    A span laid out as a block is its own line in the browser, so the extractor
+    must end a block there; inline-block stays inline; and text inside a shadow
+    root runs on through inline elements, like innerText.
+    """
+    from src.modules.content_processor.adapters.html_source import (
+        extract_html_source,
+        match_key,
+    )
+
+    _, ex = await _explore(renderer, f"{server_url}/pages/css_blocks", InteractionPolicy())
+    state = next(s for s in ex.states if s.kind == "shadow_root")
+    dom = state.dom_html.decode()
+    assert 'class="sr-line" data-cp-block="1"' in dom
+    assert 'class="chip" data-cp-block' not in dom
+    assert "of Longer. Healthier. Better., host David" in state.inner_text
+    blocks = extract_html_source(
+        state.dom_html, base_url=server_url, evidence_id="e", resource_id="r"
+    ).blocks
+    texts = [b.normalized_text for b in blocks if b.layer.value == "rendered_visible"]
+    assert "(opens in a new tab)" in texts
+    assert "Plans start at $12 a month." in texts
+    visible = match_key(state.inner_text)
+    unmatched = [t for t in texts if match_key(t) not in visible]
+    assert unmatched == []

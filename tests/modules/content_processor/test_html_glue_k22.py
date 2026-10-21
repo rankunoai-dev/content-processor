@@ -62,3 +62,12 @@ def test_inline_elements_still_keep_a_sentence_together() -> None:
 def test_superscript_footnote_is_kept_with_its_number() -> None:
     texts = _texts("<p>The fee is $120<sup>1</sup> a year.</p>")
     assert texts == ["The fee is $120¹ a year."]
+
+
+def test_css_block_mark_from_the_browser_ends_a_block() -> None:
+    marked = '<p>visit www.x.com<span data-cp-block="1">(opens in a new tab)</span>.</p>'
+    assert _texts(marked) == ["visit www.x.com", "(opens in a new tab)", "."]
+    # Source HTML carries no marks: the same markup stays one sentence.
+    assert _texts(marked.replace(' data-cp-block="1"', "")) == [
+        "visit www.x.com(opens in a new tab)."
+    ]
