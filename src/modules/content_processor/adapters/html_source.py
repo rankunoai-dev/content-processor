@@ -86,8 +86,26 @@ _BLOCK_TAGS = frozenset(
         "button",
         "option",
         "title",
+        "dl",
+        "figure",
+        "hr",
+        "dialog",
+        "menu",
+        "hgroup",
+        "search",
+        "center",
     }
 )
+# Line breaks end a line of text (K22): "Management<br>A company" is two lines in the
+# browser and must not become "ManagementA company".
+_LINE_BREAK_TAGS = frozenset({"br"})
+
+
+def _is_block_boundary(tag: str) -> bool:
+    """Block elements, line breaks and custom elements (whole components) end a block."""
+    return tag in _BLOCK_TAGS or tag in _LINE_BREAK_TAGS or "-" in tag
+
+
 _SKIP_TAGS = frozenset({"style", "svg", "math", "canvas", "head", "link", "meta"})
 _HEADING = re.compile(r"^h([1-6])$")
 _ICON_CLASS = re.compile(
@@ -348,7 +366,7 @@ class _Walker:
             self.spa_root = True
 
         ctx = self.context_for(tag, attrs, parent)
-        is_block = tag in _BLOCK_TAGS
+        is_block = _is_block_boundary(tag)
         if is_block:
             self.flush()
         heading = _HEADING.match(tag)
