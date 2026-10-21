@@ -261,7 +261,7 @@ SELECT record FROM resources WHERE resource_id = %(resource_id)s
 """
 
 SQL_GET_BLOCKS = """
-SELECT record FROM extractions e JOIN resources r ON r.run_id = e.run_id
+SELECT e.record FROM extractions e JOIN resources r ON r.run_id = e.run_id
 WHERE r.resource_id = %(resource_id)s AND e.region_id LIKE %(prefix)s
 ORDER BY e.extraction_id
 """

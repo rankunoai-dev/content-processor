@@ -6,6 +6,7 @@ idempotent. Chaos tests force the failure modes in ARCHITECTURE.md §15.
 
 from __future__ import annotations
 
+import contextlib
 import uuid
 from datetime import UTC, datetime, timedelta
 
@@ -32,6 +33,23 @@ def run(ledger_db: TaskLedger, scope: RunScope) -> str:
     run_id = f"test-{uuid.uuid4().hex[:8]}"
     ledger_db.create_run(run_id, scope, {"engine": "0.1.0"})
     return run_id
+
+
+@pytest.fixture(autouse=True)
+def _clean_db(ledger_db: TaskLedger):
+    def _reset():
+        with contextlib.suppress(Exception):
+            ledger_db._conn.rollback()
+        with ledger_db._conn.cursor() as cur:
+            cur.execute(
+                "TRUNCATE runs, host_policy, tasks, resources, resource_edges, states, regions, "
+                "extractions, evidence, gaps, events, cost_ledger CASCADE"
+            )
+        ledger_db._conn.commit()
+
+    _reset()
+    yield
+    _reset()
 
 
 def _task(run_id: str, host: str, n: int, kind: TaskKind = TaskKind.FETCH) -> Task:
@@ -65,6 +83,7 @@ def test_host_slot_limits_concurrency_to_one(ledger_db: TaskLedger, run: str):
     time.sleep(1.1)
     third = ledger_db.lease("w2", [TaskKind.FETCH])
     assert third is not None
+    assert ledger_db.complete(third.id or 0, "w2")
 
 
 def test_plain_kinds_do_not_need_a_slot(ledger_db: TaskLedger, run: str):
