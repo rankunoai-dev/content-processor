@@ -17,6 +17,7 @@ from fastapi import FastAPI, HTTPException, Query, Request, Response
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 
+from src.modules.content_processor.export.bundle import BUNDLE_FILES, bundle_file_name
 from src.modules.content_processor.webapi import reports
 from src.modules.content_processor.webapi.models import (
     ContradictionsResponse,
@@ -188,7 +189,12 @@ def create_app(
         path = report_files(load(run)).get(file_name)
         if path is None:
             raise HTTPException(status_code=404, detail="That file is not in this run's reports.")
-        return FileResponse(path, filename=file_name, content_disposition_type="attachment")
+        # Reports from different runs must not share a name once downloaded: files
+        # written before run names were added get the run's name in front.
+        download_name = file_name
+        if file_name in BUNDLE_FILES:
+            download_name = bundle_file_name(run, file_name)
+        return FileResponse(path, filename=download_name, content_disposition_type="attachment")
 
     @app.get("/api/{rest:path}")
     def api_not_found(rest: str) -> JSONResponse:

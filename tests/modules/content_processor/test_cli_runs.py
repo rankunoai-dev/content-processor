@@ -18,6 +18,7 @@ from fixtures.server import app
 from src.integrations.http_client import FetchLimits, HttpFetcher
 from src.modules.content_processor import cli
 from src.modules.content_processor.ledger.memory import MemoryLedger
+from tests.modules.content_processor.l5_factory import report_path
 
 ROOT = Path(__file__).resolve().parents[3]
 SCOPE_FILE = ROOT / "fixtures" / "scopes" / "local_fixtures.json"
@@ -112,7 +113,9 @@ def test_dryrun_writes_url_records(wired: FakeDurable, tmp_path: Path, capsys):
     report = json.loads(out.read_text("utf-8"))
     assert report["records"] == {"path": str(out.with_suffix(".records.jsonl")), "count": 3}
     assert sum(report["verdicts"].values()) == 3
-    assert (out.parent / "dry_reports" / "manifest.json").exists(), "Stage 4 bundle written"
+    assert report_path(out.parent / "dry_reports", "manifest.json").exists(), (
+        "Stage 4 bundle written"
+    )
     assert wired.schema_created == 0, "dryrun never touches the durable ledger"
 
 
@@ -166,7 +169,7 @@ def test_work_resumes_and_report_reads_without_workers(wired: FakeDurable, tmp_p
     capsys.readouterr()
     bundle = tmp_path / "bundle"
     assert cli.main(["report", "--records", str(records_file), "--out", str(bundle)]) == 0
-    assert (bundle / "r1_url_content.csv").exists(), "L5 report reads the durable records"
+    assert report_path(bundle, "r1_url_content.csv").exists(), "L5 report reads the durable records"
     assert reported["mode"] == "report_only" and reported["url_records"]["urls"] == 2
 
 

@@ -20,6 +20,7 @@ from typing import Any
 
 from src.modules.content_processor.analysis.contradictions import find_contradictions, r4_table
 from src.modules.content_processor.analysis.overlap import find_overlaps, r2a_table, r2b_table
+from src.modules.content_processor.export.bundle import report_file
 from src.modules.content_processor.export.reports import review_rows
 from src.modules.content_processor.webapi.models import (
     Contradiction,
@@ -81,11 +82,15 @@ def _read_jsonl(path: Path) -> list[dict[str, Any]]:
 
 
 def _report_files(run: RunData, names: Sequence[str]) -> list[Path] | None:
-    """The saved report files, if all exist and belong to this run (manifest run id)."""
-    folder = run.reports_dir
-    paths = [folder / n for n in names]
-    if not all(p.is_file() for p in paths):
+    """The saved report files, if all exist and belong to this run (manifest run id).
+
+    Each is found under its run-named file (`<run>_<name>`) or, for report
+    folders written before run names were added, under the plain name.
+    """
+    found = [report_file(run.reports_dir, run.name, n) for n in names]
+    if any(p is None for p in found):
         return None
+    paths = [p for p in found if p is not None]
     manifest = _manifest(run)
     run_id = run.entries[0].record.run_id if run.entries else None
     if manifest.get("run_id") not in (None, run_id):
@@ -94,7 +99,9 @@ def _report_files(run: RunData, names: Sequence[str]) -> list[Path] | None:
 
 
 def _manifest(run: RunData) -> dict[str, Any]:
-    path = run.reports_dir / "manifest.json"
+    path = report_file(run.reports_dir, run.name, "manifest.json")
+    if path is None:
+        return {}
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):

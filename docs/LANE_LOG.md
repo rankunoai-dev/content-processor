@@ -460,3 +460,17 @@ git worktree add ../content-processor-lane4 -b lane/L4-verify
 - **Live John Hancock run, OCR on, final rules (34 supplied URLs, $0):** 3 VERIFIED_WITHIN_SCOPE, 31 NEEDS_REVIEW. R6 and R13 raise no gaps (one R6 warning). Causes: 21 pages R7 source text not rendered (K23, real capture gaps), 8 pages one unverified glued block (K22, regression from the R9 html_source change), 2 pages live "Lorem ipsum". Follow-up images: OCR now runs; logos and photos give low-confidence readings (PARTIAL with a LOW_CONFIDENCE gap). Before calibration the same run gave 0 of 34 because of R6/R13 noise.
 - **Gate:** see the merge commit.
 - **Open:** K22 (extractor owner; the R9 session has ended), K23 (L2), push to GitHub so CI runs.
+
+## [2026-10-20] Run-named report files (L5 writer, L6 callers, L8 API and web app)
+
+- **Branch / worktree:** `feat/run-named-reports` at `../content-processor-runnames` (on `lane/L8-ui` `c1412d5`, which `main` now points to).
+- **Why:** the user asked for each run's reports to be separate. Each run already had its own `<name>_reports/` folder, but every run's files had the same names (`r1_url_content.xlsx`, …), so downloads from different runs collided and were indistinguishable.
+- **What landed:**
+  - `export/bundle.py`: every file is `<run>_<report>`, e.g. `jh2_r1_url_content.xlsx`, `jh2_explorer.html`, `jh2_manifest.json` (`bundle_file_name`, `run_file_prefix` keeps letters, digits, `.`, `_`, `-`). The run name comes from `run_name=`, else the folder name without `_reports`, else the run id. The explorer's download links, `manifest.files` and the new `manifest.run_name` use the prefixed names. `REPORT_VERSION` is now `l5-v3`. `report_file(folder, run, base)` finds a report under its prefixed name, else the plain name (folders written before this change).
+  - Callers: `dryrun`/`run`/`work` pass their `--out` stem (the name the analyst UI shows). `report` takes the records file's name (`x.records.jsonl` → `x`) or `--run-name`.
+  - `webapi`: report readers and the manifest go through `report_file`, so existing exports keep working. A plain-named file from an older run is downloaded as `<run>_<name>`.
+  - `webui`: file titles match `<run>_<report>` or `<report>`; the Downloads sort recognises `<run>_manifest.json`.
+- **Checked:** two dry runs (`alpha`, `beta`) into one exports folder give two separately named sets; the analyst UI (my build, port 8781) lists `beta_*` files with their titles and serves `content-disposition: filename="beta_r1_url_content.xlsx"`; no page errors.
+- **Gate:** ruff and mypy --strict clean (97 files), 778 passed and 11 skipped, coverage 93.82%; web app typecheck, lint, 46 vitest tests and build pass.
+- **Note for anyone reading report folders by hand or from scripts:** use `report_file()` or the `manifest.json` `files` list; fixed names only exist in folders written before this change.
+- **Not done:** `docs/guide/GUIDE.md` (CLAUDE.md asks for a guide update on user-visible changes) is not on any branch yet, only uncommitted in the main worktree, so this change still needs a line in the guide once it is committed.

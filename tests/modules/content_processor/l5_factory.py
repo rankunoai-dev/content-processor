@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Literal
 
 from src.modules.content_processor.contracts import (
@@ -124,3 +125,10 @@ def words(seed: int, n: int) -> str:
         x = (1103515245 * x + 12345) % 2**31
         out.append(f"w{x % 500}")
     return " ".join(out)
+
+
+def report_path(folder: Path, base: str) -> Path:
+    """The single report file in `folder` for a report name (`<run>_<base>`)."""
+    matches = sorted(folder.glob(f"*_{base}"))
+    assert len(matches) == 1, (folder, base, [m.name for m in matches])
+    return matches[0]

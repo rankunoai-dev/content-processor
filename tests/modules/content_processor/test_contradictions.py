@@ -23,7 +23,7 @@ from src.modules.content_processor.analysis.nli import NliVerdict
 from src.modules.content_processor.contracts import UrlRecord
 from src.modules.content_processor.enums import ContentLayer, EntityStatus, UrlBadge
 from src.modules.content_processor.export.commands import register
-from tests.modules.content_processor.l5_factory import block, record
+from tests.modules.content_processor.l5_factory import block, record, report_path
 
 
 def site() -> list[UrlRecord]:
@@ -311,7 +311,9 @@ def test_report_command_writes_r4_and_refuses_remote_judges(tmp_path: Path, caps
     assert manifest["contradictions"]["reported_pairs"] == len(EXPECTED)
     rows = list(
         csv.DictReader(
-            (tmp_path / "out" / "r4_contradictions.csv").read_text("utf-8-sig").splitlines()
+            report_path(tmp_path / "out", "r4_contradictions.csv")
+            .read_text("utf-8-sig")
+            .splitlines()
         )
     )
     assert len(rows) == len(EXPECTED)
@@ -328,7 +330,9 @@ def test_report_command_carries_decisions_and_uses_a_local_judge(tmp_path: Path,
     capsys.readouterr()
     rows = [
         json.loads(x)
-        for x in (tmp_path / "out" / "r4_contradictions.jsonl").read_text("utf-8").splitlines()
+        for x in report_path(tmp_path / "out", "r4_contradictions.jsonl")
+        .read_text("utf-8")
+        .splitlines()
     ]
     decided = tmp_path / "decided.jsonl"
     decided.write_text(
@@ -349,6 +353,8 @@ def test_report_command_carries_decisions_and_uses_a_local_judge(tmp_path: Path,
     assert manifest["contradictions"]["judge_status"].startswith("enabled(m:errors=")
     again = [
         json.loads(x)
-        for x in (tmp_path / "out" / "r4_contradictions.jsonl").read_text("utf-8").splitlines()
+        for x in report_path(tmp_path / "out", "r4_contradictions.jsonl")
+        .read_text("utf-8")
+        .splitlines()
     ]
     assert again[0]["reviewer_decision"] == "confirmed"

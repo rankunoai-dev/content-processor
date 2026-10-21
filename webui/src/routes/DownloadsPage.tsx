@@ -26,7 +26,7 @@ function rank(name: string): number {
   if (name.endsWith('.xlsx')) return 0;
   if (name.endsWith('.csv')) return 1;
   if (name.endsWith('.html')) return 3;
-  if (name === 'manifest.json') return 4;
+  if (name === 'manifest.json' || name.endsWith('_manifest.json')) return 4;
   return 2;
 }
 

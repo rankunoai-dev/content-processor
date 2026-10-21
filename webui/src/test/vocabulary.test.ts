@@ -101,6 +101,11 @@ describe('other wording', () => {
 
   it('describes report files', () => {
     expect(describeFile('r1_url_content.xlsx')).toMatchObject({ title: 'Page content', kind: 'Excel' });
+    expect(describeFile('jh2_r1_url_content.xlsx')).toMatchObject({ title: 'Page content', kind: 'Excel' });
+    expect(describeFile('jh2_r2a_overlap_groups.csv').title).toBe('Duplicate content: groups');
+    expect(describeFile('jh2_r2_overlap.xlsx').title).toBe('Duplicate content (workbook)');
+    expect(describeFile('jh2_manifest.json').title).toBe('Report summary');
+    expect(describeFile('jh2_explorer.html').title).toBe('Offline page viewer');
     expect(describeFile('unknown.bin').title).toBe('unknown.bin');
   });
 

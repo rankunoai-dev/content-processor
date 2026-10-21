@@ -25,7 +25,7 @@ from src.modules.content_processor.webapi.store import (
     RunStore,
     page_key_for,
 )
-from tests.modules.content_processor.l5_factory import block, gap, record, words
+from tests.modules.content_processor.l5_factory import block, gap, record, report_path, words
 
 BASE = "http://127.0.0.1"
 
@@ -237,8 +237,8 @@ def test_reports_are_read_from_the_saved_folder(exports: Path) -> None:
         "badge_b": "VERIFIED_WITHIN_SCOPE",
         "reviewer_decision": "confirmed",
     }
-    (out / "r4_contradictions.jsonl").write_text(json.dumps(row) + "\n", encoding="utf-8")
-    with (out / "r2b_overlap_pairs.csv").open("a", encoding="utf-8") as handle:
+    report_path(out, "r4_contradictions.jsonl").write_text(json.dumps(row) + "\n", encoding="utf-8")
+    with report_path(out, "r2b_overlap_pairs.csv").open("a", encoding="utf-8") as handle:
         handle.write("run-l5,https://x/a,https://x/b,X,Y,1,2,3,4,'=SUM(1),exact_duplicate,\n")
     client = TestClient(create_app(exports), base_url=BASE)
 
@@ -262,10 +262,11 @@ def test_reports_are_read_from_the_saved_folder(exports: Path) -> None:
     files = client.get("/api/runs/demo/downloads").json()
     assert files["folder"] == "demo_reports"
     names = {f["name"] for f in files["files"]}
-    assert "r1_url_content.xlsx" in names
-    got = client.get("/api/runs/demo/downloads/review_queue.csv")
+    assert "demo_r1_url_content.xlsx" in names and "r1_url_content.xlsx" not in names
+    got = client.get("/api/runs/demo/downloads/demo_review_queue.csv")
     assert got.status_code == 200
     assert "attachment" in got.headers["content-disposition"]
+    assert 'filename="demo_review_queue.csv"' in got.headers["content-disposition"]
     for bad in ("..%2Fdemo.json", "demo.json", "%2E%2E%2Fdemo.records.jsonl", "nope.csv"):
         assert client.get(f"/api/runs/demo/downloads/{bad}").status_code == 404
 
@@ -348,3 +349,18 @@ def test_command_line_checks_its_folders(tmp_path: Path, monkeypatch: pytest.Mon
     assert cli.main(["--exports", str(tmp_path), "--port", "8799"]) == 0
     assert started == {"host": "127.0.0.1", "port": 8799, "log_level": "warning"}
     assert cli.parse_args(["--exports", "x"]).port == 8780
+
+
+def test_report_folders_from_before_run_names_still_work(exports: Path) -> None:
+    out = exports / "demo_reports"
+    write_run_reports(_records(), out)
+    for path in out.iterdir():  # rename to the plain names older runs used
+        path.rename(out / path.name.removeprefix("demo_"))
+    client = TestClient(create_app(exports), base_url=BASE)
+    assert client.get("/api/runs/demo/review").json()["source"] == "report"
+    names = {f["name"] for f in client.get("/api/runs/demo/downloads").json()["files"]}
+    assert "r1_url_content.xlsx" in names
+    got = client.get("/api/runs/demo/downloads/r1_url_content.xlsx")
+    assert got.status_code == 200
+    # Downloaded under the run's name, so it cannot collide with another run's file.
+    assert 'filename="demo_r1_url_content.xlsx"' in got.headers["content-disposition"]
