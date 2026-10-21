@@ -156,6 +156,7 @@ Besides the files, there is a web app for reviewing runs in a browser on your ow
 
 | Test | Result |
 |---|---|
+| Live John Hancock website, 34 pages (21 October 2026) | 32 of 34 pages VERIFIED_WITHIN_SCOPE at $0 with every check switched on (stricter than on 19 October: text reading, missing-text and leak checks). The other 2 are correctly flagged NEEDS_REVIEW: their live content is "Lorem ipsum" placeholder text. Reached by opening FAQ sections built as web components, matching text the way the browser shows it, and not letting a brief network hiccup pause the whole site. |
 | Live John Hancock website, 34 pages (19 October 2026) | 32 of 34 pages VERIFIED_WITHIN_SCOPE at $0 with the checks available that day. The other 2 correctly flagged NEEDS_REVIEW because the live pages contain "Lorem ipsum" placeholder text. Before the browser-exploration work, all 34 were PARTIAL. |
 | Same website, re-run with the stricter checks and OCR (20 October 2026) | 3 of 34 VERIFIED. This is the more honest number: the new channel-agreement check found text that exists in the page code but was not captured from the browser on 21 pages (frequently-asked-question answers on the form pages, half of one press release), so those pages were less complete than the earlier run suggested. On 8 pages a text-joining fault introduced on 20 October glues words together; it is being fixed. 2 pages still contain placeholder text. |
 | Adversarial test suite (28 trick pages) | Zero pages wrongly marked VERIFIED. Each trick (fake PDFs, challenge pages, form walls, paywalls, disguised fonts, soft redirects) gets the expected verdict. |
@@ -193,6 +194,7 @@ Besides the files, there is a web app for reviewing runs in a browser on your ow
 
 | Date | Significant change |
 |---|---|
+| 2026-10-21 | Live John Hancock: 32 of 34 verified again with all checks on (the 2 others are placeholder pages). FAQ sections built as web components are now opened, text is matched the way the browser shows it, and a brief network hiccup no longer pauses a whole website. |
 | 2026-10-21 | Project report: one Excel workbook per run with every page's text, whether it was fully extracted, the confirmed share and the confidence, plus, for every page, which other pages carry the same text and how much (exact matching). |
 | 2026-10-21 | Evidence stored compactly: repeated fonts and style sheets kept once, the rest compressed, originals unchanged. About 18 times less disk on the live John Hancock run; a 5,000-page run now fits the 20 GB budget. Older evidence can be converted with one command. |
 | 2026-10-21 | Crossed-out text (for example an old sale price) is kept and marked with ~~ instead of reading as a current price. |
