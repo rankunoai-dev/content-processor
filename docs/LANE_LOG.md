@@ -486,3 +486,18 @@ git worktree add ../content-processor-lane4 -b lane/L4-verify
 - **Gate:** ruff format and check clean, mypy strict clean (107 files), 843 passed and 11 skipped, coverage 94.07%.
 - **Merge note:** `docs/guide/GUIDE.md` and the binary `Content_Processor_Guide.docx` are also changed by `fix/k20-evidence-volume`; whichever merges second keeps both GUIDE.md entries and re-runs `python scripts/build_guide.py` instead of merging the .docx.
 - **Not done:** the analyst web app shows `~~` as text; rendering it as a strike-through is a small `webui` follow-up.
+
+## [2026-10-21] K20 evidence volume: packed evidence store
+
+- **Branch / worktree:** `fix/k20-evidence-volume` at `../content-processor-k20` (on `main` `d598764`). Coordinated with the Lane 2 session (content-processor-08), which is doing K22 in `adapters/html_source.py`; no overlap.
+- **Measured first:** on the live John Hancock evidence (799 objects, 1,182 MB), HTML snapshots are 98 % of the bytes (440 files, 2.6 MB each). 88 % of a snapshot is `<style>` blocks of base64 `data:` URIs (web fonts, images) that repeat in every explored state and across pages, so per-file gzip gives only 2× while 12 consecutive snapshots compressed together give 37×.
+- **What landed:**
+  - `integrations/evidence_store.py`: text payloads are packed. `data:` URIs and `<style>` bodies of `CHUNK_MIN_BYTES` (4 KB) or more become chunks stored once per tenant (`<root>/<tenant>/chunks/<aa>/<sha>.z`, zlib); the rest is a zlib container `raw/<aa>/<bb>/<sha>.cpz`. Objects keep their SHA-256 of the exact original bytes and `get()` returns those bytes. Already-compressed media (images, PDF, archives, Office, fonts, audio, video) and anything that would not shrink by 10 % stay raw. Chunks are written before the container, both atomically. Raw objects from earlier versions read as before. `EvidenceRef.stored_bytes` reports bytes added on disk (0 when reused); `LocalEvidenceStore.repack(sha)` converts one raw object after checking its hash and verifying the read-back.
+  - `scheduler/budget.py`: `max_evidence_bytes` meters `stored_bytes` (bytes on disk) instead of the raw size.
+  - `scripts/repack_evidence.py` (`--root`, `--tenant`, `--dry-run`): repacks existing evidence in place, safe to stop and re-run.
+- **Result on the live evidence:** 1,182 MB → 65 MB on disk (18×; HTML about 27×, the rest is JPEG kept as is), 695 objects packed, 45 shared chunks, 75 MB/s write, all 799 objects read back byte-identical. About 1.7 MB per URL instead of 30 MB, so a 5,000-URL run needs roughly 8–9 GB instead of exhausting the 20 GB budget at ~750 URLs.
+- **Checked:** fixture dry run with real Chromium on `main` and on this branch: identical badges URL by URL (12 VERIFIED_WITHIN_SCOPE, 3 NEEDS_REVIEW, 5 PARTIAL, 5 BLOCKED, 2 EXCLUDED, 1 FAILED).
+- **Gate:** ruff format and check clean, mypy strict clean (106 files), 841 passed and 11 skipped, coverage 94.08% (`evidence_store.py` 96%).
+- **Guide:** `docs/guide/GUIDE.md` and `Content_Processor_Guide.docx` updated (compact evidence, plus the missing entry for run-named report files from 2026-10-20).
+- **Limits, stated:** deleting evidence (retention, P-5) must now count chunk references, since chunks are shared between objects; there is no garbage collection of unreferenced chunks yet. MinIO/S3 (P-5) needs the same packed layout.
+- **Operator action, optional:** `python scripts/repack_evidence.py --root evidence` (and for other evidence roots) reclaims about 94 % of existing evidence disk.

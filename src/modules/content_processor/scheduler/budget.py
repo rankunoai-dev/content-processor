@@ -9,7 +9,7 @@ changes:
 | `max_runtime_s` | wall-clock seconds since the meter started |
 | `max_requests` | calls to a fetcher's `fetch` (robots included) and the renderer's `render` |
 | `max_bytes` | bytes received: `FetchResult.received_bytes` plus rendered DOM and screenshot |
-| `max_evidence_bytes` | bytes newly written to the evidence store (deduplicated writes are free) |
+| `max_evidence_bytes` | bytes newly written to disk by the evidence store, after packing |
 
 The run engine checks the meter before every task and stops the run when a
 budget is reached (see `execute_run`). One task in flight can overshoot a
@@ -164,7 +164,10 @@ class MeteredEvidenceStore:
         """Store and count the bytes unless the object already existed."""
         ref = self._inner.put(data, media_type)
         if not ref.reused:
-            self._meter.evidence_bytes += ref.bytes
+            # Bytes actually added on disk (K20: packed evidence is far smaller).
+            self._meter.evidence_bytes += (
+                ref.bytes if ref.stored_bytes is None else ref.stored_bytes
+            )
         return ref
 
     def get(self, sha256: str) -> bytes:

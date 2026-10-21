@@ -1,6 +1,6 @@
 # Content Processor: A Plain-Language Guide
 
-Last updated: 21 October 2026 · Code version: main after the struck-text change · Maintained by every session that adds a significant feature (see "Keeping this guide current" at the end)
+Last updated: 21 October 2026 · Code version: main after the struck-text change and the evidence-storage fix (K20) · Maintained by every session that adds a significant feature (see "Keeping this guide current" at the end)
 
 ## 1. What this is, in one paragraph
 
@@ -78,6 +78,8 @@ The engine climbs the ladder only as far as needed. It never enters a paid rung 
 
 Each page is downloaded, its type is checked (for example, is this really a PDF, or an HTML login page pretending to be one?), and the original bytes are stored as evidence.
 
+Evidence is stored compactly. Web pages carry the same fonts and style sheets on every page of a site, and a page photographed in several states repeats them each time, so the engine keeps each of those large repeated pieces once and compresses the rest. Nothing is lost: every original reads back exactly as it was captured, and the evidence-integrity check still proves it. On the live John Hancock run this cut evidence from about 1.2 GB to 65 MB (about 18 times smaller), so a 5,000-page run fits comfortably within the 20 GB storage budget.
+
 ### Step 5: Reading the page's text
 
 The engine reads the page's HTML and splits it into blocks (headings, paragraphs, tables), and labels each block by layer: visible content, hidden text, navigation and footer, third-party widgets such as chat boxes, icon codes, and so on. Hidden and decorative text is kept but never mixed into the main content.
@@ -127,7 +129,7 @@ All gaps for a page are combined into one verdict using the strict order in sect
 
 ### Step 10: The reports
 
-At the end of a run the engine writes a bundle of files:
+At the end of a run the engine writes a bundle of files. Every file name starts with the run's name (for example `jh2_r1_url_content.xlsx`), so files from different runs never get mixed up once downloaded:
 
 | File | What you use it for |
 |---|---|
@@ -166,7 +168,6 @@ Besides the files, there is a web app for reviewing runs in a browser on your ow
 - Starting runs from the web: the analyst web app reviews finished runs, but runs are still started from the command line, and there is no live progress feed or deployment package yet.
 - Some content types: text drawn on canvas or in CSS, product variant selectors, audio and video, archives and email files, and old-style .doc and .xls files.
 - Semantic similarity: finding pages that say the same thing in different words (planned with a vector database).
-- Storage size: each explored page currently stores about 27 MB of evidence, which needs compressing before 5,000-page runs.
 - Hidden page text: some text present in the page code (for example frequently-asked-question answers) is not yet revealed and captured by the browser exploration; the engine flags these pages for review rather than counting them complete.
 - A text-joining fault (20 October) glues neighbouring words on some live pages; until it is fixed those pages are flagged for review.
 
@@ -191,7 +192,9 @@ Besides the files, there is a web app for reviewing runs in a browser on your ow
 
 | Date | Significant change |
 |---|---|
+| 2026-10-21 | Evidence stored compactly: repeated fonts and style sheets kept once, the rest compressed, originals unchanged. About 18 times less disk on the live John Hancock run; a 5,000-page run now fits the 20 GB budget. Older evidence can be converted with one command. |
 | 2026-10-21 | Crossed-out text (for example an old sale price) is kept and marked with ~~ instead of reading as a current price. |
+| 2026-10-20 | Report file names start with the run's name, so downloads from different runs stay separate. |
 | 2026-10-20 | Analyst web app for reviewing runs in a browser. Optional grouping of pages by design template, so shared files are fetched once per group. |
 | 2026-10-20 | Image and scanned-text reading switched on (Tesseract with 25 languages, found automatically). The visual-text check was tuned on the live John Hancock site so ordinary reading errors and cookie banners no longer cause false alarms. Images and PDFs no longer wait for a browser exploration they cannot have. Automated quality pipeline (CI) added. Live re-run: 3 of 34 verified, with the stricter checks finding real missing text. |
 | 2026-10-20 | Six safety and accuracy fixes (failed image reading no longer reported as verified; compressed pages decoded correctly; paused websites resume; paid access always needs approval; connections locked to the checked address; contradiction report no longer confuses dated snapshots or different products). Critical-fact check (R9) added. Tesseract OCR installed with 25 languages. |
