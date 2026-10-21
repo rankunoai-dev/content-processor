@@ -549,3 +549,37 @@ def test_r7_source_text_found_when_render_splits_at_a_css_line_break():
         _block(4, tail),
     ]
     assert rule_r7_channel_agreement(RUN, _res(), blocks=blocks) == []
+
+
+def test_r7_render_time_insertions_are_not_missing_source_text():
+    """The site's script adds "(opens in a new tab)" after links in the render only.
+
+    Live Oura press release: the source sentence never had the hint, so it is not a
+    substring of the render, but every word is there in order.
+    """
+    source = (
+        "BOSTON, May 16, 2023 /CNW/ - Today, John Hancock, a unit of Toronto-based "
+        "Manulife, expanded its industry-leading John Hancock Vitality Program through "
+        "a new collaboration with the company behind the smart ring that delivers "
+        "personalized health data, insights, and daily guidance to its members."
+    )
+    head, tail = source.split(", a unit of")
+    blocks = [
+        _block(1, source, state="run|source"),
+        _block(2, head),
+        _block(3, "(opens in a new tab)"),
+        _block(4, ", a unit of" + tail),
+    ]
+    assert rule_r7_channel_agreement(RUN, _res(), blocks=blocks) == []
+
+
+def test_r7_still_flags_a_paragraph_that_is_really_missing():
+    kept = " ".join(f"kept{i}" for i in range(60))
+    lost = " ".join(f"lost{i}" for i in range(60))
+    blocks = [
+        _block(1, kept, state="run|source"),
+        _block(2, lost, state="run|source"),
+        _block(3, kept),
+    ]
+    (gap,) = rule_r7_channel_agreement(RUN, _res(), blocks=blocks)
+    assert gap.reason.startswith("source_text_not_rendered:words=60/120")

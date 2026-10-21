@@ -110,6 +110,38 @@ def _squash(text: str) -> str:
     return "".join(text.split())
 
 
+R7_SHINGLE = 5
+R7_SHINGLE_COVERAGE = 0.9
+_WORD = re.compile(r"\w+")
+
+
+def _words(text: str) -> list[str]:
+    return _WORD.findall(text)
+
+
+def _shingles(words: Sequence[str]) -> set[tuple[str, ...]]:
+    n = R7_SHINGLE
+    return {tuple(words[i : i + n]) for i in range(len(words) - n + 1)}
+
+
+def _source_text_rendered(text: str, haystack: str, rendered: set[tuple[str, ...]]) -> bool:
+    """True when the rendered channel shows this source text.
+
+    Exact (whitespace-free) containment first. Otherwise the words must still be
+    there in order with only small insertions: sites add text at render time,
+    such as an "(opens in a new tab)" hint after every external link, which the
+    source HTML never had. A real loss removes most 5-word runs; an insertion
+    only breaks the few that span it.
+    """
+    if _squash(text) in haystack:
+        return True
+    shingles = _shingles(_words(text))
+    if not shingles:
+        return False
+    found = sum(1 for sh in shingles if sh in rendered)
+    return found / len(shingles) >= R7_SHINGLE_COVERAGE
+
+
 def _tokens(text: str) -> list[str]:
     return _TOKEN.findall(_norm(text))
 
@@ -248,7 +280,9 @@ def rule_r7_channel_agreement(
     if rendered:
         # Compared without whitespace: rendered blocks split at CSS line breaks
         # rejoin as "Hancock (opens in a new tab) , a unit", the same words.
-        haystack = _squash(" ".join(_norm(b.normalized_text) for b in rendered))
+        rendered_text = " ".join(_norm(b.normalized_text) for b in rendered)
+        haystack = _squash(rendered_text)
+        rendered_shingles = _shingles(_words(rendered_text))
         source_main = [
             b
             for b in blocks
@@ -258,7 +292,11 @@ def rule_r7_channel_agreement(
             and b.dedupe_of is None
         ]
         total = sum(len(b.normalized_text.split()) for b in source_main)
-        missing = [b for b in source_main if _squash(_norm(b.normalized_text)) not in haystack]
+        missing = [
+            b
+            for b in source_main
+            if not _source_text_rendered(_norm(b.normalized_text), haystack, rendered_shingles)
+        ]
         missing_words = sum(len(b.normalized_text.split()) for b in missing)
         if (
             missing_words >= R7_MIN_MISSING_WORDS
