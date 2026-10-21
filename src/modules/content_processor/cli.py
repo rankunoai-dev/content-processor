@@ -47,6 +47,12 @@ from src.modules.content_processor.contracts import RunScope
 from src.modules.content_processor.enums import AccessTier, tier_rank
 from src.modules.content_processor.export.bundle import write_run_reports
 from src.modules.content_processor.export.commands import register as register_report_command
+from src.modules.content_processor.export.decisions import (
+    contradiction_decisions,
+    decisions_path,
+    read_decisions,
+    review_decisions,
+)
 from src.modules.content_processor.ledger.memory import MemoryLedger
 from src.modules.content_processor.ledger.tasks import TaskLedger, new_run_id
 from src.modules.content_processor.planner import fetch_tasks_for
@@ -375,7 +381,18 @@ def _finish(
         bundle_dir = Path(out).parent / f"{Path(out).stem}_reports"
     if bundle_dir is not None:
         run_name = Path(out).stem if out else None
-        manifest = write_run_reports(records, bundle_dir, run_id=run_id, run_name=run_name)
+        # Decisions saved in the analyst web app for this run name are carried forward.
+        saved = (
+            read_decisions(decisions_path(Path(out).parent, run_name)) if out and run_name else []
+        )
+        manifest = write_run_reports(
+            records,
+            bundle_dir,
+            run_id=run_id,
+            run_name=run_name,
+            decisions=contradiction_decisions(saved),
+            review_decisions=review_decisions(saved),
+        )
         full["reports"] = {"dir": str(bundle_dir), "manifest": manifest}
     if out:
         full["records"] = {"path": str(records_path_for(Path(out))), "count": len(records)}

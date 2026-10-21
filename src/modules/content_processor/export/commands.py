@@ -28,6 +28,13 @@ from src.modules.content_processor.analysis.nli import GatewayJudge, JudgeRefuse
 from src.modules.content_processor.analysis.overlap import OverlapConfig
 from src.modules.content_processor.contracts import UrlRecord
 from src.modules.content_processor.export.bundle import write_run_reports
+from src.modules.content_processor.export.decisions import (
+    contradiction_decisions,
+    decisions_path,
+    merge_carried,
+    read_decisions,
+    review_decisions,
+)
 
 __all__ = ["cmd_report", "load_records", "register", "run_name_for"]
 
@@ -76,17 +83,23 @@ def cmd_report(args: argparse.Namespace) -> int:
         except JudgeRefusedError as exc:
             sys.stderr.write(f"{exc}\n")
             return 2
-    decisions = load_reviewer_decisions(Path(args.decisions)) if args.decisions else None
+    records_path = Path(args.records)
+    run_name = args.run_name or run_name_for(records_path)
+    # Decisions saved in the web app for this run, then any earlier R4 given by hand.
+    saved = read_decisions(decisions_path(records_path.parent, run_name))
+    earlier = load_reviewer_decisions(Path(args.decisions)) if args.decisions else None
+    decisions = merge_carried(contradiction_decisions(saved), earlier)
     try:
         manifest: dict[str, Any] = write_run_reports(
             records,
             Path(args.out),
             run_id=args.run,
-            run_name=args.run_name or run_name_for(Path(args.records)),
+            run_name=run_name,
             overlap=config,
             contradictions=ContradictionConfig(threshold=args.contradiction_threshold / 100.0),
             judge=judge,
             decisions=decisions,
+            review_decisions=review_decisions(saved),
         )
     finally:
         if judge is not None:

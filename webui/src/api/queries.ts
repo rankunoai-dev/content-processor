@@ -1,11 +1,13 @@
 import {
   QueryClient,
   keepPreviousData,
+  useMutation,
   useQuery,
   useQueryClient,
 } from '@tanstack/react-query';
 import { useCallback } from 'react';
 import { ApiError, api, type PageFilters } from './client';
+import type { DecisionIn } from './types';
 
 /** Every query key in one place, so invalidation and prefetching agree. */
 export const queryKeys = {
@@ -112,6 +114,20 @@ export function useReview(run: string) {
     queryKey: queryKeys.review(run),
     queryFn: ({ signal }) => api.review(run, signal),
     refetchInterval: useRunPolling(run),
+  });
+}
+
+/** Save a reviewer decision, then refresh the review and contradiction lists. */
+export function useSaveDecision(run: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (decision: DecisionIn) => api.saveDecision(run, decision),
+    onSuccess: async () => {
+      await Promise.all([
+        client.invalidateQueries({ queryKey: queryKeys.contradictions(run) }),
+        client.invalidateQueries({ queryKey: queryKeys.review(run) }),
+      ]);
+    },
   });
 }
 

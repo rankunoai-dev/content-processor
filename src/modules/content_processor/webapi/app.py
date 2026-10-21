@@ -1,6 +1,12 @@
-"""The read-only analyst API and the built web app, served from one process.
+"""The analyst API and the built web app, served from one process.
 
-Every route is GET. The server binds 127.0.0.1 (see `__main__`), accepts only
+Every route is GET except one: `POST /api/runs/{run}/decisions`, which appends
+a reviewer's decision to the run's decisions log (`export/decisions.py`). That
+write is accepted only as JSON carrying the `X-Requested-With: content-processor`
+header (a page on another site cannot send it without a cross-origin grant,
+which this server never gives) and, when the browser sends an Origin, only
+from a local host; every other method or path is refused as read-only. The
+server binds 127.0.0.1 (see `__main__`), accepts only
 local Host headers (DNS-rebinding guard) and sends a strict
 Content-Security-Policy. Downloads are limited to the files that exist in the
 run's reports folder; a name is matched against the folder listing, never
@@ -9,18 +15,29 @@ joined onto a path, so `..` and absolute paths cannot escape it.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Awaitable, Callable, Sequence
 from pathlib import Path
 from typing import Annotated, Any, Literal
+from urllib.parse import urlsplit
 
 from fastapi import FastAPI, HTTPException, Query, Request, Response
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import FileResponse, JSONResponse
+from pydantic import ValidationError
 
 from src.modules.content_processor.export.bundle import BUNDLE_FILES, bundle_file_name
+from src.modules.content_processor.export.decisions import (
+    Decision,
+    append_decision,
+    decisions_path,
+)
 from src.modules.content_processor.webapi import reports
 from src.modules.content_processor.webapi.models import (
     ContradictionsResponse,
+    DecisionIn,
+    DecisionOut,
+    DecisionsResponse,
     DownloadFile,
     DownloadsResponse,
     DuplicatesResponse,
@@ -38,7 +55,11 @@ from src.modules.content_processor.webapi.store import (
     SortField,
 )
 
-__all__ = ["DEFAULT_ALLOWED_HOSTS", "create_app"]
+__all__ = ["DEFAULT_ALLOWED_HOSTS", "WRITE_HEADER", "WRITE_HEADER_VALUE", "create_app"]
+
+WRITE_HEADER = "X-Requested-With"
+WRITE_HEADER_VALUE = "content-processor"
+_DECISIONS_PATH = re.compile(r"^/api/runs/[^/]+/decisions$")
 
 DEFAULT_ALLOWED_HOSTS: tuple[str, ...] = ("127.0.0.1", "localhost")
 _CSP = (
@@ -84,7 +105,9 @@ def create_app(
         request: Request, call_next: Callable[[Request], Awaitable[Response]]
     ) -> Response:
         if request.method not in ("GET", "HEAD"):
-            return JSONResponse({"detail": "This server is read-only."}, status_code=405)
+            refusal = _write_refusal(request, allowed_hosts)
+            if refusal is not None:
+                return refusal
         response = await call_next(request)
         for name, value in _SECURITY_HEADERS.items():
             response.headers.setdefault(name, value)
@@ -158,11 +181,47 @@ def create_app(
 
     @app.get("/api/runs/{run}/contradictions")
     def contradictions(run: str) -> ContradictionsResponse:
-        return reports.contradictions(load(run))
+        data = load(run)
+        return reports.with_contradiction_decisions(
+            reports.contradictions(data), reports.decision_log(data)
+        )
 
     @app.get("/api/runs/{run}/review")
     def review(run: str) -> ReviewResponse:
-        return reports.review(load(run))
+        data = load(run)
+        return reports.with_review_decisions(reports.review(data), reports.decision_log(data))
+
+    @app.get("/api/runs/{run}/decisions")
+    def decisions(run: str) -> DecisionsResponse:
+        data = load(run)
+        log = reports.decision_log(data)
+        return DecisionsResponse(
+            path=decisions_path(data.path.parent, data.name).name,
+            items=[DecisionOut.model_validate(d.model_dump()) for d in reversed(log)],
+        )
+
+    @app.post("/api/runs/{run}/decisions")
+    def save_decision(run: str, body: DecisionIn) -> DecisionOut:
+        data = load(run)
+        if body.kind == "contradiction":
+            known = {i.pair_id for i in reports.contradictions(data).items}
+        else:
+            known = {i.url for i in reports.review(data).items}
+        if body.key not in known:
+            raise HTTPException(status_code=404, detail="That item is not part of this run.")
+        try:
+            decision = Decision(
+                reviewer=body.reviewer.strip(),
+                kind=body.kind,
+                key=body.key,
+                decision=body.decision.strip().lower(),
+                note=body.note.strip(),
+            )
+        except ValidationError as exc:
+            reason = exc.errors()[0].get("msg", "invalid decision")
+            raise HTTPException(status_code=422, detail=f"Not saved: {reason}.") from None
+        append_decision(decisions_path(data.path.parent, data.name), decision)
+        return DecisionOut.model_validate(decision.model_dump())
 
     def report_files(data: RunData) -> dict[str, Path]:
         folder = data.reports_dir
@@ -233,3 +292,19 @@ def _mount_web_app(app: FastAPI, static_dir: Path | None) -> None:
             )
             return FileResponse(path, headers={"Cache-Control": cache})
         return FileResponse(index, headers={"Cache-Control": "no-cache"})
+
+
+def _write_refusal(request: Request, allowed_hosts: Sequence[str]) -> JSONResponse | None:
+    """None when this non-GET request is an acceptable decision save, else the refusal."""
+    if request.method != "POST" or not _DECISIONS_PATH.match(request.url.path):
+        return JSONResponse({"detail": "This server is read-only."}, status_code=405)
+    if request.headers.get(WRITE_HEADER) != WRITE_HEADER_VALUE:
+        return JSONResponse(
+            {"detail": "Decisions can only be saved from the web app."}, status_code=403
+        )
+    if not request.headers.get("content-type", "").startswith("application/json"):
+        return JSONResponse({"detail": "Decisions must be sent as JSON."}, status_code=415)
+    origin = request.headers.get("origin")
+    if origin and urlsplit(origin).hostname not in set(allowed_hosts):
+        return JSONResponse({"detail": "Decisions can only be saved locally."}, status_code=403)
+    return None

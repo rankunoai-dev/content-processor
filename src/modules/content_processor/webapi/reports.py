@@ -21,6 +21,11 @@ from typing import Any
 from src.modules.content_processor.analysis.contradictions import find_contradictions, r4_table
 from src.modules.content_processor.analysis.overlap import find_overlaps, r2a_table, r2b_table
 from src.modules.content_processor.export.bundle import report_file
+from src.modules.content_processor.export.decisions import (
+    Decision,
+    decisions_path,
+    read_decisions,
+)
 from src.modules.content_processor.export.reports import review_rows
 from src.modules.content_processor.webapi.models import (
     Contradiction,
@@ -335,3 +340,68 @@ def review(run: RunData) -> ReviewResponse:
     )
     run.cache["review"] = (signature, response)
     return response
+
+
+# -- decisions saved in the web app ---------------------------------------------------------
+
+
+def decision_log(run: RunData) -> list[Decision]:
+    """The run's decisions log (`<run>.decisions.jsonl` next to its records)."""
+    return read_decisions(decisions_path(run.path.parent, run.name))
+
+
+def with_contradiction_decisions(
+    response: ContradictionsResponse, log: Sequence[Decision]
+) -> ContradictionsResponse:
+    """Saved decisions override the report's `reviewer_decision` (latest wins)."""
+    latest = {key: d for (kind, key), d in _latest(log).items() if kind == "contradiction"}
+    if not latest:
+        return response
+    items = []
+    for item in response.items:
+        saved = latest.get(item.pair_id)
+        if saved is None:
+            items.append(item)
+        else:
+            items.append(
+                item.model_copy(
+                    update={
+                        "reviewer_decision": saved.decision,
+                        "decided_by": saved.reviewer,
+                        "decided_at": saved.at,
+                    }
+                )
+            )
+    return response.model_copy(update={"items": items})
+
+
+def with_review_decisions(response: ReviewResponse, log: Sequence[Decision]) -> ReviewResponse:
+    """Saved decisions fill or replace each page's operator action and note."""
+    latest = {key: d for (kind, key), d in _latest(log).items() if kind == "review"}
+    if not latest:
+        return response
+    items = []
+    for item in response.items:
+        saved = latest.get(item.url)
+        if saved is None:
+            items.append(item)
+        else:
+            items.append(
+                item.model_copy(
+                    update={
+                        "operator_action": saved.decision,
+                        "operator_note": saved.note,
+                        "decided_by": saved.reviewer,
+                        "decided_at": saved.at,
+                    }
+                )
+            )
+    return response.model_copy(update={"items": items})
+
+
+def _latest(log: Sequence[Decision]) -> dict[tuple[str, str], Decision]:
+    """Latest line per item, cleared items included (a clear must hide the report value)."""
+    latest: dict[tuple[str, str], Decision] = {}
+    for decision in log:
+        latest[(decision.kind, decision.key)] = decision
+    return latest

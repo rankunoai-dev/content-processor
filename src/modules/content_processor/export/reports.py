@@ -11,7 +11,7 @@ verification brain does.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 
 from src.modules.content_processor.contracts import Gap, UrlRecord
 from src.modules.content_processor.enums import BADGE_PRECEDENCE, GapType, UrlBadge
@@ -157,8 +157,16 @@ def _severity(badge: UrlBadge) -> int:
     return BADGE_PRECEDENCE.index(badge)
 
 
-def review_rows(records: Iterable[UrlRecord]) -> list[dict[str, Cell]]:
-    """URLs needing a decision, most severe badge first, with blank operator columns."""
+def review_rows(
+    records: Iterable[UrlRecord],
+    decisions: Mapping[str, tuple[str, str]] | None = None,
+) -> list[dict[str, Cell]]:
+    """URLs needing a decision, most severe badge first.
+
+    `decisions` (url -> (action, note), saved in the web app) pre-fill the
+    operator columns; otherwise they are blank for the reviewer.
+    """
+    saved = decisions or {}
     chosen = sorted(
         (r for r in records if r.badge in REVIEW_BADGES),
         key=lambda r: (_severity(r.badge), r.requested_url),
@@ -176,8 +184,8 @@ def review_rows(records: Iterable[UrlRecord]) -> list[dict[str, Cell]]:
                 "tier_reached": record.tier_reached.value if record.tier_reached else None,
                 "final_url": record.final_url,
                 "evidence_ids": _join(_evidence_ids(record)),
-                "operator_action": "",
-                "operator_note": "",
+                "operator_action": saved.get(record.requested_url, ("", ""))[0],
+                "operator_note": saved.get(record.requested_url, ("", ""))[1],
             }
         )
     return rows

@@ -219,6 +219,8 @@ export interface Contradiction {
   a: Statement;
   b: Statement;
   reviewer_decision: string;
+  decided_by?: string | null;
+  decided_at?: string | null;
 }
 
 export interface ContradictionsResponse {
@@ -239,6 +241,8 @@ export interface ReviewItem {
   suggested_action: string;
   operator_action: string;
   operator_note: string;
+  decided_by?: string | null;
+  decided_at?: string | null;
 }
 
 export interface ReviewResponse {
@@ -257,4 +261,20 @@ export interface DownloadFile {
 export interface DownloadsResponse {
   folder: string | null;
   files: DownloadFile[];
+}
+
+export type DecisionKind = 'contradiction' | 'review';
+
+/** A reviewer's decision; an empty decision and note clears it. */
+export interface DecisionIn {
+  kind: DecisionKind;
+  key: string;
+  decision: string;
+  note: string;
+  reviewer: string;
+}
+
+export interface DecisionOut extends Omit<DecisionIn, 'reviewer'> {
+  at: string;
+  reviewer: string;
 }

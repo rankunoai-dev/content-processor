@@ -124,6 +124,7 @@ def write_run_reports(
     contradictions: ContradictionConfig | None = None,
     judge: NliJudge | None = None,
     decisions: Mapping[str, str] | None = None,
+    review_decisions: Mapping[str, tuple[str, str]] | None = None,
 ) -> dict[str, Any]:
     """Write R1, the review queue, R2a/R2b, R4 and the explorer; return the manifest.
 
@@ -141,6 +142,8 @@ def write_run_reports(
         judge: NLI judge for R4; None runs deterministic checks only and the
             manifest records `judge_status: disabled(...)`.
         decisions: Reviewer decisions by `pair_id` from an earlier R4, carried forward.
+        review_decisions: Review-queue decisions by URL (`action`, `note`), saved in the
+            web app; they pre-fill the operator columns.
     """
     run = run_id or (records[0].run_id if records else "unknown-run")
     prefix = run_file_prefix(run_name or _default_prefix(out_dir, run))
@@ -157,7 +160,7 @@ def write_run_reports(
     write_csv(path("r1_url_content.csv"), r1_sheet)
     replaced[path("r1_url_content.xlsx").name] = write_xlsx(path("r1_url_content.xlsx"), [r1_sheet])
 
-    review = review_rows(records)
+    review = review_rows(records, review_decisions)
     write_jsonl(path("review_queue.jsonl"), review)
     review_sheet = review_table(review)
     write_csv(path("review_queue.csv"), review_sheet)

@@ -1114,6 +1114,26 @@ export const CONFIDENCE: Record<string, { label: string; tag: string }> = {
   low: { label: 'Low', tag: 'red' },
 };
 
+/** What a reviewer decided for a page in the review queue (engine values). */
+export const REVIEW_ACTIONS: Record<string, string> = {
+  resolved: 'Resolved',
+  accept_as_is: 'Accept as it is',
+  retry_later: 'Try again later',
+  obtain_manually: 'Get the content by hand',
+  approve_higher_tier: 'Approve stronger access',
+  exclude: 'Leave out of the results',
+};
+
+export const SAVING = {
+  reviewerLabel: 'Saving decisions as',
+  reviewerPlaceholder: 'Your name',
+  needName: 'Enter your name at the top of the page to save decisions.',
+  saved: 'Decision saved.',
+  cleared: 'Decision cleared.',
+  by: (who: string, when: string) => `Saved by ${who}, ${when}`,
+  carried: 'Saved decisions go into the next report for this run.',
+} as const;
+
 export const DECISIONS: Record<string, string> = {
   confirmed: 'Confirmed conflict',
   not_a_contradiction: 'Not a contradiction',
@@ -1158,8 +1178,13 @@ export const REVIEW = {
   mainIssue: 'Main issue',
   whatToDo: 'What to do',
   otherIssues: (n: number) => `+${n} more`,
-  decision: 'Decision recorded',
+  decision: 'Your decision',
   noDecision: 'None yet',
+  chooseAction: 'Choose what to do',
+  note: 'Note',
+  addNote: 'Add a note',
+  editNote: 'Edit note',
+  saveNote: 'Save note',
   engineSuggestion: 'Engine suggestion',
   count: (n: number) => `${n.toLocaleString()} ${n === 1 ? 'page' : 'pages'} to review`,
 } as const;

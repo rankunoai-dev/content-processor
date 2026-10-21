@@ -1,5 +1,7 @@
 import type {
   ContradictionsResponse,
+  DecisionIn,
+  DecisionOut,
   DownloadsResponse,
   DuplicatesResponse,
   Overview,
@@ -41,6 +43,38 @@ async function getJson<T>(path: string, signal?: AbortSignal): Promise<T> {
         const detail = (body as { detail: unknown }).detail;
         if (typeof detail === 'string') message = detail;
         else if (Array.isArray(detail)) message = 'Some filter values were not understood.';
+      }
+    } catch {
+      // not JSON: keep the generic sentence
+    }
+    throw new ApiError(response.status, message);
+  }
+  return (await response.json()) as T;
+}
+
+/** The only write: saving a reviewer decision. The header proves it comes from this app. */
+async function postJson<T>(path: string, body: unknown): Promise<T> {
+  let response: Response;
+  try {
+    response = await fetch(path, {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+        'X-Requested-With': 'content-processor',
+      },
+      body: JSON.stringify(body),
+    });
+  } catch {
+    throw new ApiError(0, 'Could not reach the results server. Is it still running?');
+  }
+  if (!response.ok) {
+    let message = `The decision was not saved (${response.status}).`;
+    try {
+      const data: unknown = await response.json();
+      if (data && typeof data === 'object' && 'detail' in data) {
+        const detail = (data as { detail: unknown }).detail;
+        if (typeof detail === 'string') message = detail;
       }
     } catch {
       // not JSON: keep the generic sentence
@@ -99,4 +133,6 @@ export const api = {
   downloads: (run: string, signal?: AbortSignal) =>
     getJson<DownloadsResponse>(`/api/runs/${enc(run)}/downloads`, signal),
   downloadUrl: (run: string, file: string) => `/api/runs/${enc(run)}/downloads/${enc(file)}`,
+  saveDecision: (run: string, decision: DecisionIn) =>
+    postJson<DecisionOut>(`/api/runs/${enc(run)}/decisions`, decision),
 };

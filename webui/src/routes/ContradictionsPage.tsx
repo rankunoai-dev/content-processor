@@ -1,16 +1,19 @@
-import { Card, Col, Descriptions, Row, Segmented, Space, Tag, Tooltip, Typography } from 'antd';
+import { Card, Col, Descriptions, Row, Segmented, Select, Space, Tag, Tooltip, Typography } from 'antd';
 import { useMemo } from 'react';
 import { useParams } from 'react-router-dom';
 import type { Contradiction, ContradictionsResponse, Statement } from '../api/types';
 import { useContradictions } from '../api/queries';
+import { DecidedNote, ReviewerField } from '../components/Decisions';
 import { QueryState } from '../components/QueryState';
 import { PageHeading, PageLink, ReportSourceNote, StatusTag, TechName } from '../components/bits';
+import { useDecisionSaver } from '../state/useDecisionSaver';
 import { useViewParams } from '../state/viewParams';
 import {
   BUCKETS,
   CONFIDENCE,
   CONTRADICTIONS,
   DECISIONS,
+  SAVING,
   describeContextField,
   describeFlag,
   humanize,
@@ -27,6 +30,27 @@ function StatementCard({ run, label, s }: { run: string; label: string; s: State
       ) : null}
       <PageLink run={run} pageKey={s.page_key} title={s.title} url={s.url} />
     </Card>
+  );
+}
+
+function DecisionPicker({ run, item }: { run: string; item: Contradiction }) {
+  const { save, saving, canSave } = useDecisionSaver(run);
+  return (
+    <Space direction="vertical" size={2}>
+      <Tooltip title={canSave ? undefined : SAVING.needName}>
+        <Select
+          aria-label={CONTRADICTIONS.decision}
+          placeholder={CONTRADICTIONS.undecided}
+          value={item.reviewer_decision || undefined}
+          allowClear
+          disabled={saving || !canSave}
+          style={{ minWidth: 200 }}
+          options={Object.entries(DECISIONS).map(([value, label]) => ({ value, label }))}
+          onChange={(value?: string) => void save('contradiction', item.pair_id, value ?? '')}
+        />
+      </Tooltip>
+      <DecidedNote by={item.decided_by} at={item.decided_at} />
+    </Space>
   );
 }
 
@@ -84,7 +108,7 @@ function ContradictionCard({ run, item }: { run: string; item: Contradiction }) 
           </Tooltip>
         </Descriptions.Item>
         <Descriptions.Item label={CONTRADICTIONS.decision}>
-          {item.reviewer_decision ? DECISIONS[item.reviewer_decision] ?? humanize(item.reviewer_decision) : CONTRADICTIONS.undecided}
+          <DecisionPicker run={run} item={item} />
         </Descriptions.Item>
       </Descriptions>
     </Card>
@@ -103,7 +127,7 @@ export default function ContradictionsPage() {
   }, [items]);
   return (
     <>
-      <PageHeading title={CONTRADICTIONS.title} subtitle={CONTRADICTIONS.subtitle} />
+      <PageHeading title={CONTRADICTIONS.title} subtitle={CONTRADICTIONS.subtitle} extra={<ReviewerField />} />
       <QueryState<ContradictionsResponse> query={query} isEmpty={(d) => d.items.length === 0} empty={CONTRADICTIONS.empty}>
         {(data) => {
           const shown = data.items

@@ -1,6 +1,6 @@
 # Content Processor: A Plain-Language Guide
 
-Last updated: 21 October 2026 · Code version: main after the project report · Maintained by every session that adds a significant feature (see "Keeping this guide current" at the end)
+Last updated: 21 October 2026 · Code version: main after the project report and reviewer decisions in the web app · Maintained by every session that adds a significant feature (see "Keeping this guide current" at the end)
 
 ## 1. What this is, in one paragraph
 
@@ -142,7 +142,9 @@ At the end of a run the engine writes a bundle of files. Every file name starts 
 
 ### The analyst web app
 
-Besides the files, there is a web app for reviewing runs in a browser on your own computer (it only reads results and cannot change anything). It shows all runs; an overview of each run with charts of verdicts, the most common reasons pages were not verified and what to do about them; a searchable, filterable table of pages; a detail view per page (its content, issues, facts and technical details); duplicate content; possible contradictions; the pages that need your review; downloads of every report; and a dark mode.
+Besides the files, there is a web app for reviewing runs in a browser on your own computer. It never changes a run's results; the one thing you can save in it is your own decisions. It shows all runs; an overview of each run with charts of verdicts, the most common reasons pages were not verified and what to do about them; a searchable, filterable table of pages; a detail view per page (its content, issues, facts and technical details); duplicate content; possible contradictions; the pages that need your review; downloads of every report; and a dark mode.
+
+Reviewers can record decisions directly in the app: for each possible contradiction (confirmed, not a contradiction, different context) and for each page that needs review (for example "get the content by hand" or "leave out of the results", with a note). You enter your name once; every decision is saved with your name and the time, and every earlier answer is kept, so there is a full history. The next report for that run starts with these decisions already filled in, in the Excel files too.
 
 ## 5. Safety and cost promises
 
@@ -194,6 +196,7 @@ Besides the files, there is a web app for reviewing runs in a browser on your ow
 
 | Date | Significant change |
 |---|---|
+| 2026-10-21 | Reviewers save decisions in the web app (with name, time and full history); the next report carries them forward. |
 | 2026-10-21 | Live John Hancock: 32 of 34 verified again with all checks on (the 2 others are placeholder pages). FAQ sections built as web components are now opened, text is matched the way the browser shows it, and a brief network hiccup no longer pauses a whole website. |
 | 2026-10-21 | Project report: one Excel workbook per run with every page's text, whether it was fully extracted, the confirmed share and the confidence, plus, for every page, which other pages carry the same text and how much (exact matching). |
 | 2026-10-21 | Evidence stored compactly: repeated fonts and style sheets kept once, the rest compressed, originals unchanged. About 18 times less disk on the live John Hancock run; a 5,000-page run now fits the 20 GB budget. Older evidence can be converted with one command. |

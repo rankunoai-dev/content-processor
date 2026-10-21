@@ -1,11 +1,80 @@
-import { Card, Space, Table, Tag, Tooltip, Typography } from 'antd';
+import { Button, Card, Input, Popover, Select, Space, Table, Tooltip, Typography } from 'antd';
+import { useState } from 'react';
 import { useParams } from 'react-router-dom';
 import type { ReviewItem, ReviewResponse } from '../api/types';
 import { useReview } from '../api/queries';
+import { DecidedNote, ReviewerField } from '../components/Decisions';
 import { QueryState } from '../components/QueryState';
 import { PageHeading, PageLink, ReportSourceNote, StatusTag, TechName } from '../components/bits';
 import { usePreferences } from '../state/preferences';
-import { PAGES, REVIEW, headlineIssue, issueInfo } from '../vocabulary';
+import { useDecisionSaver } from '../state/useDecisionSaver';
+import { PAGES, REVIEW, REVIEW_ACTIONS, SAVING, headlineIssue, issueInfo } from '../vocabulary';
+
+function ReviewDecision({ run, item }: { run: string; item: ReviewItem }) {
+  const { save, saving, canSave } = useDecisionSaver(run);
+  const [draft, setDraft] = useState(item.operator_note);
+  const [open, setOpen] = useState(false);
+  const known = item.operator_action in REVIEW_ACTIONS;
+  return (
+    <Space direction="vertical" size={4} style={{ width: '100%' }}>
+      <Tooltip title={canSave ? undefined : SAVING.needName}>
+        <Select
+          aria-label={REVIEW.decision}
+          placeholder={REVIEW.chooseAction}
+          value={item.operator_action || undefined}
+          allowClear
+          disabled={saving || !canSave}
+          style={{ width: '100%' }}
+          options={[
+            ...Object.entries(REVIEW_ACTIONS).map(([value, label]) => ({ value, label })),
+            // A free-text action typed into an older spreadsheet stays visible.
+            ...(item.operator_action && !known ? [{ value: item.operator_action, label: item.operator_action }] : []),
+          ]}
+          onChange={(value?: string) => void save('review', item.url, value ?? '', item.operator_note)}
+        />
+      </Tooltip>
+      <Popover
+        trigger="click"
+        open={open}
+        onOpenChange={(next) => {
+          setOpen(next);
+          if (next) setDraft(item.operator_note);
+        }}
+        content={
+          <Space direction="vertical" style={{ width: 280 }}>
+            <Input.TextArea
+              aria-label={REVIEW.note}
+              value={draft}
+              maxLength={2000}
+              autoSize={{ minRows: 3, maxRows: 8 }}
+              onChange={(e) => setDraft(e.target.value)}
+            />
+            <Button
+              type="primary"
+              size="small"
+              disabled={!canSave || saving}
+              onClick={() =>
+                void save('review', item.url, item.operator_action, draft).then((ok) => ok && setOpen(false))
+              }
+            >
+              {REVIEW.saveNote}
+            </Button>
+          </Space>
+        }
+      >
+        <Button type="link" size="small" style={{ padding: 0 }}>
+          {item.operator_note ? REVIEW.editNote : REVIEW.addNote}
+        </Button>
+      </Popover>
+      {item.operator_note ? (
+        <Typography.Text className="small-note" ellipsis={{ tooltip: item.operator_note }}>
+          {item.operator_note}
+        </Typography.Text>
+      ) : null}
+      <DecidedNote by={item.decided_by} at={item.decided_at} />
+    </Space>
+  );
+}
 
 export default function ReviewPage() {
   const { runId = '' } = useParams();
@@ -16,7 +85,12 @@ export default function ReviewPage() {
       <PageHeading
         title={REVIEW.title}
         subtitle={REVIEW.subtitle}
-        extra={query.data ? <Typography.Text type="secondary">{REVIEW.count(query.data.items.length)}</Typography.Text> : null}
+        extra={
+          <Space size={16} wrap>
+            {query.data ? <Typography.Text type="secondary">{REVIEW.count(query.data.items.length)}</Typography.Text> : null}
+            <ReviewerField />
+          </Space>
+        }
       />
       <QueryState<ReviewResponse> query={query} isEmpty={(d) => d.items.length === 0} empty={REVIEW.empty}>
         {(data) => (
@@ -76,17 +150,8 @@ export default function ReviewPage() {
                   {
                     key: 'decision',
                     title: REVIEW.decision,
-                    width: 160,
-                    render: (_, r) =>
-                      r.operator_action ? (
-                        <Tooltip title={r.operator_note || undefined}>
-                          <Tag bordered={false} color="green">
-                            {r.operator_action}
-                          </Tag>
-                        </Tooltip>
-                      ) : (
-                        <Typography.Text type="secondary">{REVIEW.noDecision}</Typography.Text>
-                      ),
+                    width: 240,
+                    render: (_, r) => <ReviewDecision run={runId} item={r} />,
                   },
                 ]}
               />

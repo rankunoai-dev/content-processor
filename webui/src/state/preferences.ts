@@ -12,12 +12,15 @@ export interface Preferences {
   showTechNames: boolean;
   siderCollapsed: boolean;
   lastRun: string | null;
+  /** Name recorded with every decision saved from this browser. */
+  reviewer: string;
   setTheme: (theme: 'light' | 'dark') => void;
   setDensity: (density: 'middle' | 'small') => void;
   toggleColumn: (column: string) => void;
   setShowTechNames: (show: boolean) => void;
   setSiderCollapsed: (collapsed: boolean) => void;
   setLastRun: (run: string | null) => void;
+  setReviewer: (reviewer: string) => void;
 }
 
 export const DEFAULT_HIDDEN_COLUMNS = ['change', 'captured'];
@@ -52,6 +55,7 @@ export const usePreferences = create<Preferences>()(
       showTechNames: false,
       siderCollapsed: false,
       lastRun: null,
+      reviewer: '',
       setTheme: (theme) => set({ theme }),
       setDensity: (density) => set({ density }),
       toggleColumn: (column) =>
@@ -63,6 +67,7 @@ export const usePreferences = create<Preferences>()(
       setShowTechNames: (showTechNames) => set({ showTechNames }),
       setSiderCollapsed: (siderCollapsed) => set({ siderCollapsed }),
       setLastRun: (lastRun) => set({ lastRun }),
+      setReviewer: (reviewer) => set({ reviewer }),
     }),
     {
       name: 'capture-results-preferences',

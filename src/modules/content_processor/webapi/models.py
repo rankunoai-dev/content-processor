@@ -19,6 +19,9 @@ __all__ = [
     "Contradiction",
     "ContradictionsResponse",
     "Count",
+    "DecisionIn",
+    "DecisionOut",
+    "DecisionsResponse",
     "DownloadFile",
     "DownloadsResponse",
     "DuplicateGroup",
@@ -295,6 +298,8 @@ class Contradiction(StrictModel):
     a: Statement
     b: Statement
     reviewer_decision: str
+    decided_by: str | None = None
+    decided_at: datetime | None = None
 
 
 class ContradictionsResponse(StrictModel):
@@ -319,6 +324,8 @@ class ReviewItem(StrictModel):
     suggested_action: str
     operator_action: str
     operator_note: str
+    decided_by: str | None = None
+    decided_at: datetime | None = None
 
 
 class ReviewResponse(StrictModel):
@@ -343,3 +350,31 @@ class DownloadsResponse(StrictModel):
 
     folder: str | None
     files: list[DownloadFile]
+
+
+class DecisionIn(StrictModel):
+    """A reviewer's decision, as sent by the web app."""
+
+    kind: Literal["contradiction", "review"]
+    key: str = Field(min_length=1, max_length=4096, description="pair_id or page URL")
+    decision: str = Field(default="", max_length=40, description="empty clears")
+    note: str = Field(default="", max_length=2000)
+    reviewer: str = Field(min_length=1, max_length=80)
+
+
+class DecisionOut(StrictModel):
+    """One saved decision (a line of the run's decisions log)."""
+
+    at: datetime
+    reviewer: str
+    kind: Literal["contradiction", "review"]
+    key: str
+    decision: str
+    note: str
+
+
+class DecisionsResponse(StrictModel):
+    """Every decision saved for a run, newest first (the audit trail)."""
+
+    path: str
+    items: list[DecisionOut]
