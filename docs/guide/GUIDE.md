@@ -1,6 +1,6 @@
 # Content Processor: A Plain-Language Guide
 
-Last updated: 21 October 2026 · Code version: main after the struck-text change and the evidence-storage fix (K20) · Maintained by every session that adds a significant feature (see "Keeping this guide current" at the end)
+Last updated: 21 October 2026 · Code version: main after the project report · Maintained by every session that adds a significant feature (see "Keeping this guide current" at the end)
 
 ## 1. What this is, in one paragraph
 
@@ -133,6 +133,7 @@ At the end of a run the engine writes a bundle of files. Every file name starts 
 
 | File | What you use it for |
 |---|---|
+| Project report (Excel) | The one workbook most people need. Sheet "Pages": every address with its whole text, whether it was fully extracted (Yes/No), the share of its captured text that was confirmed against the live page, how confident the reading is (text from the page's code is 100%, text read from images lower), and in plain words what is missing. Sheet "Matching content": for every address, the other addresses that carry the same text and what share of it, one row each, by exact word-for-word matching (menus, headers and footers left out). The share is one-directional: a short page can be 100% inside a long page while the long page is only 20% inside the short one. Sheet "How to read" explains every column. |
 | R1 URL content (Excel, CSV) | One row per address: verdict, word count, gaps, and the whole extracted text. Long text is split across columns so Excel never cuts it off. |
 | Review queue (Excel, CSV) | The pages that need a human decision, most serious first, with a blank column for the reviewer. |
 | R2 overlap (Excel, CSV) | Groups of pages that share the same text (duplicate or near-duplicate content), with the shared passages quoted. |
@@ -192,6 +193,7 @@ Besides the files, there is a web app for reviewing runs in a browser on your ow
 
 | Date | Significant change |
 |---|---|
+| 2026-10-21 | Project report: one Excel workbook per run with every page's text, whether it was fully extracted, the confirmed share and the confidence, plus, for every page, which other pages carry the same text and how much (exact matching). |
 | 2026-10-21 | Evidence stored compactly: repeated fonts and style sheets kept once, the rest compressed, originals unchanged. About 18 times less disk on the live John Hancock run; a 5,000-page run now fits the 20 GB budget. Older evidence can be converted with one command. |
 | 2026-10-21 | Crossed-out text (for example an old sale price) is kept and marked with ~~ instead of reading as a current price. |
 | 2026-10-20 | Report file names start with the run's name, so downloads from different runs stay separate. |

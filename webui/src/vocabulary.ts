@@ -1177,6 +1177,7 @@ export const DOWNLOADS = {
 
 // Report files are named `<run>_<report>` (older runs: just `<report>`).
 const FILE_DESCRIPTIONS: { match: RegExp; title: string; text: string }[] = [
+  { match: /(?:^|_)project_report\.xlsx$/, title: 'Project report', text: 'One workbook for the whole run: every page with its content, whether it was fully extracted, the share confirmed and the confidence; and, for every page, the other pages that carry the same text and how much.' },
   { match: /(?:^|_)r1_url_content\./, title: 'Page content', text: 'One row per page: its status, word count, issues and all of its captured text.' },
   { match: /(?:^|_)review_queue\./, title: 'Review list', text: 'Pages that need a decision, with empty columns for your action and notes.' },
   { match: /(?:^|_)r2_overlap\./, title: 'Duplicate content (workbook)', text: 'Both duplicate-content sheets: groups of similar pages and page pairs.' },

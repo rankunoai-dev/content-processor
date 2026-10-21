@@ -44,6 +44,7 @@ from src.modules.content_processor.analysis.overlap import (
     r2b_table,
 )
 from src.modules.content_processor.contracts import UrlRecord
+from src.modules.content_processor.export.project_report import project_report_tables
 from src.modules.content_processor.export.reports import (
     r1_rows,
     r1_table,
@@ -69,6 +70,7 @@ _UNSAFE = re.compile(r"[^A-Za-z0-9._-]+")
 BUNDLE_FILES: tuple[str, ...] = (
     "explorer.html",
     "manifest.json",
+    "project_report.xlsx",
     "r1_url_content.csv",
     "r1_url_content.jsonl",
     "r1_url_content.xlsx",
@@ -173,7 +175,12 @@ def write_run_reports(
     write_csv(path("r4_contradictions.csv"), r4)
     replaced[path("r4_contradictions.xlsx").name] = write_xlsx(path("r4_contradictions.xlsx"), [r4])
 
+    replaced[path("project_report.xlsx").name] = write_xlsx(
+        path("project_report.xlsx"), project_report_tables(records)
+    )
+
     downloads = {
+        "Project report (XLSX)": path("project_report.xlsx").name,
         "R1 (XLSX)": path("r1_url_content.xlsx").name,
         "R1 (CSV)": path("r1_url_content.csv").name,
         "Review queue (XLSX)": path("review_queue.xlsx").name,

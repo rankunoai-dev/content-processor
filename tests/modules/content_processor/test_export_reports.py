@@ -140,6 +140,7 @@ def test_bundle_writes_every_report_and_a_manifest(tmp_path: Path):
         == [
             "run-l5_explorer.html",
             "run-l5_manifest.json",
+            "run-l5_project_report.xlsx",
             "run-l5_r1_url_content.csv",
             "run-l5_r1_url_content.jsonl",
             "run-l5_r1_url_content.xlsx",
