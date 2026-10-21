@@ -71,7 +71,8 @@ class FakeExplorer:
     def __init__(self, result: ExplorationResult) -> None:
         self.result = result
 
-    async def explore(self, page: Any) -> ExplorationResult:
+    async def explore(self, page: Any, *, time_left_s: float | None = None) -> ExplorationResult:
+        self.time_left_s = time_left_s
         return self.result
 
 
@@ -296,3 +297,25 @@ async def test_explorer_error_is_reported_not_raised(tmp_path: Path):
     exploration = ExplorationResult(error="PlaywrightError:Target closed")
     _, res = await _run(tmp_path, exploration, ["expand_disclosure"])
     assert "discovery_open:explore_error" in (res.status_reason or "")
+
+
+async def test_explorer_gets_the_page_time_that_is_left(tmp_path: Path):
+    from src.integrations.browser_client import RenderLimits
+
+    explorer = FakeExplorer(ExplorationResult())
+    renderer = FakeRenderer()
+    renderer.limits = RenderLimits(max_page_time_s=150.0)  # type: ignore[attr-defined]
+    ledger = MemoryLedger(base_delay_s=0)
+    _seed(ledger)
+    worker = RenderWorker(
+        ledger=ledger,
+        renderer=renderer,
+        evidence=LocalEvidenceStore(tmp_path, "t1"),
+        scope=_scope(["expand_disclosure"]),
+        run_id="run-t",
+        worker_id="r1",
+        explorer_factory=lambda _policy: explorer,
+    )
+    await worker.run_until_idle(idle_polls=1, poll_s=0, max_wait_s=0)
+    assert explorer.time_left_s is not None
+    assert 130.0 < explorer.time_left_s <= 135.0  # 150 s cap minus the 15 s margin

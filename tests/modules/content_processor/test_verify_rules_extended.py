@@ -527,3 +527,25 @@ def test_r13_ignores_accessibility_hints_and_non_main_blocks():
         _block(4, "Chat with us now!", layer=ContentLayer.THIRD_PARTY_CHROME, role="chrome"),
     ]
     assert rule_r13_layer_hygiene(RUN, _res(), blocks=blocks) == []
+
+
+def test_r7_source_text_found_when_render_splits_at_a_css_line_break():
+    """Rendered blocks split at a CSS line break still contain the source sentence.
+
+    Live Oura press release: the rendered side is split around a display:block
+    "(opens in a new tab)", the source side is one sentence; same words, no gap.
+    """
+    sentence = (
+        "Today, John Hancock (opens in a new tab), a unit of Toronto-based Manulife, "
+        "expanded its industry-leading John Hancock Vitality Program through a new "
+        "collaboration with the company behind the smart ring that delivers "
+        "personalized health data, insights, and daily guidance every single day."
+    )
+    head, tail = sentence.split(" (opens in a new tab)")
+    blocks = [
+        _block(1, sentence, state="run|source"),
+        _block(2, head),
+        _block(3, "(opens in a new tab)"),
+        _block(4, tail),
+    ]
+    assert rule_r7_channel_agreement(RUN, _res(), blocks=blocks) == []

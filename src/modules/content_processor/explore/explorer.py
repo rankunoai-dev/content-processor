@@ -246,6 +246,7 @@ class StateExplorer:
         self._allowed = set(policy.allowed)
         self._budget = policy.max_actions_per_url
         self._max_s = max_explore_s
+        self._configured_max_s = max_explore_s
         self._click_timeout_ms = click_timeout_s * 1000
         self._settle_max_s = settle_max_s
         self._settle_poll_s = settle_poll_s
@@ -260,9 +261,15 @@ class StateExplorer:
         self._acting = False
         self._last_error = ""
 
-    async def explore(self, page: Any) -> ExplorationResult:
-        """Explore the page. Never raises; failures are recorded on the result."""
+    async def explore(self, page: Any, *, time_left_s: float | None = None) -> ExplorationResult:
+        """Explore the page. Never raises; failures are recorded on the result.
+
+        `time_left_s` is what the caller's page-time cap still allows; the explorer
+        stops in time instead of being cut off with nothing recorded.
+        """
         started = time.perf_counter()
+        if time_left_s is not None:
+            self._max_s = min(self._configured_max_s, max(0.0, time_left_s))
         result = ExplorationResult(
             action_budget=self._budget,
             unexplored_action_kinds=sorted(self._allowed - IMPLEMENTED_ACTIONS),
@@ -302,6 +309,11 @@ class StateExplorer:
             await self._loop(page, result, unsafe, started)
         except PlaywrightError as exc:
             result.error = f"PlaywrightError:{str(exc).splitlines()[0][:200]}"
+        except Exception as exc:  # noqa: BLE001 - never lose the controls already explored
+            _logger.exception("explore_failed")
+            result.error = (
+                f"{type(exc).__name__}:{str(exc).splitlines()[0][:200] if str(exc) else ''}"
+            )
         finally:
             with contextlib.suppress(PlaywrightError):
                 await page.unroute("**/*", guard)

@@ -194,3 +194,38 @@ async def test_frames_that_stay_hidden_are_tracking_pixels(monkeypatch) -> None:
     await explorer._frames(_FakePage(), added.append, ExplorationResult())
     assert len(calls) == 2  # one look again, then accepted as hidden
     assert [(c.status, c.reason) for c in added] == [("excluded", "hidden_frame")]
+
+
+class _RoutablePage(_FakePage):
+    async def route(self, *_: object) -> None:
+        return None
+
+    async def unroute(self, *_: object) -> None:
+        return None
+
+
+async def test_unexpected_exception_is_recorded_not_raised(monkeypatch) -> None:
+    async def boom(self, page, result, unsafe, started):  # noqa: ANN001
+        result.controls.append(
+            ControlRecord(control_id="0", kind="tab", label="Done", status="visited")
+        )
+        raise ValueError("odd page")
+
+    monkeypatch.setattr(StateExplorer, "_loop", boom)
+    result = await StateExplorer(InteractionPolicy(), settle_poll_s=0).explore(_RoutablePage())
+    assert result.error == "ValueError:odd page"
+    assert [c.label for c in result.controls] == ["Done"]  # work done so far is kept
+
+
+async def test_time_left_caps_the_exploration_budget(monkeypatch) -> None:
+    seen: list[float] = []
+
+    async def loop(self, page, result, unsafe, started):  # noqa: ANN001
+        seen.append(self._max_s)
+
+    monkeypatch.setattr(StateExplorer, "_loop", loop)
+    explorer = StateExplorer(InteractionPolicy(), max_explore_s=90.0, settle_poll_s=0)
+    await explorer.explore(_RoutablePage(), time_left_s=20.0)
+    await explorer.explore(_RoutablePage(), time_left_s=500.0)
+    await explorer.explore(_RoutablePage())
+    assert seen == [20.0, 90.0, 90.0]

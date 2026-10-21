@@ -147,12 +147,29 @@ ANNOTATE_JS = """
 }
 """
 
+# B. Only elements that can show text count: tag managers keep injecting <script>,
+#    tracking pixels and the like long after the visible page is final.
 SETTLE_PROBE_JS = """
-() => ({
-  text: document.body ? document.body.innerText.length : 0,
-  nodes: document.getElementsByTagName('*').length,
-  ready: document.readyState
-})
+() => {
+  const silent = new Set(['SCRIPT', 'STYLE', 'LINK', 'META', 'NOSCRIPT', 'TEMPLATE', 'IMG',
+    'IFRAME', 'SVG', 'PATH', 'SOURCE', 'TRACK', 'BR', 'WBR', 'HEAD', 'TITLE', 'BASE']);
+  let nodes = 0;
+  for (const el of document.getElementsByTagName('*')) {
+    if (!silent.has(el.tagName.toUpperCase())) { nodes += 1; }
+  }
+  return { text: document.body ? document.body.innerText.length : 0, nodes,
+           ready: document.readyState };
+}
+"""
+
+# DOM and visible text read in one call, so nothing can change between the two reads.
+SNAPSHOT_JS = """
+() => {
+  const dt = document.doctype;
+  const doctype = dt ? '<!DOCTYPE ' + dt.name + '>' : '';
+  return { html: doctype + document.documentElement.outerHTML,
+           text: document.body ? document.body.innerText : '' };
+}
 """
 
 
@@ -242,6 +259,7 @@ class BrowserRenderer:
         self._viewport = viewport
         self._suppress = analytics_suppression
         self._limits = limits or RenderLimits()
+        self.limits = self._limits
         self._headless = headless
         self._channel = channel
         self._recycle_after = max_pages_per_browser
@@ -406,8 +424,9 @@ class BrowserRenderer:
                 annotation = dict(await page.evaluate(ANNOTATE_JS))
             except PlaywrightError as exc:
                 console_errors.append(f"annotate_failed:{str(exc)[:120]}")
-            dom_html = (await page.content()).encode("utf-8")
-            inner_text = str(await page.evaluate("document.body ? document.body.innerText : ''"))
+            snapshot = dict(await page.evaluate(SNAPSHOT_JS))
+            dom_html = str(snapshot.get("html") or "").encode("utf-8")
+            inner_text = str(snapshot.get("text") or "")
             try:
                 aria = await page.locator("body").aria_snapshot()
             except PlaywrightError:

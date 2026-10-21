@@ -106,6 +106,10 @@ def _norm(text: str) -> str:
     return normalize_text(text)[0].casefold()
 
 
+def _squash(text: str) -> str:
+    return "".join(text.split())
+
+
 def _tokens(text: str) -> list[str]:
     return _TOKEN.findall(_norm(text))
 
@@ -242,7 +246,9 @@ def rule_r7_channel_agreement(
         )
     rendered = [b for b in corpus if not b.state_id.endswith("|source")]
     if rendered:
-        haystack = " ".join(_norm(b.normalized_text) for b in rendered)
+        # Compared without whitespace: rendered blocks split at CSS line breaks
+        # rejoin as "Hancock (opens in a new tab) , a unit", the same words.
+        haystack = _squash(" ".join(_norm(b.normalized_text) for b in rendered))
         source_main = [
             b
             for b in blocks
@@ -252,7 +258,7 @@ def rule_r7_channel_agreement(
             and b.dedupe_of is None
         ]
         total = sum(len(b.normalized_text.split()) for b in source_main)
-        missing = [b for b in source_main if _norm(b.normalized_text) not in haystack]
+        missing = [b for b in source_main if _squash(_norm(b.normalized_text)) not in haystack]
         missing_words = sum(len(b.normalized_text.split()) for b in missing)
         if (
             missing_words >= R7_MIN_MISSING_WORDS

@@ -12,6 +12,7 @@ summary, events. Never raises out of `process()`.
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
@@ -49,6 +50,7 @@ from src.modules.content_processor.workers.ports import LedgerPort
 __all__ = ["Explorer", "RenderWorker", "Renderer"]
 
 _logger = get_logger("content_processor.render_worker")
+_HOOK_MARGIN_S = 15.0
 
 
 class Renderer(Protocol):
@@ -69,8 +71,8 @@ class Renderer(Protocol):
 class Explorer(Protocol):
     """What the worker needs from a state explorer (so tests can fake it)."""
 
-    async def explore(self, page: Any) -> ExplorationResult:
-        """Explore one live page."""
+    async def explore(self, page: Any, *, time_left_s: float | None = None) -> ExplorationResult:
+        """Explore one live page within `time_left_s` when given."""
         ...
 
 
@@ -170,8 +172,14 @@ class RenderWorker:
         explorer = self._explorer_factory(self._scope.interaction_policy)
         holder: dict[str, ExplorationResult] = {}
 
+        limits = getattr(self._renderer, "limits", None)
+        page_cap = float(getattr(limits, "max_page_time_s", 0.0) or 0.0)
+        render_started = time.perf_counter()
+
         async def explore_hook(page: Any) -> None:
-            holder["result"] = await explorer.explore(page)
+            # Leave room after exploring for the remaining capture and teardown.
+            left = page_cap - (time.perf_counter() - render_started) - _HOOK_MARGIN_S
+            holder["result"] = await explorer.explore(page, time_left_s=left if page_cap else None)
 
         store = self._asset_store_for(url) if self._asset_store_for is not None else None
         if store is None:

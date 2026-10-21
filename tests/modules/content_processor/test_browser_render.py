@@ -127,3 +127,14 @@ async def test_redirect_chain_and_blocked_subrequests(server_url: str):
     assert result.hops == [f"{server_url}/gated"]
     assert result.final_url.endswith("/login?next=/gated")
     assert "127.0.0.1" in seen
+
+
+async def test_scripts_and_pixels_added_forever_do_not_keep_a_page_unsettled(
+    renderer: BrowserRenderer, server_url: str
+):
+    """Live fund pages: a tag manager adds elements without visible text forever."""
+    result = await renderer.render(f"{server_url}/pages/script_churn")
+    assert result.rendered, result.transport_error
+    assert result.settle["stable"] is True, result.settle
+    assert "The monthly distribution is $0.0825 per share." in result.inner_text
+    assert result.dom_html.lower().startswith(b"<!doctype html>")
