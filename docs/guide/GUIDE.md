@@ -1,6 +1,6 @@
 # Content Processor: A Plain-Language Guide
 
-Last updated: 21 October 2026 · Code version: main after the struck-text change and the evidence-storage fix (K20) · Maintained by every session that adds a significant feature (see "Keeping this guide current" at the end)
+Last updated: 21 October 2026 · Code version: feature branch for page grouping and shared downloads, on top of main after the evidence-storage fix (K20) · Maintained by every session that adds a significant feature (see "Keeping this guide current" at the end)
 
 ## 1. What this is, in one paragraph
 
@@ -97,6 +97,8 @@ Many modern pages only show their content after the browser runs them, and much 
 
 The engine then compares what the browser shows with what the raw HTML contained, so content that appears only after loading, or disappears, is noticed.
 
+**Pages that look alike are grouped (optional, switched on with `--group-assets`).** Pages in one section of a website often share the same design: the same layout, style sheets, scripts, fonts and logo. The engine recognises pages built from the same design template and groups them. A group's shared files are downloaded once and reused for the other pages in the group, which means fewer requests reach the website. Error pages, blocked pages and pages that only load their content with scripts are never placed in these groups. On the test website we built for this, pages in a group needed 62 percent fewer requests to the website than pages handled one at a time. The work for each page is still done for that page, and each page keeps its own evidence.
+
 ### Step 7: Documents and images
 
 Linked PDFs, Word, Excel and PowerPoint files, and images are downloaded too (one link deep). PDFs are read including tables that continue across pages, form fields, comments and hidden layers. Scanned pages and images are read with OCR (optical character recognition: software that reads text from pictures). The OCR engine is Tesseract, which runs on the local machine for free, with 25 core languages (including English, Hindi, Gujarati, Tamil, Arabic, Chinese, Japanese and the main European languages).
@@ -160,6 +162,7 @@ Besides the files, there is a web app for reviewing runs in a browser on your ow
 | Adversarial test suite (28 trick pages) | Zero pages wrongly marked VERIFIED. Each trick (fake PDFs, challenge pages, form walls, paywalls, disguised fonts, soft redirects) gets the expected verdict. |
 | Automated tests | 771 tests passing, 93.7% of the code exercised by tests. A CI pipeline runs all quality checks and the release gate on every change once the code is on GitHub. |
 | Contradiction report on John Hancock | After the 20 October fix: 0 false contradictions (previously 17); differing-context pairs listed separately. |
+| Shared downloads within a page group (our own test website, 4 pages, 21 October 2026) | Requests to the website fell from 24 to 9 (the four pages plus five shared files, instead of every file four times). Time saved on the test site is small because the test site responds almost instantly; the saving on real, slower websites has not been measured yet. |
 
 ## 7. What it does not do yet
 
@@ -170,6 +173,9 @@ Besides the files, there is a web app for reviewing runs in a browser on your ow
 - Semantic similarity: finding pages that say the same thing in different words (planned with a vector database).
 - Hidden page text: some text present in the page code (for example frequently-asked-question answers) is not yet revealed and captured by the browser exploration; the engine flags these pages for review rather than counting them complete.
 - A text-joining fault (20 October) glues neighbouring words on some live pages; until it is fixed those pages are flagged for review.
+- Group-by-group browsing: pages in a group are not yet opened one after another, so how much the shared-file reuse saves depends on the order the pages happen to be opened in. Fixing this needs a change to the work queue.
+- Shared text across pages: the engine can recognise text that repeats across a group (for example the same help text on every page), but it does not yet skip re-checking it on each page. Rechecking is still done per page.
+- Meaning-based similarity: the engine compares pages by their layout, and by exact or near-exact wording. It does not yet find pages that say the same thing in different words. That needs the planned vector search with a language-understanding model, which is not installed.
 
 ## 8. Glossary
 
@@ -192,6 +198,7 @@ Besides the files, there is a web app for reviewing runs in a browser on your ow
 
 | Date | Significant change |
 |---|---|
+| 2026-10-21 | Pages built from the same design template are grouped (optional, `--group-assets`). Shared style sheets, scripts, fonts and images are downloaded once per group and reused, so fewer requests reach the website. Error, blocked and script-only pages are kept out of groups. The engine also recognises text that repeats across a group, as groundwork for skipping repeated checks later. |
 | 2026-10-21 | Evidence stored compactly: repeated fonts and style sheets kept once, the rest compressed, originals unchanged. About 18 times less disk on the live John Hancock run; a 5,000-page run now fits the 20 GB budget. Older evidence can be converted with one command. |
 | 2026-10-21 | Crossed-out text (for example an old sale price) is kept and marked with ~~ instead of reading as a current price. |
 | 2026-10-20 | Report file names start with the run's name, so downloads from different runs stay separate. |

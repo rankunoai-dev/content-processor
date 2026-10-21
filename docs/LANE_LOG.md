@@ -501,3 +501,19 @@ git worktree add ../content-processor-lane4 -b lane/L4-verify
 - **Guide:** `docs/guide/GUIDE.md` and `Content_Processor_Guide.docx` updated (compact evidence, plus the missing entry for run-named report files from 2026-10-20).
 - **Limits, stated:** deleting evidence (retention, P-5) must now count chunk references, since chunks are shared between objects; there is no garbage collection of unreferenced chunks yet. MinIO/S3 (P-5) needs the same packed layout.
 - **Operator action, optional:** `python scripts/repack_evidence.py --root evidence` (and for other evidence roots) reclaims about 94 % of existing evidence disk.
+
+## [2026-10-21] Feature branch feat/url-grouping: page grouping, shared downloads, boilerplate reuse, scheduler wiring
+
+- **Branch / worktree:** `feat/url-grouping` at `../content-processor-grouping`, merged with `main` on 2026-10-21.
+- **What landed:**
+  - Bit 1: `grouping/` package (gate, path family, DOM skeleton, clustering), with the `/services` fixture on the local test server.
+  - Bit 2: `grouping/asset_cache.py`, a group-scoped store for static files, measured on the local fixture (24 to 9 origin requests).
+  - Bit 3: `grouping/boilerplate.py`, shared block-text detection and a reuse cache (measured on the John Hancock help-center group: all static main text shared).
+  - Scheduler wiring (opt-in `--group-assets`): `scheduler/grouping.py` (`RunGroups`), optional `asset_store` in `integrations/browser_client.py`, optional `asset_store_for` in the render worker, `RunExecution.group_stats`.
+  - RFC 0001: `docs/rfc/0001-url-grouping-and-asset-cache.md`.
+  - Plain-language guide updated (`docs/guide/GUIDE.md`) and `Content_Processor_Guide.docx` rebuilt.
+- **Gate:** ruff clean, `mypy --strict src fixtures` clean, full test suite passing, coverage 93.6%.
+- **Available to other lanes:** `RunGroups(ledger, evidence, run_id=...)`, `AssetCache`, `group_urls(pages)`, `find_shared_blocks(group_id, page_blocks)`.
+- **Open contract requests:** CR-010 (group-ordered leasing for RENDER tasks; L0 to land).
+- **Needs review:** the browser client (Lane 2) and the scheduler and CLI (Lane 6) each gained optional parameters. Both are opt-in and default to existing behaviour.
+- **Not done:** group-ordered rendering; a full `dry-run --group-assets` against the fixture server; semantic (meaning-based) similarity, which needs the embedding model and vector store and is not installed.
