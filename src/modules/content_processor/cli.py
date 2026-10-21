@@ -31,8 +31,9 @@ import argparse
 import asyncio
 import json
 import sys
+import time
 from collections import Counter
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -71,7 +72,7 @@ from src.modules.content_processor.scheduler.budget import (
 from src.modules.content_processor.scheduler.grouping import RunGroups
 from src.modules.content_processor.scheduler.reports import badge_summary, records_path_for
 from src.modules.content_processor.scope.frontier import FrontierPlan, build_frontier
-from src.modules.content_processor.scope.ssrf import IpClass, check_host
+from src.modules.content_processor.scope.ssrf import EgressDecision, IpClass, check_host
 from src.modules.content_processor.workers.doc_worker import DocWorker
 from src.modules.content_processor.workers.fetch_worker import FetchWorker, user_agent_for
 from src.modules.content_processor.workers.ports import LedgerPort
@@ -95,26 +96,59 @@ class EgressGuard:
     Called like the plain checker (`guard(host) -> (allowed, reason)`); the T1
     fetcher reads `pinned(host)` right after a successful check and connects to
     those addresses, so a DNS answer that changes after the check is never used.
+
+    The browser checks every request, hundreds per page. A lookup that fails
+    outright (no answer) for a host approved within `DNS_BLIP_GRACE_S` reuses
+    that approval and its pinned addresses: a failure returns no address, so it
+    cannot point us anywhere new. Without this, one resolver hiccup aborted a
+    page load, opened the host's circuit and held every remaining page of the
+    host (live John Hancock run, 2026-10-21). An answer that resolves to a
+    non-public address is still denied at once.
     """
 
-    def __init__(self, scope: RunScope) -> None:
+    DNS_BLIP_GRACE_S = 300.0
+
+    def __init__(
+        self,
+        scope: RunScope,
+        *,
+        check: Callable[[str], EgressDecision] = check_host,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
         """Bind the scope's development-only private allowance."""
         self._allow_private = scope.egress_allow_private
         self._approved: dict[str, list[str]] = {}
+        self._approved_at: dict[str, float] = {}
+        self._check = check
+        self._clock = clock
 
     def __call__(self, host: str) -> tuple[bool, str]:
         """Check `host`; remember the resolved addresses when it is allowed."""
-        decision = check_host(host)
+        key = host.lower()
+        decision = self._check(host)
         if decision.allowed:
-            self._approved[host.lower()] = list(decision.resolved)
+            self._approve(key, decision.resolved)
             return True, decision.reason
         if self._allow_private and all(
             c in (IpClass.LOOPBACK, IpClass.PRIVATE) for c in decision.classes
         ):
-            self._approved[host.lower()] = list(decision.resolved)
+            self._approve(key, decision.resolved)
             return True, "allowed_private_fixture"
-        self._approved.pop(host.lower(), None)
+        approved_at = self._approved_at.get(key)
+        if (
+            decision.reason.startswith("dns_failure")
+            and key in self._approved
+            and approved_at is not None
+            and self._clock() - approved_at <= self.DNS_BLIP_GRACE_S
+        ):
+            return True, "dns_failure_recent_approval"
+        self._approved.pop(key, None)
+        self._approved_at.pop(key, None)
         return False, decision.reason
+
+    def _approve(self, key: str, resolved: Sequence[str]) -> None:
+        self._approved[key] = list(resolved)
+        self._approved_at[key] = self._clock()
 
     def pinned(self, host: str) -> list[str]:
         """Addresses the last check approved for `host` (empty when denied or unchecked)."""
