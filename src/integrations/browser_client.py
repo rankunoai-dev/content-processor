@@ -11,6 +11,7 @@ snapshot, screenshot and the content-bearing network responses it saw.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import time
 from collections.abc import Awaitable, Callable
 from typing import Any, Protocol
@@ -171,6 +172,38 @@ SNAPSHOT_JS = """
            text: document.body ? document.body.innerText : '' };
 }
 """
+
+
+async def serve_through_asset_store(route: Any, request: Any, asset_store: Any) -> None:
+    """Answer a static request from the group's asset store, or fetch it and record it.
+
+    A failure on the way (the page timed out or closed while the asset was in
+    flight: "Request context disposed") falls back to a normal request, and if
+    even that is impossible it is dropped: a missed cache entry must never fail
+    the page itself.
+    """
+    hit = asset_store.lookup(request.url, request.resource_type, request.method)
+    try:
+        if hit is not None:
+            await route.fulfill(status=hit.status, headers=hit.headers, body=hit.body)
+            return
+        if request.method.upper() != "GET":
+            await route.continue_()
+            return
+        response = await route.fetch()
+        body = await response.body()
+        asset_store.record_origin(
+            request.url,
+            request.resource_type,
+            request.method,
+            response.status,
+            dict(response.headers),
+            body,
+        )
+        await route.fulfill(response=response)
+    except PlaywrightError:
+        with contextlib.suppress(PlaywrightError):
+            await route.continue_()
 
 
 class RenderLimits(StrictModel):
@@ -361,23 +394,8 @@ class BrowserRenderer:
                 return
             # Host checks above run first: the store can only replace a request the policy allowed.
             if asset_store is not None and request.resource_type in _STATIC_RESOURCE_TYPES:
-                hit = asset_store.lookup(request.url, request.resource_type, request.method)
-                if hit is not None:
-                    await route.fulfill(status=hit.status, headers=hit.headers, body=hit.body)
-                    return
-                if request.method.upper() == "GET":
-                    response = await route.fetch()
-                    body = await response.body()
-                    asset_store.record_origin(
-                        request.url,
-                        request.resource_type,
-                        request.method,
-                        response.status,
-                        dict(response.headers),
-                        body,
-                    )
-                    await route.fulfill(response=response)
-                    return
+                await serve_through_asset_store(route, request, asset_store)
+                return
             await route.continue_()
 
         async def on_response(response: Response) -> None:

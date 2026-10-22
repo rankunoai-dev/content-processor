@@ -110,6 +110,9 @@ TELEMETRY_HOSTS: tuple[str, ...] = (
     "glassboxdigital.io",
     "akstat.io",
     "go-mpulse.net",
+    # feedback and session-replay services seen on live sites
+    "medallia.com",
+    "decibelinsight.net",
 )
 _BODY_TEXT = "document.body ? document.body.innerText : ''"
 

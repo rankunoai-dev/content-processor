@@ -46,6 +46,8 @@ def test_click_cause(message: str, cause: str) -> None:
         ("https://bam.nr-data.net/jserrors/1/x", True),
         ("https://www.google-analytics.com/g/collect", True),
         ("https://edge.adobedc.net/ee/v1/privacy/set-consent", True),
+        ("https://collection.decibelinsight.net/i/123", True),
+        ("https://analytics-fe.digital-cloud.medallia.com/x", True),
         ("https://www.johnhancock.com/api/forms", False),
         ("https://notonetrust.com/x", False),
     ],
