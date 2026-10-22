@@ -98,7 +98,7 @@ These are bugs or holes in code that is already there, not new features.
 | K7 | Crawl-delay is parsed only in the in-memory ledger; the Postgres `set_robots` passes `None` | Durable runs ignore crawl-delay | L0 |
 | K8 | Reaper reclaims leases but emits no events and does not mark the owning resource `FAILED(poison)` | Quarantined URLs vanish from the status stream | L0 |
 | K9 | Run-level budgets (runtime, requests, bytes, evidence) are declared in scope but not enforced | A runaway run is only bounded by task attempts | L6 |
-| K10 | Cost ledger not wired to any route (no paid route exists yet) | Must exist before T4/T5 is ever enabled | L1 |
+| K10 | **FIXED 2026-10-22** (spend guard and spend log on every paid request, playbook §10). Cost ledger not wired to any route (no paid route exists yet) | Must exist before T4/T5 is ever enabled | L1 |
 | K11 | Dry run `--max-tasks` applies to fetch and render separately; render pass can stall waiting on held tasks | Fixed with a 60 s cap, but the loop model is per-kind and serial | L6 |
 | K13 | The `/rate-limited` fixture shares host `127.0.0.1` with all other fixtures; three 429s open the host circuit for 15 min and the render pass gives up after its 60 s wait, so 0 pages render in a full fixture run | Correct governor behaviour on a real host, but it hides render results in the fixture suite. Fix: serve rate-limit and challenge fixtures on a second host alias (e.g. `localhost`) so they get their own circuit | L1 + L4 |
 | K14 | Gate gaps found by the fetch worker do not change the resource status (stays `EXTRACTED_UNVERIFIED`); only the render worker applies the implied status | `--no-render` runs under-report gated pages in the badge (the gap is still recorded) | L4 |
@@ -136,9 +136,9 @@ IDs are stable so lanes and sessions can reference them. "Stage" follows `ARCHIT
 - A-3 Identity-consistency checklist enforced per session (playbook section 6).
 - A-4 Conditional GET and recrawl mode (cases 101, 102).
 - A-5 Transport integrity: compression bombs, 206 assembly, 304 without cache, HTTP/3/TLS classification (cases 103–110).
-- A-6 Bright Data proxy provider (T4) and Web Unlocker / Scraping Browser (T5) behind provider interfaces.
-- A-7 Cost ledger per run, per day, per month, per host, per URL; vendor rate table; nightly reconciliation; kill switch honoured.
-- A-8 Operator approval flow for `paid_tier_available`: CLI and API command that raises one host's ceiling with a cap and re-queues its blocked URLs; before/after comparison report.
+- A-6 **Done 2026-10-22 for T4 proxy and T5 Web Unlocker; Scraping Browser not built.** Bright Data proxy provider (T4) and Web Unlocker / Scraping Browser (T5) behind provider interfaces.
+- A-7 **Done 2026-10-22 except nightly reconciliation.** Cost ledger per run, per day, per month, per host, per URL; vendor rate table; nightly reconciliation; kill switch honoured.
+- A-8 **Done 2026-10-22 as CLI (`approve`, `revoke`, `spend`, re-queue); API command and before/after report not built.** Operator approval flow for `paid_tier_available`: CLI and API command that raises one host's ceiling with a cap and re-queues its blocked URLs; before/after comparison report.
 - A-9 Shadow-block detection: canary URL per host, baseline drift, alternate-class probe (case 178).
 - A-10 Sitemap and feed discovery as a cheap first channel; CMS JSON endpoints as a separate representation (playbook section 5).
 - A-11 AI opt-out and TDM directive parsing (case 182).

@@ -31,3 +31,6 @@ scratch/
 Thumbs.db
 
 .testmondata*
+
+# Paid-tier spend and approval logs (governor/spend.py)
+spend/

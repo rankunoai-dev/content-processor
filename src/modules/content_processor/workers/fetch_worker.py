@@ -20,7 +20,7 @@ classifier can fail a wrong payload closed (K15).
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from datetime import UTC, datetime, timedelta
 from email.utils import parsedate_to_datetime
 from typing import Any
@@ -55,6 +55,7 @@ from src.modules.content_processor.governor.block_classifier import classify_res
 from src.modules.content_processor.governor.escalation import Action, ActionKind, HostAccessState
 from src.modules.content_processor.governor.gates import detect_gates
 from src.modules.content_processor.governor.robots import crawl_delay_for, evaluate_robots
+from src.modules.content_processor.governor.spend import Approval, apply_approval
 from src.modules.content_processor.ledger.keys import resource_id_for, task_key
 from src.modules.content_processor.provenance import stamp_blocks
 from src.modules.content_processor.recrawl import (
@@ -139,6 +140,7 @@ class FetchWorker:
         worker_id: str,
         escalation_fetchers: Sequence[Fetcher] = (),
         baseline: Baseline | None = None,
+        approvals: Callable[[str], Approval | None] | None = None,
     ) -> None:
         """Bind the worker to one run.
 
@@ -153,6 +155,9 @@ class FetchWorker:
                 for T2). A host escalated to one of these tiers is fetched with it.
             baseline: Previous run's records. When a URL is in it, the fetch is
                 conditional and an unchanged page reuses the previous extraction.
+            approvals: `host -> active paid-tier approval` (A-8). An approved
+                host's ceiling rises to its approved tier (never past the
+                scope's); every other host stays at the free tiers.
         """
         self._ledger = ledger
         self._fetcher = fetcher
@@ -167,6 +172,7 @@ class FetchWorker:
         self._expected_by_key: dict[str, Expectation] = {}
         self._payload_owner: dict[str, str] = {}
         self._baseline = baseline
+        self._approvals = approvals
         self._priors: dict[str, UrlRecord] = {}
 
     # -- loop ---------------------------------------------------------------
@@ -240,7 +246,16 @@ class FetchWorker:
                 not_before=gate.not_before,
             )
             return
-        fetcher = self._fetcher_for(host_state.tier)
+        approval = self._approvals(host) if self._approvals is not None else None
+        apply_approval(host_state, approval, self._scope.access_tier_ceiling)
+        fetch_tier = host_state.tier
+        approved_tier = task.payload.get("approved_tier")
+        if approval is not None and isinstance(approved_tier, str):
+            # Re-queued after an approval: go straight to the approved tier.
+            wanted = AccessTier(approved_tier)
+            if tier_rank(host_state.ceiling) >= tier_rank(wanted) > tier_rank(fetch_tier):
+                fetch_tier = wanted
+        fetcher = self._fetcher_for(fetch_tier)
         depth = int(task.payload.get("depth", 0))
         self._remember_expectation(task)
         if depth > 0:
@@ -300,6 +315,14 @@ class FetchWorker:
             )
             for h in result.hops
         ]
+
+        if result.spend_refused:
+            # A paid tier refused before sending anything (cap, approval, kill switch).
+            reason = f"paid_tier_refused:{result.spend_refused}:fetched_at={fetcher.tier_name}"
+            self._upsert(task, resource, EntityStatus.BLOCKED, reason)
+            self._event("host", host, host_state.tier.value, host_state.tier.value, reason)
+            self._ledger.complete(task.id or 0, self._worker_id)
+            return
 
         if result.egress_denied:
             self._upsert(

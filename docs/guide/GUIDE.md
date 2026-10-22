@@ -1,6 +1,6 @@
 # Content Processor: A Plain-Language Guide
 
-Last updated: 21 October 2026 · Code version: main after the project report and reviewer decisions in the web app · Maintained by every session that adds a significant feature (see "Keeping this guide current" at the end)
+Last updated: 22 October 2026 · Code version: main after paid access with approvals and spending limits · Maintained by every session that adds a significant feature (see "Keeping this guide current" at the end)
 
 ## 1. What this is, in one paragraph
 
@@ -151,6 +151,7 @@ Reviewers can record decisions directly in the app: for each possible contradict
 - Read-only: the engine never submits forms, logs in, buys, unsubscribes or clicks anything that changes the website.
 - Polite: robots rules and requested delays are respected; a struggling site is paused, not hammered.
 - Free by default: every run starts at $0. Paid access (Bright Data) needs your explicit approval per website, with caps of $5 per run and $25 per day, a monthly cap and a kill switch.
+- How paid access works: when a website blocks every free method, the engine stops and asks. An operator can approve that one website, for a set amount (for example $5 per run), with one command; nothing else changes. Before every paid request the engine checks the kill switch, the approval and every limit (per run, per day, per month, per website and per page), and refuses rather than overspend. Every paid request is written to a spending log, and one command shows what has been spent and which websites are approved. Prices are counted on the high side, so the log never understates the bill.
 - Private networks are off-limits: the engine checks every address before contacting it, at every redirect. The basic downloader also connects only to the exact public address it checked, so a trick that swaps the address mid-way cannot redirect it into a private network (the browser and the Chrome-like downloader re-check each request instead).
 - Evidence first: originals are stored before anything is changed, so every claim can be proven.
 
@@ -167,7 +168,7 @@ Reviewers can record decisions directly in the app: for each possible contradict
 
 ## 7. What it does not do yet
 
-- Paid access ladder: the Bright Data connection, spending ledger and approval command are not built yet, so a site that blocks all free access ends BLOCKED and the engine asks for approval.
+- Paid access through Bright Data's remote browser is not built; pages fetched through paid access are read from their page code, not opened in a browser through the paid connection.
 - Durable database: the PostgreSQL storage exists but has never been tested against a real database.
 - Starting runs from the web: the analyst web app reviews finished runs, but runs are still started from the command line, and there is no live progress feed or deployment package yet.
 - Some content types: text drawn on canvas or in CSS, product variant selectors, audio and video, archives and email files, and old-style .doc and .xls files.
@@ -196,6 +197,7 @@ Reviewers can record decisions directly in the app: for each possible contradict
 
 | Date | Significant change |
 |---|---|
+| 2026-10-22 | Paid access (Bright Data) built but off by default: one approval per website with a spending cap, checked before every paid request, with a spending log. |
 | 2026-10-21 | Reviewers save decisions in the web app (with name, time and full history); the next report carries them forward. |
 | 2026-10-21 | Live John Hancock: 32 of 34 verified again with all checks on (the 2 others are placeholder pages). FAQ sections built as web components are now opened, text is matched the way the browser shows it, and a brief network hiccup no longer pauses a whole website. |
 | 2026-10-21 | Project report: one Excel workbook per run with every page's text, whether it was fully extracted, the confirmed share and the confidence, plus, for every page, which other pages carry the same text and how much (exact matching). |

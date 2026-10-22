@@ -95,6 +95,8 @@ class FetchResult(StrictModel):
     elapsed_ms: float = 0.0
     transport_error: str | None = None
     egress_denied: str | None = None
+    spend_refused: str | None = None
+    """A paid tier refused to make the request (cap, approval or kill switch); no bytes sent."""
 
     @property
     def acquired(self) -> bool:

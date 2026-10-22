@@ -111,6 +111,26 @@ class Settings(BaseSettings):
     brightdata_monthly_cap_usd: float = Field(
         default=0.0, ge=0.0, description="0 means unset: T4/T5 refuse to start until set."
     )
+    brightdata_url_cap_usd: float = Field(
+        default=0.25, ge=0.0, description="Most one URL may cost across all its paid attempts."
+    )
+    brightdata_proxy_host: str = "brd.superproxy.io"
+    brightdata_proxy_port: int = Field(default=33335, ge=1, le=65535)
+    brightdata_ca_cert_path: Path | None = Field(
+        default=None,
+        description="Bright Data's CA certificate; the Web Unlocker (T5) needs it. "
+        "TLS verification is never switched off.",
+    )
+    # Prices are deliberately on the high side so a cap is reached early, not late.
+    brightdata_proxy_usd_per_gb: float = Field(default=10.0, gt=0.0)
+    brightdata_unlocker_usd_per_1k: float = Field(default=3.0, gt=0.0)
+    brightdata_paid_max_bytes: int = Field(
+        default=5 * 1024 * 1024, ge=1, description="Body cap for a paid fetch (bounds its cost)."
+    )
+    cp_spend_dir: Path = Field(
+        default=REPO_ROOT / "spend",
+        description="Append-only spend and approval logs for paid tiers.",
+    )
 
     @field_validator("log_level")
     @classmethod

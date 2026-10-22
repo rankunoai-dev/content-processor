@@ -53,6 +53,13 @@ from src.modules.content_processor.export.decisions import (
     read_decisions,
     review_decisions,
 )
+from src.modules.content_processor.governor.paid import (
+    build_paid_fetchers,
+    paid_tier_status,
+    spend_store,
+)
+from src.modules.content_processor.governor.paid import register as register_paid_commands
+from src.modules.content_processor.governor.spend import approvals_lookup
 from src.modules.content_processor.ledger.memory import MemoryLedger
 from src.modules.content_processor.ledger.tasks import TaskLedger, new_run_id
 from src.modules.content_processor.planner import fetch_tasks_for
@@ -265,6 +272,17 @@ async def _drive(
     grouping = RunGroups(ledger, evidence, run_id=run_id) if group_assets else None
     evidence = MeteredEvidenceStore(evidence, meter)
     raw_t1, raw_escalation = build_fetchers(scope)
+    # Paid tiers (T4/T5): only when every switch allows it, and per host only after
+    # `approve`; each request also passes the spend guard (governor/spend.py).
+    paid = build_paid_fetchers(
+        scope,
+        run_id=run_id,
+        host_checker=host_checker_for(scope),
+        user_agent=user_agent_for(scope),
+        accept_language=_accept_language(scope),
+    )
+    raw_escalation = [*raw_escalation, *paid]
+    approvals = approvals_lookup(spend_store(), scope.tenant_id) if paid else None
     t1 = MeteredFetcher(raw_t1, meter)
     escalation = [MeteredFetcher(f, meter) for f in raw_escalation]
     stages: dict[StageName, Stage] = {}
@@ -279,6 +297,7 @@ async def _drive(
             worker_id=f"{worker_prefix}-fetch",
             escalation_fetchers=escalation,
             baseline=baseline,
+            approvals=approvals,
         )
     if "render" in stage_names:
         renderer = MeteredRenderer(build_renderer(scope), meter)
@@ -451,6 +470,7 @@ async def _dryrun(args: argparse.Namespace) -> int:
     report = {
         "run_id": run_id,
         "mode": "dryrun_memory_ledger",
+        "paid_tiers": paid_tier_status(scope),
         "baseline": _baseline_info(baseline, getattr(args, "baseline", None)),
         "scheduled": len(plan.entries),
         "excluded_at_plan": [x.model_dump() for x in plan.excluded],
@@ -549,6 +569,7 @@ async def _durable(args: argparse.Namespace, *, create: bool) -> int:
         report = {
             "run_id": run_id,
             "mode": "durable_postgres",
+            "paid_tiers": paid_tier_status(scope),
             "baseline": _baseline_info(baseline, baseline_source),
             "scheduled": len(plan.entries),
             "enqueued": enqueued,
@@ -707,6 +728,7 @@ def main(argv: list[str] | None = None) -> int:
     p_records.set_defaults(func=cmd_records)
 
     register_report_command(sub)
+    register_paid_commands(sub)
 
     p_status = sub.add_parser("status", help="durable: task and resource counts")
     p_status.add_argument("--run", required=True)

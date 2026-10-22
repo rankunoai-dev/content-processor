@@ -252,3 +252,19 @@ Per host and per tier: requests, 2xx/3xx/4xx/5xx, challenge rate, shadow-block s
 | T4 | Bright Data / Oxylabs / Decodo / IPRoyal / Webshare | FINANCIAL | per GB or per IP | Behind `ProxyProvider` |
 | T5 | Zyte API / Bright Data Web Unlocker / Oxylabs Unblocker / ScraperAPI / ZenRows; FlareSolverr (self-hosted) | FINANCIAL | per request | Behind `UnblockerProvider`; HITL per engagement |
 | T6 | CAPTCHA solvers; pay-per-crawl | FINANCIAL | per solve / per page | Off by default; dual sign-off |
+
+## 10. Credit governance (paid tiers, built 2026-10-22)
+
+Referenced from §2 (T4) and ARCHITECTURE.md §19. Code: `governor/spend.py` (guard, approvals, spend log), `governor/paid.py` (when paid tiers are on, the commands), `integrations/proxy_provider.py` (T4), `integrations/unblocker_provider.py` (T5).
+
+**Layer 1: switches that build nothing.** Paid fetchers exist in a run only when all hold: `BRIGHTDATA_ENABLED=true` (kill switch), `BRIGHTDATA_MONTHLY_CAP_USD` > 0, the scope's `access_tier_ceiling` is T4 or T5 (which the scope validator ties to `budgets.cost_ceiling_usd` > 0), and the zone credentials are set (T5 also needs `BRIGHTDATA_CA_CERT_PATH`; TLS verification is never switched off). The run report records `paid_tiers: on(T4[,T5])` or `off(<reason>)`.
+
+**Layer 2: per-host approval.** Every host starts at most at T3 (`initial_host_ceiling`) and an escalation past it returns NEEDS_APPROVAL with the proposed tier. `cli approve --tenant <t> --host <h> --tier T4_PROXIED|T5_MANAGED_UNBLOCKER --cap <usd per run> --by <operator> [--expires-days N]` raises that host's ceiling only (never past the scope's); `cli revoke` withdraws it. Approvals are an append-only log (`CP_SPEND_DIR/approvals.jsonl`); the latest line per host wins. `requeue_blocked()` re-queues an approved host's BLOCKED URLs straight at the approved tier.
+
+**Layer 3: the spend guard, before every paid request.** In order: kill switch, monthly cap set, an active approval covering the tier, then the request's worst-case cost against the run cap (the smaller of `BRIGHTDATA_RUN_CAP_USD`, default $5, and the scope's `cost_ceiling_usd`), the daily cap ($25), the monthly cap, the host's approved cap and the per-URL cap (`BRIGHTDATA_URL_CAP_USD`, $0.25). The worst case is reserved first (paid fetches have a 5 MB body cap), so no cap can be crossed; a refusal sends nothing and ends the URL `BLOCKED paid_tier_refused:<rule>:…` with a host event. The actual cost is charged after the response to `CP_SPEND_DIR/spend.jsonl`; `cli spend [--run]` shows totals, caps and active approvals.
+
+**Prices.** `BRIGHTDATA_PROXY_USD_PER_GB` (default 10, priced on received bytes plus a header allowance per request) and `BRIGHTDATA_UNLOCKER_USD_PER_1K` (default 3, per request including redirects) are deliberately on the high side, so the ledger over-counts rather than under-counts. Reconcile them against the Bright Data invoice; nightly reconciliation is not built yet.
+
+**Identity.** T4 uses one sticky session per host per run (`-session-<id>` from the run and host) and the scope's geography as `-country-<cc>`.
+
+**Not built yet:** Scraping Browser (T5 browser variant), rendering through the paid exit IP (pages acquired at T4/T5 are extracted from source; the T3 render still uses the local network), cumulative caps across parallel processes (each process may pass one worst case before another's charge lands), and the before/after comparison report.
