@@ -29,6 +29,7 @@ from typing import Any
 from src.modules.content_processor.adapters.html_source import match_key
 from src.modules.content_processor.contracts import ContentBlock, Gap, Resource
 from src.modules.content_processor.enums import ContentLayer, EntityStatus, GapType
+from src.modules.content_processor.export.content import drop_duplicates
 from src.modules.content_processor.verify.detectors import (
     DetectedRegion,
     EvidenceProblem,
@@ -284,14 +285,15 @@ def rule_r7_channel_agreement(
         rendered_text = " ".join(_norm(b.normalized_text) for b in rendered)
         haystack = _squash(rendered_text)
         rendered_shingles = _shingles(_words(rendered_text))
-        source_main = [
-            b
-            for b in blocks
-            if b.state_id.endswith("|source")
-            and b.layer is ContentLayer.RENDERED_VISIBLE
-            and b.role in _MAIN_ROLES
-            and b.dedupe_of is None
-        ]
+        source_main = drop_duplicates(
+            [
+                b
+                for b in blocks
+                if b.state_id.endswith("|source")
+                and b.layer is ContentLayer.RENDERED_VISIBLE
+                and b.role in _MAIN_ROLES
+            ]
+        )
         total = sum(len(b.normalized_text.split()) for b in source_main)
         missing = [
             b

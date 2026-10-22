@@ -27,7 +27,11 @@ from src.modules.content_processor.analysis.overlap import (
 )
 from src.modules.content_processor.contracts import ContentBlock, UrlRecord
 from src.modules.content_processor.enums import EntityStatus, GapType, UrlBadge
-from src.modules.content_processor.export.content import DEFAULT_LAYERS, whole_content
+from src.modules.content_processor.export.content import (
+    DEFAULT_LAYERS,
+    drop_duplicates,
+    whole_content,
+)
 from src.modules.content_processor.export.tabular import Cell, Table, expand_split_column
 
 __all__ = [
@@ -172,9 +176,7 @@ _NOTES: list[tuple[str, str]] = [
 
 
 def _corpus(blocks: Sequence[ContentBlock]) -> list[ContentBlock]:
-    return [
-        b for b in blocks if b.normalized_text and b.layer in DEFAULT_LAYERS and b.dedupe_of is None
-    ]
+    return drop_duplicates([b for b in blocks if b.normalized_text and b.layer in DEFAULT_LAYERS])
 
 
 def _words(block: ContentBlock) -> int:

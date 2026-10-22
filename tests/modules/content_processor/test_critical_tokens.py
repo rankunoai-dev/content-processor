@@ -164,8 +164,12 @@ def test_gap_ids_are_stable_and_capped():
     assert len(first) == R9_MAX_GAPS
     assert [g.gap_id for g in first] == [g.gap_id for g in again]
     assert len({g.gap_id for g in first}) == R9_MAX_GAPS
-    duplicate = _b(1, "not x", "x").model_copy(update={"dedupe_of": "b0"})
-    assert rule_r9_critical_tokens(RUN, _res(), [duplicate]) == []
+    # a duplicate of a block in the same list is not reported twice; a duplicate
+    # whose original is absent is the only copy of its text and is checked
+    original = _b(0, "not x", "x")
+    duplicate = _b(1, "not x", "x").model_copy(update={"dedupe_of": original.block_id})
+    assert len(rule_r9_critical_tokens(RUN, _res(), [original, duplicate])) == 1
+    assert len(rule_r9_critical_tokens(RUN, _res(), [duplicate])) == 1
 
 
 def test_record_with_a_changed_amount_needs_review():

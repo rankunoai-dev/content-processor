@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Any
 
 from src.modules.content_processor.contracts import UrlRecord
-from src.modules.content_processor.export.content import whole_content
+from src.modules.content_processor.export.content import drop_duplicates, whole_content
 
 __all__ = ["explorer_data", "render_explorer", "write_explorer"]
 
@@ -74,8 +74,7 @@ def _record_data(record: UrlRecord) -> dict[str, Any]:
                 "heading": list(b.heading_path),
                 "evidence": list(b.evidence_ids),
             }
-            for b in blocks
-            if b.normalized_text and b.dedupe_of is None
+            for b in drop_duplicates([b for b in blocks if b.normalized_text])
         ],
     }
 

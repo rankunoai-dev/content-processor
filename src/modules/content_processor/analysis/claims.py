@@ -22,7 +22,7 @@ from datetime import date, datetime
 
 from src.modules.content_processor.adapters.html_source import without_struck_text
 from src.modules.content_processor.contracts import ClaimContext, ContentBlock, UrlRecord
-from src.modules.content_processor.export.content import DEFAULT_LAYERS
+from src.modules.content_processor.export.content import DEFAULT_LAYERS, drop_duplicates
 
 __all__ = [
     "CLAIM_ROLES",
@@ -474,12 +474,13 @@ def claims_from_records(
     page_codes: dict[str, frozenset[str]] = {}
     for record in records:
         page_codes[record.requested_url] = _page_codes(record)
-        for block in record.blocks:
-            if (
-                block.normalized_text
-                and block.layer in DEFAULT_LAYERS
-                and (include_boilerplate or block.role in CLAIM_ROLES)
-                and block.dedupe_of is None
-            ):
-                claims.extend(extract_claims(record, block))
+        candidates = [
+            block
+            for block in record.blocks
+            if block.normalized_text
+            and block.layer in DEFAULT_LAYERS
+            and (include_boilerplate or block.role in CLAIM_ROLES)
+        ]
+        for block in drop_duplicates(candidates):
+            claims.extend(extract_claims(record, block))
     return [_with_page_codes(c, page_codes) for c in claims]

@@ -12,12 +12,24 @@ from collections.abc import Iterable, Sequence
 from src.modules.content_processor.contracts import ContentBlock
 from src.modules.content_processor.enums import ContentLayer
 
-__all__ = ["DEFAULT_LAYERS", "ROLE_ORDER", "whole_content"]
+__all__ = ["DEFAULT_LAYERS", "ROLE_ORDER", "drop_duplicates", "whole_content"]
 
 DEFAULT_LAYERS: frozenset[ContentLayer] = frozenset(
     {ContentLayer.RENDERED_VISIBLE, ContentLayer.COLLAPSED_PUBLISHED}
 )
 ROLE_ORDER: tuple[str, ...] = ("main", "unknown", "aside", "legal", "nav", "chrome", "footer")
+
+
+def drop_duplicates(blocks: Sequence[ContentBlock]) -> list[ContentBlock]:
+    """The blocks that are not duplicates of another block in the same list.
+
+    A block marked `dedupe_of` is skipped only when the block it points to is in
+    `blocks`. If that block was filtered out (a hidden mobile-menu copy, a layer
+    or role the caller leaves out), the text is kept: a duplicate link must never
+    make visible text disappear.
+    """
+    present = {b.block_id for b in blocks}
+    return [b for b in blocks if b.dedupe_of is None or b.dedupe_of not in present]
 
 
 def whole_content(
@@ -38,12 +50,12 @@ def whole_content(
     layers = set(include_layers)
     roles = ROLE_ORDER if include_boilerplate else ("main", "unknown", "aside", "legal")
     chosen = [b for b in blocks if b.layer in layers and b.role in roles]
+    if dedupe:
+        chosen = drop_duplicates(chosen)
     chosen.sort(key=lambda b: (roles.index(b.role), b.reading_order))
     lines: list[str] = []
     last_heading: list[str] = []
     for b in chosen:
-        if dedupe and b.dedupe_of is not None:
-            continue
         if b.heading_path != last_heading and b.heading_path:
             depth = len(b.heading_path)
             title = b.heading_path[-1]

@@ -188,7 +188,8 @@ def test_records_without_text_are_reported_as_skipped():
         record(BASE + "hidden", blocks=[block("rh", 0, "secret", layer=ContentLayer.HIDDEN)]),
     ]
     result = find_overlaps(records)
-    assert [u for u, _ in result.skipped] == [BASE + "empty", BASE + "dup-only", BASE + "hidden"]
+    # "dup-only" points at a block that is not there: its text is the only copy and counts
+    assert [u for u, _ in result.skipped] == [BASE + "empty", BASE + "hidden"]
     assert result.summary()["skipped"][0] == {"url": BASE + "empty", "reason": "no_content"}
     assert r2a_table(result).rows == [] and r2b_table(result).rows == []
 

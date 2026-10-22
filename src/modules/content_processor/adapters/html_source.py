@@ -118,6 +118,17 @@ def _is_block_boundary(tag: str, attrs: dict[str, str | None]) -> bool:
     )
 
 
+# Which copy of repeated text is kept: the most visible one.
+_VISIBILITY_RANK: dict[ContentLayer, int] = {
+    ContentLayer.RENDERED_VISIBLE: 3,
+    ContentLayer.COLLAPSED_PUBLISHED: 2,
+    ContentLayer.ACCESSIBILITY_ONLY: 1,
+    ContentLayer.THIRD_PARTY_CHROME: 1,
+    ContentLayer.UGC: 1,
+    ContentLayer.ICON_ARTIFACT: 1,
+    ContentLayer.PAYWALLED_IN_SOURCE: 1,
+    ContentLayer.UNCERTAIN: 1,
+}
 _SKIP_TAGS = frozenset({"style", "svg", "math", "canvas", "head", "link", "meta"})
 _HEADING = re.compile(r"^h([1-6])$")
 _ICON_CLASS = re.compile(
@@ -286,6 +297,7 @@ class _Walker:
     structured: list[str] = field(default_factory=list)
     skeleton: list[str] = field(default_factory=list)
     seen_keys: dict[str, str] = field(default_factory=dict)
+    layer_of: dict[str, ContentLayer] = field(default_factory=dict)
     buffer: list[str] = field(default_factory=list)
     buffer_ctx: _Ctx | None = None
     order: int = 0
@@ -312,6 +324,16 @@ class _Walker:
         dedupe_of = self.seen_keys.get(block_key)
         if dedupe_of is None:
             self.seen_keys[block_key] = block_id
+        elif _VISIBILITY_RANK.get(ctx.layer, 0) > _VISIBILITY_RANK.get(self.layer_of[dedupe_of], 0):
+            # A visible copy after a hidden one (the desktop menu after the hidden
+            # mobile menu): the visible block is the one to keep, and the earlier
+            # copies point to it. Downstream filters keep only visible layers.
+            for i, earlier in enumerate(self.blocks):
+                if earlier.block_id == dedupe_of or earlier.dedupe_of == dedupe_of:
+                    self.blocks[i] = earlier.model_copy(update={"dedupe_of": block_id})
+            self.seen_keys[block_key] = block_id
+            dedupe_of = None
+        self.layer_of[block_id] = ctx.layer
         self.blocks.append(
             ContentBlock(
                 block_id=block_id,

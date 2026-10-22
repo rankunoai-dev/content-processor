@@ -31,6 +31,7 @@ from src.modules.content_processor.enums import (
     EntityStatus,
     GapType,
 )
+from src.modules.content_processor.export.content import drop_duplicates
 from src.modules.content_processor.verify.gaps import gap_id_for
 
 __all__ = [
@@ -552,9 +553,8 @@ def rule_r9_critical_tokens(
     `R9_MAX_GAPS` per resource.
     """
     gaps: list[Gap] = []
-    for block in regions:
-        if block.dedupe_of is not None or not block.normalized_text:
-            continue
+    kept = drop_duplicates([b for b in regions if b.normalized_text])
+    for block in kept:
         before = critical_tokens(_canonical(block.raw_text))
         after = critical_tokens(block.normalized_text)
         if before != after:
@@ -569,10 +569,7 @@ def rule_r9_critical_tokens(
                     run_id, resource, block, "tokens", "critical_tokens_changed:" + ";".join(detail)
                 )
             )
-    ordered = sorted(
-        (b for b in regions if b.dedupe_of is None and b.normalized_text),
-        key=lambda b: (b.state_id, b.reading_order),
-    )
+    ordered = sorted(kept, key=lambda b: (b.state_id, b.reading_order))
     for first, second in zip(ordered, ordered[1:], strict=False):
         if (
             first.state_id == second.state_id

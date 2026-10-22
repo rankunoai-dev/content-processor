@@ -35,7 +35,11 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 from src.modules.content_processor.contracts import UrlRecord
-from src.modules.content_processor.export.content import DEFAULT_LAYERS, ROLE_ORDER
+from src.modules.content_processor.export.content import (
+    DEFAULT_LAYERS,
+    ROLE_ORDER,
+    drop_duplicates,
+)
 from src.modules.content_processor.export.tabular import Cell, Table
 
 __all__ = [
@@ -217,13 +221,12 @@ def docs_from_records(
     roles = ROLE_ORDER if config.include_boilerplate else _CONTENT_ROLES
     for record in records:
         blocks = sorted(
-            (
-                b
-                for b in record.blocks
-                if b.normalized_text
-                and b.layer in DEFAULT_LAYERS
-                and b.role in roles
-                and b.dedupe_of is None
+            drop_duplicates(
+                [
+                    b
+                    for b in record.blocks
+                    if b.normalized_text and b.layer in DEFAULT_LAYERS and b.role in roles
+                ]
             ),
             key=lambda b: (roles.index(b.role), b.reading_order),
         )

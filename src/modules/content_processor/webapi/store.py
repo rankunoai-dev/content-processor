@@ -32,7 +32,7 @@ from src.modules.content_processor.enums import (
     UiRegion,
     UrlBadge,
 )
-from src.modules.content_processor.export.content import whole_content
+from src.modules.content_processor.export.content import drop_duplicates, whole_content
 from src.modules.content_processor.webapi.models import (
     Block,
     Count,
@@ -524,8 +524,9 @@ class RunStore:
             return None
         rec = entry.record
         blocks = sorted(rec.blocks, key=lambda b: b.reading_order)
-        kept = [b for b in blocks if b.dedupe_of is None and b.normalized_text.strip()]
-        repeated = sum(1 for b in blocks if b.dedupe_of is not None)
+        texts = [b for b in blocks if b.normalized_text.strip()]
+        kept = drop_duplicates(texts)
+        repeated = len(texts) - len(kept)
         return PageDetail(
             row=entry.row,
             run_name=run.name,
