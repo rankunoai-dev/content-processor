@@ -105,6 +105,15 @@ ANNOTATE_JS = """
     'list-item', 'flow-root']);
   const root = document.documentElement;
   const docRect = { w: root.scrollWidth, h: root.scrollHeight };
+  const ownTextLaidOut = (node) => {
+    for (const c of node.childNodes) {
+      if (c.nodeType !== 3 || !c.nodeValue.trim()) { continue; }
+      const range = document.createRange();
+      range.selectNodeContents(c);
+      if (range.getClientRects().length > 0) { return true; }
+    }
+    return false;
+  };
   // Walk the composed tree: elements inside open shadow roots are marked too.
   const all = [];
   const collect = (root) => {
@@ -125,8 +134,12 @@ ANNOTATE_JS = """
       || rect.left > docRect.w || rect.top > docRect.h;
     const offscreen = hasBox && outside;
     const voidTags = ['br', 'wbr', 'area', 'map', 'col', 'colgroup'];
+    // A box-less element with text is hidden only when none of its own text is laid
+    // out: a web component host (display: contents, or text drawn through a shadow
+    // root slot) has no box but its text is on screen (live John Hancock cards).
     const zeroBoxWithText = rect.width === 0 && rect.height === 0 && !voidTags.includes(tag)
-      && el.childElementCount === 0 && (el.textContent || '').trim().length > 0;
+      && el.childElementCount === 0 && (el.textContent || '').trim().length > 0
+      && !ownTextLaidOut(el);
     const invisible = cs.display === 'none' || cs.visibility === 'hidden'
       || parseFloat(cs.opacity) === 0 || zeroBoxWithText;
     if (invisible || offscreen) { el.setAttribute('data-cp-hidden', '1'); hidden += 1; }

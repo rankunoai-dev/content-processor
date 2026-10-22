@@ -172,6 +172,12 @@ export const ISSUES: Record<string, IssueInfo> = {
     todo: 'Re-run with a higher limit if this page matters.',
     level: 'warning',
   },
+  VISIBLE_TEXT_NOT_EXTRACTED: {
+    title: "Text on the page wasn't captured",
+    why: 'The page shows lines of text that are not in the captured content.',
+    todo: 'Open the page and look for the quoted lines; they are missing from the content.',
+    level: 'warning',
+  },
   DISCOVERY_OPEN: {
     title: "Some page sections weren't opened",
     why: 'Not every tab, menu or button on the page was tried.',
@@ -259,6 +265,7 @@ export const ISSUE_ORDER: string[] = [
   'BUDGET_STOPPED',
   'LIMIT_HIT',
   'FIDELITY_DISAGREEMENT',
+  'VISIBLE_TEXT_NOT_EXTRACTED',
   'UNVISITED_STATE',
   'DISCOVERY_OPEN',
   'LOW_CONFIDENCE',

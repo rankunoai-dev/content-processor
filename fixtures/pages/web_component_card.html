@@ -1,0 +1,14 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Fund news</title></head>
+<body><main><h1>Fund news</h1>
+<p>The fund declared its monthly distribution.</p>
+<news-card><card-date>October 8, 2026</card-date><card-header>Closed-end funds release earnings data</card-header></news-card>
+</main>
+<script>
+// Like the live John Hancock cards: the header element has no box of its own
+// (display: contents) and its text is drawn through a slot in a shadow root.
+customElements.define('card-header', class extends HTMLElement { constructor() { super();
+  this.attachShadow({ mode: 'open' }).innerHTML =
+    '<style>:host { display: contents; }</style><h4><slot></slot></h4>'; } });
+customElements.define('news-card', class extends HTMLElement { constructor() { super();
+  this.attachShadow({ mode: 'open' }).innerHTML = '<article><slot></slot></article>'; } });
+</script></body></html>

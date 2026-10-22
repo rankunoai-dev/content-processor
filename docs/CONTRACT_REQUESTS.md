@@ -102,3 +102,11 @@ Only Lane L0 edits `contracts.py`, `enums.py`, `workers/ports.py`, `ledger/schem
 - **Change:** `lease()` accepts an optional `group_key: Callable[[Task], str | None]` (or a `group_of: Mapping[str, str]` keyed by URL). When given, ready tasks of the same group are preferred over tasks of other groups, so a group's pages render back to back and its asset cache is reused. Additive: the parameter defaults to None and keeps the current enqueue order.
 - **Why:** the scheduler's `RunGroups` (scheduler/grouping.py) builds groups after the fetch stage, after RENDER tasks already exist. Without ordering, cache hits depend on how leases happen to interleave. Measured effect on the local services fixture is still to be quantified with interleaved leasing.
 - **Status:** OPEN
+
+### CR-011: Gap type for visible text that was not extracted
+- **Lane:** L0 (enums), requested by the coverage check (validation of the 98-URL John Hancock run)
+- **File(s):** enums.py
+- **Change:** `GapType.VISIBLE_TEXT_NOT_EXTRACTED`. The render worker raises it (status PARTIAL) when lines the browser shows (3+ words, at least 4 words in all) are not accounted for by any captured block of the same snapshot; hidden, source-only and metadata blocks do not count. Report wording, review action and the web app vocabulary added.
+- **Why:** verification proved only precision (extracted text is on the page), never coverage (page text was extracted); the Latest News headlines were wrongly hidden on every John Hancock news page and the pages still read "Fully captured".
+- **Status:** LANDED with the coverage check (2026-10-22).
+

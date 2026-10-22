@@ -12,6 +12,7 @@ summary, events. Never raises out of `process()`.
 from __future__ import annotations
 
 import asyncio
+import re
 import time
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
@@ -108,6 +109,8 @@ class RenderWorker:
         self._scope = scope
         self._run_id = run_id
         self._worker_id = worker_id
+        # (visible text, full extraction) of the base render and each explored state
+        self._snapshots: list[tuple[str, list[ContentBlock]]] = []
         self._asset_store_for = asset_store_for
 
     async def run_until_idle(
@@ -258,6 +261,7 @@ class RenderWorker:
         rendered_blocks, recon = reconcile_source_vs_rendered(
             source_blocks, rendered.blocks, result.inner_text
         )
+        self._snapshots = [(result.inner_text, list(rendered_blocks))]
         state_blocks, explore_facts = self._apply_exploration(
             resource_id, result, rendered_blocks, exploration, evidence_ids
         )
@@ -334,8 +338,45 @@ class RenderWorker:
             status = gate_status if _worse(gate_status, status) else status
             reasons.extend(gate_reasons)
         status = self._discovery_verdict(resource_id, exploration, status, reasons, evidence_ids)
+        status = self._coverage_verdict(resource_id, status, reasons, evidence_ids)
         self._set_status(task, resource, status, ";".join(reasons), evidence_ids)
         self._ledger.complete(task.id or 0, self._worker_id)
+
+    # -- coverage ---------------------------------------------------------------
+
+    def _coverage_verdict(
+        self,
+        resource_id: str,
+        status: EntityStatus,
+        reasons: list[str],
+        evidence_ids: list[str],
+    ) -> EntityStatus:
+        """Every line the browser shows must be in the extraction (coverage, not precision).
+
+        Verification of blocks proves what was extracted is on the page; this proves
+        what is on the page was extracted. A visible line counts as covered only by a
+        block of a captured layer: a block wrongly put in the hidden layer does not.
+        """
+        missing = missing_visible_lines(self._snapshots)
+        words = sum(len(_WORD.findall(line)) for line in missing)
+        if words < COVERAGE_MIN_MISSING_WORDS:
+            return status
+        samples = " | ".join(line[:50] for line in missing[:3])
+        reason = f"visible_text_not_extracted:lines={len(missing)}:words={words}:{samples}"
+        self._ledger.record_gap(
+            Gap(
+                gap_id=gap_id_for(self._run_id, resource_id, "coverage:visible_text"),
+                run_id=self._run_id,
+                resource_id=resource_id,
+                gap_type=GapType.VISIBLE_TEXT_NOT_EXTRACTED,
+                status=EntityStatus.PARTIAL,
+                reason=reason[:500],
+                evidence_ids=list(evidence_ids),
+                retry_eligible=False,
+            )
+        )
+        reasons.append(f"visible_text_not_extracted:lines={len(missing)}:words={words}")
+        return status if _worse(status, EntityStatus.PARTIAL) else EntityStatus.PARTIAL
 
     # -- exploration ------------------------------------------------------------
 
@@ -371,6 +412,8 @@ class RenderWorker:
                 state_id=f"{self._run_id}|state:{st.index}",
             )
             blocks, _ = reconcile_source_vs_rendered([], extracted.blocks, st.inner_text)
+            if st.frame_path == "main":
+                self._snapshots.append((st.inner_text, blocks))
             n = 0
             for b in blocks:
                 # Only text actually visible in this state counts; content still collapsed
@@ -545,6 +588,81 @@ def _worse(a: EntityStatus, b: EntityStatus) -> bool:
     """True when status `a` is further from verified than `b`."""
     rank = {s: i for i, s in enumerate(_SEVERITY)}
     return rank.get(a, 0) > rank.get(b, 0)
+
+
+# Layers whose blocks account for text the browser shows. HIDDEN, SOURCE_ONLY,
+# METADATA and HIDDEN_REVISION do not: a visible line found only there was lost.
+_COVERING_LAYERS = frozenset(
+    {
+        ContentLayer.RENDERED_VISIBLE,
+        ContentLayer.COLLAPSED_PUBLISHED,
+        ContentLayer.ACCESSIBILITY_ONLY,
+        ContentLayer.THIRD_PARTY_CHROME,
+        ContentLayer.UGC,
+        ContentLayer.ICON_ARTIFACT,
+        ContentLayer.PAYWALLED_IN_SOURCE,
+        ContentLayer.UNCERTAIN,
+        ContentLayer.DESIGN_EVIDENCE,
+    }
+)
+COVERAGE_MIN_LINE_WORDS = 3
+COVERAGE_MIN_MISSING_WORDS = 4
+_WORD = re.compile(r"\w+")
+
+
+def _squash(text: str) -> str:
+    return "".join(match_key(text.replace("~~", "")).split())
+
+
+def _flow(blocks: list[ContentBlock]) -> str:
+    """The snapshot's captured text in reading order, as one squashed string.
+
+    Attribute text (aria-label, alt: ACCESSIBILITY_ONLY) is left out of the flow:
+    it is not on screen and would sit between a paragraph and its link text.
+    """
+    ordered = sorted(
+        (
+            b
+            for b in blocks
+            if b.layer in _COVERING_LAYERS and b.layer is not ContentLayer.ACCESSIBILITY_ONLY
+        ),
+        key=lambda b: b.reading_order,
+    )
+    return _squash("".join(b.normalized_text for b in ordered))
+
+
+def missing_visible_lines(snapshots: list[tuple[str, list[ContentBlock]]]) -> list[str]:
+    """Lines of visible text (3+ words) that the extraction does not account for.
+
+    Each snapshot's text (the base render, each explored state) is compared with
+    that snapshot's own full extraction, without whitespace, case or footnote and
+    strike marks, so a line split across blocks ("Posted :" + "March 1, 2023")
+    is covered. A line is also covered by any single captured block of any
+    snapshot. Hidden, source-only and metadata blocks never cover a line.
+    """
+    flows = [_flow(blocks) for _, blocks in snapshots]
+    singles = {
+        _squash(b.normalized_text)
+        for _, blocks in snapshots
+        for b in blocks
+        if b.layer in _COVERING_LAYERS and b.normalized_text
+    }
+    everything = "\u0000".join(flows)
+    missing: list[str] = []
+    seen: set[str] = set()
+    for (text, _), own in zip(snapshots, flows, strict=True):
+        for raw in text.splitlines():
+            line = " ".join(raw.split())
+            if len(_WORD.findall(line)) < COVERAGE_MIN_LINE_WORDS:
+                continue
+            key = _squash(line)
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            if key in own or key in singles or key in everything:
+                continue
+            missing.append(line)
+    return missing
 
 
 def _key(text: str) -> str:

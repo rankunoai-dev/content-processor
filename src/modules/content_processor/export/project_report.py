@@ -108,6 +108,7 @@ _GAP_WORDS = {
     GapType.VOLATILE: "the page kept changing while it was read",
     GapType.SOFT_REDIRECT_SUSPECTED: "possibly redirected to another page",
     GapType.SOFT_404_SUSPECTED: "looks like a 'page not found'",
+    GapType.VISIBLE_TEXT_NOT_EXTRACTED: "text shown on the page was not captured",
 }
 
 _NOTES: list[tuple[str, str]] = [
@@ -232,6 +233,8 @@ def completeness(record: UrlRecord, text: str, confirmed_pct: float | None) -> s
         placeholder = "lorem ipsum" in text.lower()
         return "Placeholder page (Lorem ipsum)" if placeholder else "Placeholder or reduced page"
     gaps: list[str] = _unopened(record)
+    if GapType.VISIBLE_TEXT_NOT_EXTRACTED in types:
+        gaps.append("text shown on the page was not captured")
     if GapType.UNSUPPORTED_FORMAT in types:
         gaps.append("text in a file or image could not be read")
     if GapType.LIMIT_HIT in types:

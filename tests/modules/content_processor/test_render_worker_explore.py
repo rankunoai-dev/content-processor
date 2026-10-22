@@ -319,3 +319,20 @@ async def test_explorer_gets_the_page_time_that_is_left(tmp_path: Path):
     await worker.run_until_idle(idle_polls=1, poll_s=0, max_wait_s=0)
     assert explorer.time_left_s is not None
     assert 130.0 < explorer.time_left_s <= 135.0  # 150 s cap minus the 15 s margin
+
+
+async def test_text_shown_but_not_extracted_means_not_fully_captured(tmp_path: Path):
+    """The browser shows a line the extraction does not have: the page is PARTIAL."""
+    shown = _state().model_copy(
+        update={"inner_text": STATE_TEXT + "\nClosed-end funds release earnings data today"}
+    )
+    exploration = ExplorationResult(states=[shown], actions_used=1, action_budget=50)
+    ledger, res = await _run(tmp_path, exploration, ["expand_disclosure", "select_tab"])
+    assert res.status is EntityStatus.PARTIAL
+    assert "visible_text_not_extracted:lines=1" in (res.status_reason or "")
+    (gap,) = [
+        g
+        for g in ledger.get_gaps(res.resource_id)
+        if g.gap_type.value == "VISIBLE_TEXT_NOT_EXTRACTED"
+    ]
+    assert "Closed-end funds release earnings data today" in gap.reason

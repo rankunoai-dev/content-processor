@@ -85,6 +85,7 @@ _ACTIONS: tuple[tuple[GapType, str], ...] = (
     (GapType.SOFT_404_SUSPECTED, "confirm whether the page exists"),
     (GapType.SOFT_REDIRECT_SUSPECTED, "confirm the page is not a redirect to a generic page"),
     (GapType.UNVISITED_STATE, "review the unexplored states"),
+    (GapType.VISIBLE_TEXT_NOT_EXTRACTED, "compare the page with the captured text"),
     (GapType.DISCOVERY_OPEN, "review the unexplored states"),
     (GapType.FIDELITY_DISAGREEMENT, "compare source and rendered text"),
     (GapType.LOW_CONFIDENCE, "spot-check the extracted text"),
