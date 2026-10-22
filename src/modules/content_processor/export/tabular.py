@@ -60,6 +60,10 @@ class Table:
     name: str
     columns: list[str]
     rows: list[dict[str, Cell]] = field(default_factory=list)
+    wrap_columns: frozenset[str] = frozenset()
+    """XLSX only: cells of these columns wrap text, so line breaks show in Excel."""
+    widths: Mapping[str, float] = field(default_factory=dict)
+    """XLSX only: column widths in characters."""
 
 
 def utf16_len(text: str) -> int:
@@ -231,16 +235,26 @@ class _Sheet:
         rows.append(f'<row r="1">{header}</row>')
         for r, row in enumerate(table.rows, start=2):
             cells = "".join(
-                self.cell(f"{_column_letter(i)}{r}", row.get(name))
+                self.cell(
+                    f"{_column_letter(i)}{r}",
+                    row.get(name),
+                    style=_WRAP_STYLE if name in table.wrap_columns else 0,
+                )
                 for i, name in enumerate(table.columns)
             )
             rows.append(f'<row r="{r}">{cells}</row>')
+        cols = "".join(
+            f'<col min="{i + 1}" max="{i + 1}" width="{table.widths[name]}" customWidth="1"/>'
+            for i, name in enumerate(table.columns)
+            if name in table.widths
+        )
         return (
             '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
             '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
             '<sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" '
             'activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>'
-            f"<sheetData>{''.join(rows)}</sheetData></worksheet>"
+            + (f"<cols>{cols}</cols>" if cols else "")
+            + f"<sheetData>{''.join(rows)}</sheetData></worksheet>"
         )
 
 
@@ -262,6 +276,8 @@ _ROOT_RELS = (
     'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" '
     'Target="xl/workbook.xml"/></Relationships>'
 )
+_WRAP_STYLE = 2
+
 _STYLES = (
     '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
     '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
@@ -271,8 +287,10 @@ _STYLES = (
     '<fill><patternFill patternType="gray125"/></fill></fills>'
     '<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>'
     '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'
-    '<cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>'
-    '<xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/></cellXfs>'
+    '<cellXfs count="3"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>'
+    '<xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/>'
+    '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyAlignment="1">'
+    '<alignment wrapText="1" vertical="top"/></xf></cellXfs>'
     '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>'
     "</styleSheet>"
 )

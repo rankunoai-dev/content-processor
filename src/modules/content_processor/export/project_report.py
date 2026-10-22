@@ -34,7 +34,9 @@ __all__ = [
     "DEFAULT_MIN_MATCH_PCT",
     "PAGES_COLUMNS",
     "MATCH_COLUMNS",
+    "completeness",
     "match_rows",
+    "page_confidence",
     "page_rows",
     "project_report_tables",
 ]
@@ -46,12 +48,34 @@ PAGES_COLUMNS = [
     "URL",
     "Content",
     "Fully extracted",
-    "Extracted %",
-    "Confidence %",
+    "Extraction completeness",
+    "Confidence",
+    "Confirmed text %",
+    "Reading confidence %",
     "Words",
     "Status",
     "What is missing",
 ]
+HIGH, MEDIUM, LOW, NOT_RATED = "High", "Medium", "Low", "Not rated"
+_PLACEHOLDER_WORDS = ("lorem ipsum",)
+# Plain names of the controls the explorer can leave unopened.
+_CONTROL_WORDS = {
+    "tab": ("tab", "tabs"),
+    "accordion": ("section", "sections"),
+    "disclosure": ("section", "sections"),
+    "find_reveal": ("hidden section", "hidden sections"),
+    "dialog": ("pop-up", "pop-ups"),
+    "hover": ("hover menu", "hover menus"),
+    "menu": ("menu", "menus"),
+    "carousel": ("slider", "sliders"),
+    "load_more": ("'load more' button", "'load more' buttons"),
+    "pagination": ("page of results", "pages of results"),
+    "scroll_surface": ("scroll area", "scroll areas"),
+    "frame": ("embedded frame", "embedded frames"),
+    "keyboard": ("focus-only text check", "focus-only text checks"),
+    "consent": ("consent banner", "consent banners"),
+    "shadow_root": ("web component", "web components"),
+}
 MATCH_COLUMNS = ["URL", "Matching URL", "Same content %", "Example of the shared text"]
 
 _STATUS = {
@@ -101,16 +125,31 @@ _NOTES: list[tuple[str, str]] = [
         "robots.txt, a file type not processed); 'Not yet' means still in progress.",
     ),
     (
-        "Pages: Extracted %",
-        "Of the words captured from the page, the share confirmed against what the live page "
-        "shows. Text that was never captured (an unopened tab, an image without readable "
-        "text) cannot be counted here, so a page can show 100% and still not be fully "
-        "extracted: 'What is missing' says why. Empty when the page has no text (an image).",
+        "Pages: Extraction completeness",
+        "In plain words, how complete the extraction is: 'Complete'; 'Incomplete: 1 tab not "
+        "opened (Pricing)'; 'Complete, but the page kept changing' (everything was captured "
+        "and confirmed, but the page changed while it was read); 'Placeholder page (Lorem "
+        "ipsum)'; 'Skipped by rule'; 'Not captured: ...'. It always agrees with Status.",
     ),
     (
-        "Pages: Confidence %",
-        "How sure the engine is that the captured words are read correctly, weighted by "
-        "words: text taken from the page's code is 100%, text read from images (OCR) is lower.",
+        "Pages: Confidence",
+        "How far to trust the page's extraction as a whole. High: fully captured, every word "
+        "confirmed (at least 95%) and read reliably (at least 95%). Medium: everything captured "
+        "but something needs a check (the page kept changing, some text not confirmed, or "
+        "reading confidence 80-95%). Low: incomplete (a tab, section or pop-up not opened, text "
+        "in an image not read), a placeholder page, not captured, or reading or confirmed "
+        "text below 80%. 'Not rated' for skipped pages.",
+    ),
+    (
+        "Pages: Confirmed text %",
+        "Of the words that WERE captured, the share confirmed against what the live page "
+        "shows. It cannot count text that was never captured (an unopened tab), so read it "
+        "together with 'Extraction completeness'. Empty when the page has no text (an image).",
+    ),
+    (
+        "Pages: Reading confidence %",
+        "How reliably the captured words were read, weighted by words: text taken from the "
+        "page's code is 100%, text read from images (OCR) is lower.",
     ),
     ("Pages: What is missing", "In plain words, why the page is not fully extracted."),
     ("Matching content: URL", "Every page with text gets at least one row."),
@@ -152,6 +191,103 @@ def _missing(record: UrlRecord) -> str:
     return "; ".join(reasons)
 
 
+def _unopened(record: UrlRecord) -> list[str]:
+    """'1 tab not opened (Pricing)'-style phrases from the unvisited-control gaps."""
+    by_kind: dict[str, list[str]] = defaultdict(list)
+    for g in record.gaps:
+        if g.gap_type is not GapType.UNVISITED_STATE or not g.reason.startswith("unvisited_"):
+            continue
+        kind, _, rest = g.reason[len("unvisited_") :].partition(":")
+        label = rest.rpartition(":")[2].strip()
+        by_kind[kind].append(label)
+    phrases = []
+    for kind, labels in by_kind.items():
+        one, many = _CONTROL_WORDS.get(kind, ("part of the page", "parts of the page"))
+        names = [x for x in dict.fromkeys(labels) if x]
+        shown = f" ({', '.join(names[:3])}{', ...' if len(names) > 3 else ''})" if names else ""
+        phrases.append(f"{len(labels)} {one if len(labels) == 1 else many} not opened{shown}")
+    return phrases
+
+
+def _is_placeholder(record: UrlRecord, text: str) -> bool:
+    placeholder_gap = any(
+        g.gap_type is GapType.DEGRADED_VARIANT and "placeholder" in g.reason for g in record.gaps
+    )
+    return placeholder_gap or any(w in text.lower() for w in _PLACEHOLDER_WORDS)
+
+
+def completeness(record: UrlRecord, text: str, confirmed_pct: float | None) -> str:
+    """One plain statement of how complete the extraction is; never contradicts the status."""
+    badge = record.badge
+    if badge is UrlBadge.EXCLUDED:
+        return "Skipped by rule"
+    if badge is UrlBadge.RUNNING:
+        return "Not processed yet"
+    if badge is UrlBadge.BLOCKED:
+        return "Not captured: the website blocked access"
+    if badge is UrlBadge.FAILED:
+        return "Not captured: the page did not load"
+    types = {g.gap_type for g in record.gaps}
+    if _is_placeholder(record, text) and badge is not UrlBadge.VERIFIED_WITHIN_SCOPE:
+        placeholder = "lorem ipsum" in text.lower()
+        return "Placeholder page (Lorem ipsum)" if placeholder else "Placeholder or reduced page"
+    gaps: list[str] = _unopened(record)
+    if GapType.UNSUPPORTED_FORMAT in types:
+        gaps.append("text in a file or image could not be read")
+    if GapType.LIMIT_HIT in types:
+        gaps.append("cut off at a size or time limit")
+    if types & {GapType.ACCESS_BLOCKED, GapType.ACQUISITION_FAILED}:
+        gaps.append("an embedded part could not be loaded")
+    if GapType.BUDGET_STOPPED in types:
+        gaps.append("the run stopped at its limit")
+    if not gaps and GapType.DISCOVERY_OPEN in types:
+        gaps.append("some parts of the page were not opened")
+    if gaps:
+        statement = "Incomplete: " + "; ".join(gaps)
+        if GapType.VOLATILE in types:
+            statement += "; the page also kept changing"
+        return statement
+    if badge is UrlBadge.VERIFIED_WITHIN_SCOPE:
+        return "Complete"
+    if GapType.VOLATILE in types:
+        return "Complete, but the page kept changing"
+    if confirmed_pct is not None and confirmed_pct < 100.0:
+        return "Complete, but some text could not be confirmed"
+    if GapType.FIDELITY_DISAGREEMENT in types:
+        return "Complete, but the live page and its source differ"
+    if types & {GapType.SOFT_404_SUSPECTED, GapType.SOFT_REDIRECT_SUSPECTED}:
+        return "Captured, but the page may not be the one requested"
+    if GapType.SHADOW_BLOCK_SUSPECTED in types:
+        return "Captured, but the site may have shown a different page"
+    return "Complete, but needs a check"
+
+
+def page_confidence(
+    record: UrlRecord,
+    completeness_text: str,
+    confirmed_pct: float | None,
+    reading_pct: float | None,
+) -> str:
+    """High / Medium / Low for the whole page; it can never be High when the status is not."""
+    if record.badge in (UrlBadge.EXCLUDED, UrlBadge.RUNNING):
+        return NOT_RATED
+    if (
+        record.badge in (UrlBadge.PARTIAL, UrlBadge.BLOCKED, UrlBadge.FAILED)
+        or completeness_text.startswith(("Incomplete", "Placeholder", "Not captured"))
+        or reading_pct is None
+        or reading_pct < 80.0
+        or (confirmed_pct is not None and confirmed_pct < 80.0)
+    ):
+        return LOW
+    if (
+        record.badge is UrlBadge.VERIFIED_WITHIN_SCOPE
+        and reading_pct >= 95.0
+        and (confirmed_pct is None or confirmed_pct >= 95.0)
+    ):
+        return HIGH
+    return MEDIUM
+
+
 def page_rows(records: Sequence[UrlRecord]) -> list[dict[str, Cell]]:
     """Sheet "Pages": one row per requested URL."""
     rows: list[dict[str, Cell]] = []
@@ -160,13 +296,19 @@ def page_rows(records: Sequence[UrlRecord]) -> list[dict[str, Cell]]:
         total = sum(_words(b) for b in corpus)
         confirmed = sum(_words(b) for b in corpus if b.status is EntityStatus.VERIFIED_EXTRACTED)
         weighted = sum(_words(b) * b.confidence for b in corpus)
+        text = whole_content(record.blocks)
+        confirmed_pct = round(100.0 * confirmed / total, 1) if total else None
+        reading_pct = round(100.0 * weighted / total, 1) if total else None
+        complete = completeness(record, text, confirmed_pct)
         rows.append(
             {
                 "URL": record.requested_url,
-                "Content": whole_content(record.blocks),
+                "Content": text,
                 "Fully extracted": _FULLY.get(record.badge, "No"),
-                "Extracted %": round(100.0 * confirmed / total, 1) if total else None,
-                "Confidence %": round(100.0 * weighted / total, 1) if total else None,
+                "Extraction completeness": complete,
+                "Confidence": page_confidence(record, complete, confirmed_pct, reading_pct),
+                "Confirmed text %": confirmed_pct,
+                "Reading confidence %": reading_pct,
                 "Words": total,
                 "Status": _STATUS.get(record.badge, record.badge.value),
                 "What is missing": _missing(record),
@@ -235,9 +377,21 @@ def project_report_tables(
     """The three sheets of the project report, ready for `write_xlsx`."""
     pages = page_rows(records)
     page_columns = expand_split_column(pages, PAGES_COLUMNS, "Content")
+    content_columns = [c for c in page_columns if c == "Content" or c.startswith("Content_part_")]
     notes: list[dict[str, Cell]] = [{"Column": n, "Meaning": m} for n, m in _NOTES]
     return [
-        Table(name="Pages", columns=page_columns, rows=pages),
+        Table(
+            name="Pages",
+            columns=page_columns,
+            rows=pages,
+            wrap_columns=frozenset(content_columns),
+            widths={
+                "URL": 60,
+                **dict.fromkeys(content_columns, 100),
+                "Extraction completeness": 45,
+                "What is missing": 45,
+            },
+        ),
         Table(
             name="Matching content",
             columns=MATCH_COLUMNS,
