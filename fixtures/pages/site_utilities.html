@@ -1,0 +1,29 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Fund notice</title>
+<style>.menu[hidden]{display:none}</style></head>
+<body>
+<div class="gds-Navigation">
+  <div class="gds-NavigationSignIn">
+    <button type="button" aria-expanded="false" aria-controls="signin-menu">Sign in</button>
+    <div id="signin-menu" class="gds-NavigationSignIn-Menu menu" role="menu" hidden>
+      <a role="menuitem" href="/individual/sign-in">I'm an individual</a>
+      <a role="menuitem" href="/fp/sign-in">I'm a financial professional</a>
+    </div>
+  </div>
+  <div class="gds-NavigationUtilitiesDesktopSelector"><label>Region
+    <select><option selected>United States</option><option>Austria</option><option>Canada</option></select></label></div>
+</div>
+<main><h1>Fund notice</h1>
+<p>The fund declared its monthly distribution of $0.0825 per share.</p>
+<button type="button" aria-expanded="false" aria-controls="faq1">Is the distribution taxable?</button>
+<div id="faq1" hidden><p>Part of the distribution may be a return of capital.</p></div>
+</main>
+<div class="jh-webchat"><div class="jh-webchat-tooltip"><p>Hi, I am the virtual assistant. Need help?</p></div></div>
+<script>
+document.querySelectorAll('[aria-controls]').forEach(function (b) {
+  b.addEventListener('click', function () {
+    var t = document.getElementById(b.getAttribute('aria-controls'));
+    var open = b.getAttribute('aria-expanded') === 'true';
+    b.setAttribute('aria-expanded', String(!open)); t.hidden = open;
+  });
+});
+</script></body></html>

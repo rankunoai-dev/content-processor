@@ -24,6 +24,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import hashlib
+import re
 import time
 from typing import Any, get_args
 from urllib.parse import urlsplit
@@ -140,6 +141,23 @@ THIRD_PARTY_CHROME = (
     ".truste_box_overlay,#usercentrics-root,.qc-cmp2-container,.video-js,.vjs-control-bar,"
     ".vjs-menu,.vjs-modal-dialog,.jwplayer,.plyr,.ytp-chrome-bottom"
 )
+# Site utilities: sign-in and account menus, the utility bar, language, country and
+# region selectors, chat widgets. Opening them reveals no page content, so they are
+# not explored and never count as a gap.
+SITE_UTILITIES = (
+    '[class*="signin" i],[class*="sign-in" i],[class*="login" i],[class*="log-in" i],'
+    '[class*="account-menu" i],[class*="my-account" i],[class*="utilities" i],'
+    '[class*="utility-nav" i],[class*="utility-bar" i],[class*="language-select" i],'
+    '[class*="language-switch" i],[class*="country-select" i],[class*="region-select" i],'
+    '[class*="locale" i],[class*="webchat" i],[class*="web-chat" i],[class*="chatbot" i],'
+    '[class*="livechat" i],[class*="live-chat" i],[class*="virtual-assistant" i],'
+    '[id*="webchat" i],[id*="chatbot" i]'
+)
+_UTILITY_LABEL = re.compile(
+    r"^(sign ?in|log ?in|login|sign ?up|register|my account|account|language|country|region|"
+    r"select (a )?(language|country|region)|chat( with us)?|live chat)$",
+    re.IGNORECASE,
+)
 
 DISCOVER_JS = (
     """
@@ -153,6 +171,9 @@ DISCOVER_JS = (
     .trim().replace(/\\s+/g, ' ').slice(0, 80);
   const CHROME = '"""
     + THIRD_PARTY_CHROME
+    + """';
+  const UTILITIES = '"""
+    + SITE_UTILITIES
     + """';
   const body = document.body;
   if (!body) { return []; }
@@ -174,6 +195,7 @@ DISCOVER_JS = (
       type: (el.getAttribute('type') || '').toLowerCase(),
       inNav: !!el.closest('nav,[role=menubar],[role=navigation],[role=menu]'),
       chrome: !!el.closest(CHROME),
+      utility: !!el.closest(UTILITIES),
       expanded: el.getAttribute('aria-expanded'),
       selected: el.getAttribute('aria-selected'),
       disabled: el.disabled === true || el.getAttribute('aria-disabled') === 'true',
@@ -697,6 +719,9 @@ class StateExplorer:
         real_link = item.get("tag") == "a" and href and not href.startswith(("#", "javascript:"))
         if item.get("chrome"):
             rec.status, rec.reason = "excluded", "third_party_chrome"
+            return
+        if item.get("utility") or _UTILITY_LABEL.match(rec.label.strip()):
+            rec.status, rec.reason = "excluded", "site_utility_control"
             return
         if rec.kind == "accordion" and item.get("inNav"):
             rec.kind = "menu"

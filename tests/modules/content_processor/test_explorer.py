@@ -515,3 +515,14 @@ async def test_captured_state_blocks_match_the_visible_text(renderer, server_url
     visible = match_key(state.inner_text)
     unmatched = [t for t in texts if match_key(t) not in visible]
     assert unmatched == []
+
+
+async def test_site_utilities_are_not_explored_and_are_not_gaps(renderer, server_url):
+    """Sign-in dropdown, country selector and web chat: excluded; the FAQ is opened."""
+    _, ex = await _explore(renderer, f"{server_url}/pages/site_utilities", InteractionPolicy())
+    by_label = {c.label: (c.status, c.reason) for c in ex.controls}
+    assert by_label["Sign in"] == ("excluded", "site_utility_control")
+    assert by_label["Is the distribution taxable?"][0] == "visited"
+    assert "Part of the distribution may be a return of capital." in _texts(ex)
+    assert "I'm a financial professional" not in _texts(ex)
+    assert ex.discovery_closed

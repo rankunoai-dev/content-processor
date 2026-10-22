@@ -25,7 +25,7 @@ _TOKEN_RULES: tuple[tuple[UiRegion, re.Pattern[str]], ...] = (
     (
         UiRegion.CHAT_WIDGET,
         re.compile(
-            r"intercom|drift|hubspot-messages|crisp|tawk|zendesk|livechat|olark|chat-?widget|chatbot",
+            r"intercom|drift|hubspot-messages|crisp|tawk|zendesk|livechat|olark|chat-?widget|chatbot|webchat|web-chat|virtual-?assistant",
             re.I,
         ),
     ),

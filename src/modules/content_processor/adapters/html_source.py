@@ -138,10 +138,21 @@ _ICON_CLASS = re.compile(
 )
 _THIRD_PARTY = re.compile(
     r"intercom|drift-|hubspot-messages|crisp-client|tawk|zendesk|livechat|olark|"
+    r"webchat|web-chat|chatbot|chat-?widget|virtual-?assistant|"
     r"cookie-?banner|cookie-?consent|cc-window|onetrust|osano|cookiebot|gdpr|consent-banner|"
     r"adsbygoogle|ad-slot|google_ads|dfp-|trustpilot|yotpo-|bazaarvoice",
     re.IGNORECASE,
 )
+# First-party site utilities: sign-in and account menus, the utility bar, language,
+# country and region selectors. Their text is site chrome (role "chrome"): kept in
+# the full content after the menus, never in the article text, matching or claims.
+_UTILITY = re.compile(
+    r"sign-?in|log-?in|login|account-?menu|my-?account|navigationutilities|utility-?nav|"
+    r"utility-?bar|language-?(?:selector|switch|picker)|country-?(?:selector|picker)|"
+    r"region-?(?:selector|picker)|locale-?(?:selector|switch|picker)",
+    re.IGNORECASE,
+)
+_FORM_CHOICE_TAGS = frozenset({"select", "option", "optgroup", "datalist"})
 _HIDDEN_STYLE = re.compile(
     r"display\s*:\s*none|visibility\s*:\s*hidden|opacity\s*:\s*0(?![.\d])|"
     r"left\s*:\s*-\d{4,}px|text-indent\s*:\s*-\d{4,}px",
@@ -511,12 +522,19 @@ class _Walker:
             role = "aside"
         elif tag == "header" and parent.role == "unknown":
             role = "chrome"
+        if tag in _FORM_CHOICE_TAGS or _UTILITY.search(
+            f"{attrs.get('id') or ''} {attrs.get('class') or ''}"
+        ):
+            # dropdown choices and site utilities are not page content
+            role = "chrome"
 
         layer = parent.layer
         label = parent.label
         ident = f"{attrs.get('id') or ''} {attrs.get('class') or ''}"
         if layer in (ContentLayer.RENDERED_VISIBLE, ContentLayer.COLLAPSED_PUBLISHED):
-            hidden_attr = attrs.get("hidden")
+            # A bare `hidden` attribute has no value: the parser reports None for it,
+            # so presence is what counts ("" stands for the bare form).
+            hidden_attr = (attrs.get("hidden") or "") if "hidden" in attrs else None
             style = attrs.get("style") or ""
             if attrs.get("data-cp-hidden") == "1":
                 layer, label = ContentLayer.HIDDEN, "computed_hidden"
