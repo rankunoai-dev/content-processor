@@ -154,3 +154,37 @@ async def test_web_component_text_without_its_own_box_is_not_hidden(
     layers = {b.normalized_text: b.layer.value for b in blocks}
     assert layers["Closed-end funds release earnings data"] == "rendered_visible"
     assert layers["October 8, 2026"] == "rendered_visible"
+
+
+async def test_side_by_side_boxes_are_separate_words_and_still_verify(
+    renderer: BrowserRenderer, server_url: str
+):
+    """Inline-block chips and padded links: separate words; a styled word fragment is not."""
+    from src.modules.content_processor.adapters.html_source import extract_html_source
+    from src.modules.content_processor.verify.reconcile import reconcile_source_vs_rendered
+
+    result = await renderer.render(f"{server_url}/pages/inline_boxes")
+    assert result.rendered, result.transport_error
+    blocks = extract_html_source(
+        result.dom_html, base_url=server_url, evidence_id="e", resource_id="r"
+    ).blocks
+    texts = [b.normalized_text for b in blocks]
+    assert "Equity Fixed income Alternatives" in texts
+    assert "Fund A Fund B" in texts
+    assert "The Superman fund pays monthly." in texts
+    # the browser's own text glues the chips; the blocks still verify
+    assert "EquityFixed income" in result.inner_text
+    checked, _ = reconcile_source_vs_rendered([], blocks, result.inner_text)
+    assert all(
+        b.status.value == "VERIFIED_EXTRACTED"
+        for b in checked
+        if b.layer.value == "rendered_visible"
+    )
+
+
+async def test_empty_containers_added_forever_do_not_keep_a_page_unsettled(
+    renderer: BrowserRenderer, server_url: str
+):
+    result = await renderer.render(f"{server_url}/pages/div_churn")
+    assert result.rendered, result.transport_error
+    assert result.settle["stable"] is True, result.settle

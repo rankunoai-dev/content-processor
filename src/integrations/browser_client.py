@@ -105,6 +105,16 @@ ANNOTATE_JS = """
     'list-item', 'flow-root']);
   const root = document.documentElement;
   const docRect = { w: root.scrollWidth, h: root.scrollHeight };
+  const inlineBox = (node, cs) => {
+    if (!(node.textContent || '').trim()) { return false; }
+    if (['inline-block', 'inline-flex', 'inline-grid', 'inline-table'].includes(cs.display)) {
+      return true;
+    }
+    if (cs.display !== 'inline') { return false; }
+    const side = parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight)
+      + parseFloat(cs.marginLeft) + parseFloat(cs.marginRight);
+    return side >= 4;
+  };
   const ownTextLaidOut = (node) => {
     for (const c of node.childNodes) {
       if (c.nodeType !== 3 || !c.nodeValue.trim()) { continue; }
@@ -155,6 +165,10 @@ ANNOTATE_JS = """
     if (inlineTags.has(tag) && blockDisplay.has(cs.display)) {
       el.setAttribute('data-cp-block', '1');
       blocks += 1;
+    } else if (inlineBox(el, cs)) {
+      // Side-by-side boxes (menu links, buttons, chips) read as separate words on
+      // screen even when the markup has no space between them; innerText glues them.
+      el.setAttribute('data-cp-inline-box', '1');
     }
   }
   return { total, hidden, icons, blocks };
@@ -163,16 +177,19 @@ ANNOTATE_JS = """
 
 # B. Only elements that can show text count: tag managers keep injecting <script>,
 #    tracking pixels and the like long after the visible page is final.
+# Settling is judged on the visible text only: its length and a cheap fingerprint, so a
+# same-length change still counts. Elements without text (tag-manager scripts, empty
+# widget containers, tracking pixels) keep being added on live pages long after the
+# text is final and must not keep a page "changing".
 SETTLE_PROBE_JS = """
 () => {
-  const silent = new Set(['SCRIPT', 'STYLE', 'LINK', 'META', 'NOSCRIPT', 'TEMPLATE', 'IMG',
-    'IFRAME', 'SVG', 'PATH', 'SOURCE', 'TRACK', 'BR', 'WBR', 'HEAD', 'TITLE', 'BASE']);
-  let nodes = 0;
-  for (const el of document.getElementsByTagName('*')) {
-    if (!silent.has(el.tagName.toUpperCase())) { nodes += 1; }
+  const text = document.body ? document.body.innerText : '';
+  let hash = 2166136261;
+  for (let i = 0; i < text.length; i += 1) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
   }
-  return { text: document.body ? document.body.innerText.length : 0, nodes,
-           ready: document.readyState };
+  return { text: text.length, hash: hash >>> 0, ready: document.readyState };
 }
 """
 
@@ -538,7 +555,7 @@ class BrowserRenderer:
                 probe = await page.evaluate(SETTLE_PROBE_JS)
             except PlaywrightError:
                 break
-            point = (int(probe.get("text", 0)), int(probe.get("nodes", 0)))
+            point = (int(probe.get("text", 0)), int(probe.get("hash", probe.get("nodes", 0))))
             now = time.perf_counter()
             if series and point == series[-1]:
                 stable_polls += 1

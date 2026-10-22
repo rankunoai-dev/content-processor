@@ -377,6 +377,11 @@ class _Walker:
 
     # -- traversal ------------------------------------------------------------
 
+    def word_break(self, ctx: _Ctx) -> None:
+        """A space in the open block, unless it already ends with whitespace."""
+        if self.buffer and self.buffer_ctx == ctx and not self.buffer[-1][-1:].isspace():
+            self.buffer.append(" ")
+
     def append_text(self, text: str, ctx: _Ctx) -> None:
         """Add inline text to the open block; a change of context starts a new block."""
         if self.buffer_ctx is not None and self.buffer_ctx != ctx and self.buffer:
@@ -502,8 +507,15 @@ class _Walker:
                 self.emit(text.strip(), n, ops, ctx)
             return
         # Inline elements (span, b, a, ...) continue the open block; only block
-        # elements end it, so a sentence with a link is not cut in two.
+        # elements end it, so a sentence with a link is not cut in two. An inline
+        # item drawn as its own box (marked by the browser annotator) is a separate
+        # word: "Home" + "About" side by side must not read "HomeAbout".
+        inline_box = not is_block and attrs.get("data-cp-inline-box") == "1"
+        if inline_box:
+            self.word_break(ctx)
         self.walk(node, ctx, flush_end=is_block)
+        if inline_box:
+            self.word_break(ctx)
         if is_block:
             self.flush()
 

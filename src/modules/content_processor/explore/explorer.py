@@ -119,7 +119,8 @@ _BODY_TEXT = "document.body ? document.body.innerText : ''"
 
 CLEAR_ANNOTATIONS_JS = """
 () => {
-  const marked = '[data-cp-hidden],[data-cp-icon],[data-cp-collapsed],[data-cp-block]';
+  const marked = '[data-cp-hidden],[data-cp-icon],[data-cp-collapsed],[data-cp-block],'
+    + '[data-cp-inline-box]';
   const found = [];
   const collect = (root) => {
     found.push(...root.querySelectorAll(marked));
@@ -131,6 +132,7 @@ CLEAR_ANNOTATIONS_JS = """
     el.removeAttribute('data-cp-icon');
     el.removeAttribute('data-cp-collapsed');
     el.removeAttribute('data-cp-block');
+    el.removeAttribute('data-cp-inline-box');
   }
 }
 """
@@ -850,7 +852,7 @@ class StateExplorer:
                 probe = await page.evaluate(SETTLE_PROBE_JS)
             except PlaywrightError:
                 return
-            point = (int(probe.get("text", 0)), int(probe.get("nodes", 0)))
+            point = (int(probe.get("text", 0)), int(probe.get("hash", probe.get("nodes", 0))))
             if point == previous:
                 stable += 1
                 if stable >= 2:

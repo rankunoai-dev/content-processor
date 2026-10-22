@@ -64,6 +64,7 @@ def reconcile_source_vs_rendered(
         The rendered blocks with statuses set, and the reconciliation summary.
     """
     haystack = _norm(inner_text)
+    squashed = "".join(haystack.split())
     source_visible = [b for b in source_blocks if b.layer in _VISIBLE]
     rendered_visible = [b for b in rendered_blocks if b.layer in _VISIBLE]
     source_keys = {b.block_key for b in source_visible}
@@ -84,7 +85,7 @@ def reconcile_source_vs_rendered(
             collapsed_pending += 1
         elif block.layer is ContentLayer.RENDERED_VISIBLE:
             needle = _norm(block.normalized_text)
-            if needle and needle in haystack:
+            if needle and (needle in haystack or "".join(needle.split()) in squashed):
                 copy.status = EntityStatus.VERIFIED_EXTRACTED
                 verified_ids.append(copy.block_id)
             else:
