@@ -115,6 +115,26 @@ ANNOTATE_JS = """
       + parseFloat(cs.marginLeft) + parseFloat(cs.marginRight);
     return side >= 4;
   };
+  // A wide table or a sideways list inside a box with its own scroll bar (overflow
+  // auto or scroll) runs past the page edge, yet a reader reaches it by scrolling that
+  // box: it is on the page, not hidden (live John Hancock earnings tables, whose last
+  // column starts past the page width). Text parked before the box's start (left:
+  // -9999px) cannot be scrolled to and stays hidden.
+  const scrollableInto = (node, rect) => {
+    const outX = rect.right < 0 || rect.left > docRect.w;
+    const outY = rect.bottom < 0 || rect.top > docRect.h;
+    for (let a = node.parentElement; a && a !== document.body; a = a.parentElement) {
+      const s = window.getComputedStyle(a);
+      const sx = /auto|scroll/.test(s.overflowX), sy = /auto|scroll/.test(s.overflowY);
+      if (!sx && !sy) { continue; }
+      const box = a.getBoundingClientRect();
+      const left = box.left - a.scrollLeft, top = box.top - a.scrollTop;
+      const inX = rect.left < left + a.scrollWidth && rect.right > left;
+      const inY = rect.top < top + a.scrollHeight && rect.bottom > top;
+      if ((!outX || (sx && inX)) && (!outY || (sy && inY))) { return true; }
+    }
+    return false;
+  };
   const ownTextLaidOut = (node) => {
     for (const c of node.childNodes) {
       if (c.nodeType !== 3 || !c.nodeValue.trim()) { continue; }
@@ -142,7 +162,7 @@ ANNOTATE_JS = """
     const hasBox = rect.width > 0 && rect.height > 0;
     const outside = rect.right < 0 || rect.bottom < 0
       || rect.left > docRect.w || rect.top > docRect.h;
-    const offscreen = hasBox && outside;
+    const offscreen = hasBox && outside && !scrollableInto(el, rect);
     const voidTags = ['br', 'wbr', 'area', 'map', 'col', 'colgroup'];
     // A box-less element with text is hidden only when none of its own text is laid
     // out: a web component host (display: contents, or text drawn through a shadow

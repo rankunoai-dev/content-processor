@@ -188,3 +188,21 @@ async def test_empty_containers_added_forever_do_not_keep_a_page_unsettled(
     result = await renderer.render(f"{server_url}/pages/div_churn")
     assert result.rendered, result.transport_error
     assert result.settle["stable"] is True, result.settle
+
+
+async def test_table_columns_reached_by_scrolling_their_box_are_not_hidden(
+    renderer: BrowserRenderer, server_url: str
+):
+    """Live John Hancock earnings tables: the last column starts past the page width."""
+    result = await renderer.render(f"{server_url}/pages/scroll_table")
+    assert result.rendered, result.transport_error
+    blocks = extract_html_source(
+        result.dom_html, base_url=server_url, evidence_id="e", resource_id="r"
+    ).blocks
+    layers = {b.normalized_text: b.layer.value for b in blocks}
+    assert layers["Total Net Assets"] == "rendered_visible"
+    assert layers["$482,094,881"] == "rendered_visible"
+    # text parked off the page and slides clipped by an overflow:hidden track stay hidden
+    assert layers["Screen reader note about the table"] != "rendered_visible"
+    assert layers["Fourth slide far out of view"] != "rendered_visible"
+    assert layers["First slide on show"] == "rendered_visible"

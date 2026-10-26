@@ -1,6 +1,6 @@
 # Content Processor: A Plain-Language Guide
 
-Last updated: 22 October 2026 · Code version: main after paid access with approvals and spending limits, and the project report's completeness and confidence columns · Maintained by every session that adds a significant feature (see "Keeping this guide current" at the end)
+Last updated: 26 October 2026 · Code version: main after the visible-text coverage check, matching pairs listed once, columns in sideways-scrolling tables and spaced-out browser retries · Maintained by every session that adds a significant feature (see "Keeping this guide current" at the end)
 
 ## 1. What this is, in one paragraph
 
@@ -84,6 +84,8 @@ Evidence is stored compactly. Web pages carry the same fonts and style sheets on
 
 The engine reads the page's HTML and splits it into blocks (headings, paragraphs, tables), and labels each block by layer: visible content, hidden text, navigation and footer, third-party widgets such as chat boxes, icon codes, and so on. Hidden and decorative text is kept but never mixed into the main content.
 
+Site tools that are not content (sign-in menus, country pickers, search boxes, chat bubbles) are labelled as page furniture and left out of the main text. Words that sit side by side on screen as separate boxes (menu links, buttons, labels) are kept as separate words, never glued together. A wide table inside a box you scroll sideways is read in full: a column you reach by scrolling is on the page, not hidden.
+
 Crossed-out text is kept and marked. A sale price shown as a struck-out "$200" next to "$150" is recorded as "Price ~~$200~~ $150", so a reader can see which price is current; the contradiction report never treats the crossed-out price as something the page still claims.
 
 ### Step 6: Opening the page in a real browser and exploring it
@@ -96,6 +98,8 @@ Many modern pages only show their content after the browser runs them, and much 
 - background tracking and "bot sensor" messages are blocked.
 
 The engine then compares what the browser shows with what the raw HTML contained, so content that appears only after loading, or disappears, is noticed.
+
+If the browser cannot open a page (for example it does not load within 30 seconds because the network or the website is slow), the engine tries again by itself: after 30 seconds, then 90 seconds, then 3 minutes, four tries in all. A slow spell usually lasts minutes, so tries a few seconds apart would all fail together. A page that still cannot be opened keeps the text read from its HTML and is marked "partly captured", never dropped.
 
 ### Step 7: Documents and images
 
@@ -110,6 +114,7 @@ Before giving a verdict, the engine runs a set of checks on each page. Each chec
 | Inventory (R1) | Was everything discovered on the page accounted for? |
 | Access (R2) | Was the page (and its parts) actually obtained, or blocked or failed? |
 | Frames (R3) | Were embedded frames inside the page also read? |
+| Visible-text coverage | Is every line of text the browser shows on the page also in what was extracted? If not, the page is marked "partly captured" and the missing lines are quoted. |
 | Visual text (R6) | Does every line of text visible on the screenshot appear in what was extracted? |
 | Channel agreement (R7) | Do the raw page and the browser agree? Is the text disguised with scrambled fonts? |
 | PDF images (R8) | Were images inside PDFs read, and does the OCR agree with the PDF's own text? |
@@ -133,7 +138,7 @@ At the end of a run the engine writes a bundle of files. Every file name starts 
 
 | File | What you use it for |
 |---|---|
-| Project report (Excel) | The one workbook most people need. Sheet "Pages": every address with its whole text (line breaks shown), whether it was fully extracted (Yes/No), a plain "Extraction completeness" statement ("Complete", "Incomplete: 1 tab not opened (Pricing)", "Complete, but the page kept changing", "Placeholder page (Lorem ipsum)"), an overall Confidence of High, Medium or Low that can only be High when the page is fully captured, the share of the captured text confirmed against the live page, how reliably it was read (text from the page's code is 100%, text read from images lower), and what is missing. Sheet "Matching content": for every address, the other addresses that carry the same text and what share of it, one row each, by exact word-for-word matching (menus, headers and footers left out). The share is one-directional: a short page can be 100% inside a long page while the long page is only 20% inside the short one. Sheet "How to read" explains every column. |
+| Project report (Excel) | The one workbook most people need. Sheet "Pages": every address with its whole text (line breaks shown), whether it was fully extracted (Yes/No), a plain "Extraction completeness" statement ("Complete", "Incomplete: 1 tab not opened (Pricing)", "Complete, but the page kept changing", "Placeholder page (Lorem ipsum)"), an overall Confidence of High, Medium or Low that can only be High when the page is fully captured, the share of the captured text confirmed against the live page, how reliably it was read (text from the page's code is 100%, text read from images lower), and what is missing. Sheet "Matching content": every pair of addresses that carry the same text, listed once (A with B is never repeated as B with A), by exact word-for-word matching (menus, headers and footers left out), with two percentages: how much of the first page's text is on the second, and how much of the second's is on the first. They differ when the pages differ in length: a short page can be 100% inside a long page while the long page is only 20% inside the short one. To see every match of one page, look for it in both address columns. Very long page text that does not fit in one Excel cell continues in extra "Content_part_2", "Content_part_3" columns; "Content_parts" says how many cells the text uses and "Content_split" says whether it was split (normally 1 and FALSE). Sheet "How to read" explains every column. |
 | R1 URL content (Excel, CSV) | One row per address: verdict, word count, gaps, and the whole extracted text. Long text is split across columns so Excel never cuts it off. |
 | Review queue (Excel, CSV) | The pages that need a human decision, most serious first, with a blank column for the reviewer. |
 | R2 overlap (Excel, CSV) | Groups of pages that share the same text (duplicate or near-duplicate content), with the shared passages quoted. |
@@ -159,6 +164,7 @@ Reviewers can record decisions directly in the app: for each possible contradict
 
 | Test | Result |
 |---|---|
+| Live John Hancock website, 303 pages (26 October 2026) | 279 of 303 VERIFIED_WITHIN_SCOPE at $0, run in 13 batches with unfinished pages re-run automatically. Of the rest: 15 earnings pages missed the last column of a sideways-scrolling table (found by the new coverage check, fixed the same day), 3 pages did not open in the browser during a slow spell (now retried automatically over several minutes), 4 were flagged because cookie-banner and chat-bubble text read from the screenshot was not part of the page's content, and 2 are placeholder pages. |
 | Live John Hancock website, 34 pages (21 October 2026) | 32 of 34 pages VERIFIED_WITHIN_SCOPE at $0 with every check switched on (stricter than on 19 October: text reading, missing-text and leak checks). The other 2 are correctly flagged NEEDS_REVIEW: their live content is "Lorem ipsum" placeholder text. Reached by opening FAQ sections built as web components, matching text the way the browser shows it, and not letting a brief network hiccup pause the whole site. |
 | Live John Hancock website, 34 pages (19 October 2026) | 32 of 34 pages VERIFIED_WITHIN_SCOPE at $0 with the checks available that day. The other 2 correctly flagged NEEDS_REVIEW because the live pages contain "Lorem ipsum" placeholder text. Before the browser-exploration work, all 34 were PARTIAL. |
 | Same website, re-run with the stricter checks and OCR (20 October 2026) | 3 of 34 VERIFIED. This is the more honest number: the new channel-agreement check found text that exists in the page code but was not captured from the browser on 21 pages (frequently-asked-question answers on the form pages, half of one press release), so those pages were less complete than the earlier run suggested. On 8 pages a text-joining fault introduced on 20 October glues words together; it is being fixed. 2 pages still contain placeholder text. |
@@ -197,6 +203,9 @@ Reviewers can record decisions directly in the app: for each possible contradict
 
 | Date | Significant change |
 |---|---|
+| 2026-10-26 | Columns of wide tables that you scroll sideways are captured (they were wrongly treated as hidden). A page the browser cannot open is retried by itself over about five minutes instead of a few seconds. Live John Hancock, 303 pages: 279 verified. |
+| 2026-10-26 | Project report: each pair of matching pages is listed once, with the shared share in both directions. |
+| 2026-10-24 | New check that every line of text the browser shows was extracted. Web components no longer mistaken for hidden text; a duplicate copy of text never replaces the visible one; site tools (sign-in, country picker, chat) kept out of the content; words in side-by-side boxes no longer glued; a page is judged settled by its text, not by background elements. |
 | 2026-10-22 | Paid access (Bright Data) built but off by default: one approval per website with a spending cap, checked before every paid request, with a spending log. |
 | 2026-10-21 | Reviewers save decisions in the web app (with name, time and full history); the next report carries them forward. |
 | 2026-10-21 | Live John Hancock: 32 of 34 verified again with all checks on (the 2 others are placeholder pages). FAQ sections built as web components are now opened, text is matched the way the browser shows it, and a brief network hiccup no longer pauses a whole website. |

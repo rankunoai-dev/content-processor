@@ -52,6 +52,12 @@ __all__ = ["Explorer", "RenderWorker", "Renderer"]
 
 _logger = get_logger("content_processor.render_worker")
 _HOOK_MARGIN_S = 15.0
+# Waits before the 2nd, 3rd and 4th try of a page whose render failed (a load that
+# timed out, a dropped connection). A slow spell on the network or the site usually
+# lasts minutes, so retries a few seconds apart all fail together; these spread the
+# tries over about five minutes, inside the run's default 300 s wait for queued work.
+RENDER_RETRY_DELAYS_S: tuple[float, ...] = (30.0, 90.0, 180.0)
+RENDER_MAX_ATTEMPTS = len(RENDER_RETRY_DELAYS_S) + 1
 
 
 class Renderer(Protocol):
@@ -95,6 +101,7 @@ class RenderWorker:
         worker_id: str,
         explorer_factory: Callable[[InteractionPolicy], Explorer] | None = None,
         asset_store_for: Callable[[str], AssetStore | None] | None = None,
+        render_retry_delays_s: tuple[float, ...] = RENDER_RETRY_DELAYS_S,
     ) -> None:
         """Bind the worker to one run.
 
@@ -112,6 +119,7 @@ class RenderWorker:
         # (visible text, full extraction) of the base render and each explored state
         self._snapshots: list[tuple[str, list[ContentBlock]]] = []
         self._asset_store_for = asset_store_for
+        self._retry_delays = render_retry_delays_s
 
     async def run_until_idle(
         self,
@@ -193,12 +201,17 @@ class RenderWorker:
         if not result.rendered:
             action = host_state.record_transient_failure()
             self._ledger.save_host_state(tenant, host_state)
+            not_before = action.not_before
+            if self._retry_delays:
+                wait = self._retry_delays[min(max(task.attempts, 1), len(self._retry_delays)) - 1]
+                later = datetime.now(UTC) + timedelta(seconds=wait)
+                not_before = later if not_before is None else max(not_before, later)
             state = self._ledger.fail(
                 task.id or 0,
                 self._worker_id,
                 f"render:{result.transport_error}",
                 retry=True,
-                not_before=action.not_before,
+                not_before=not_before,
             )
             if state is not None and state.value == "FAILED":
                 self._set_status(

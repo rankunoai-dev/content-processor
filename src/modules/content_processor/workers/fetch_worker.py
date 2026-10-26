@@ -76,6 +76,7 @@ from src.modules.content_processor.scope.followups import (
 from src.modules.content_processor.scope.normalize import InvalidInputUrl, normalize_url
 from src.modules.content_processor.verify.gaps import gap_for_gate, gap_id_for
 from src.modules.content_processor.workers.ports import LedgerPort, RobotsCache
+from src.modules.content_processor.workers.render_worker import RENDER_MAX_ATTEMPTS
 
 __all__ = ["FetchWorker", "extraction_kind_for", "user_agent_for"]
 
@@ -490,7 +491,7 @@ class FetchWorker:
             idempotency_key=task_key(self._run_id, TaskKind.RENDER, resource.schedule_key),
             host=task.host,
             priority=task.priority,
-            max_attempts=2,
+            max_attempts=RENDER_MAX_ATTEMPTS,
             payload={
                 "resource_id": resource.resource_id,
                 "requested_url": result.final_url,

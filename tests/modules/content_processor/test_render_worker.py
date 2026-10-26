@@ -20,7 +20,10 @@ from src.modules.content_processor.enums import (
     TaskState,
 )
 from src.modules.content_processor.ledger.memory import MemoryLedger
-from src.modules.content_processor.workers.render_worker import RenderWorker
+from src.modules.content_processor.workers.render_worker import (
+    RENDER_MAX_ATTEMPTS,
+    RenderWorker,
+)
 
 HOST = "testserver"
 SOURCE_HTML = (
@@ -201,12 +204,49 @@ async def test_render_failure_retries_then_partial(tmp_path: Path):
         scope=_scope(),
         run_id="run-t",
         worker_id="r1",
+        render_retry_delays_s=(),
     )
     await worker.run_until_idle(idle_polls=1, poll_s=0.01, max_wait_s=30)
     assert ledger.task_counts() == {"FAILED": 1}
     updated = ledger.get_resource(res.resource_id)
     assert updated is not None and updated.status is EntityStatus.PARTIAL
     assert updated.status_reason == "render_failed:render_timeout"
+
+
+async def test_a_failed_render_is_retried_minutes_later_not_seconds(tmp_path: Path):
+    """A slow spell lasts minutes: each retry waits longer (30 s, 90 s, 180 s)."""
+    ledger = MemoryLedger(base_delay_s=0)
+    _seed(ledger)
+    stored = next(iter(ledger._tasks.values()))
+    stored.max_attempts = RENDER_MAX_ATTEMPTS
+    failing = RenderResult(
+        requested_url="http://testserver/app",
+        final_url="http://testserver/app",
+        transport_error="PlaywrightError:Page.goto: Timeout 30000ms exceeded.",
+    )
+    worker = RenderWorker(
+        ledger=ledger,
+        renderer=FakeRenderer(failing),
+        evidence=LocalEvidenceStore(tmp_path, "t1"),
+        scope=_scope(),
+        run_id="run-t",
+        worker_id="r1",
+    )
+    waits = []
+    for _ in range(RENDER_MAX_ATTEMPTS):
+        task = ledger.lease("r1", [TaskKind.RENDER], run_id="run-t")
+        assert task is not None
+        before = datetime.now(UTC)
+        await worker.process(task)
+        stored = ledger._tasks[task.id or 0]
+        if stored.state.value == "FAILED":
+            break
+        assert stored.not_before is not None
+        waits.append(round((stored.not_before - before).total_seconds()))
+        stored.not_before = None  # let the next try be leased now
+    assert waits == [30, 90, 180]
+    # the 4th try fails too: the page is left partial, never dropped
+    assert ledger.task_counts() == {"FAILED": 1}
 
 
 async def test_missing_resource_fails_terminally(tmp_path: Path):
