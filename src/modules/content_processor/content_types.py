@@ -5,8 +5,8 @@ maps to the media types the scope filters on (`RunScope.allowed_mime_families`)
 and carries an honest status:
 
 - `supported`: the engine extracts it (text, tables, or OCR text).
-- `not_supported`: found files are counted as excluded with the reason in
-  `note`, so the report's denominator stays honest.
+- `not_supported`: found files are recorded as not supported, with the reason, so they stay in
+  the report's denominator and are never silently dropped.
 
 Web pages are always read, whatever is selected, because pages are how links to
 the other types are found. Selecting a type limits which linked files are
@@ -108,7 +108,10 @@ CONTENT_TYPES: tuple[ContentType, ...] = (
         ],
         extensions=[".doc", ".xls", ".ppt"],
         status="not_supported",
-        note="Needs LibreOffice, which is not installed. Found files are counted as excluded.",
+        note=(
+            "Needs LibreOffice, which is not installed. Found files are recorded as not "
+            "supported, with the reason."
+        ),
     ),
     ContentType(
         id="csv",
@@ -116,7 +119,7 @@ CONTENT_TYPES: tuple[ContentType, ...] = (
         families=["text/csv"],
         extensions=[".csv"],
         status="not_supported",
-        note="Not extracted yet. Found files are counted as excluded.",
+        note="Not extracted yet. Found files are recorded as not supported, with the reason.",
     ),
     ContentType(
         id="archives",
@@ -124,7 +127,10 @@ CONTENT_TYPES: tuple[ContentType, ...] = (
         families=["application/zip"],
         extensions=[".zip"],
         status="not_supported",
-        note="Archive contents are not opened yet. Found files are counted as excluded.",
+        note=(
+            "Archive contents are not opened yet. Found files are recorded as not "
+            "supported, with the reason."
+        ),
     ),
     ContentType(
         id="audio_video",
@@ -134,7 +140,7 @@ CONTENT_TYPES: tuple[ContentType, ...] = (
         status="not_supported",
         note=(
             "Captions, speech and frame reading are not built yet. Found files are "
-            "counted as excluded."
+            "recorded as not supported, with the reason."
         ),
     ),
     ContentType(
@@ -143,7 +149,7 @@ CONTENT_TYPES: tuple[ContentType, ...] = (
         families=["message/rfc822"],
         extensions=[".eml", ".msg"],
         status="not_supported",
-        note="Not extracted yet. Found files are counted as excluded.",
+        note="Not extracted yet. Found files are recorded as not supported, with the reason.",
     ),
 )
 

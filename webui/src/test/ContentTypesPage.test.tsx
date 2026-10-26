@@ -65,7 +65,7 @@ describe('Content types page', () => {
     expect(calls.some((u) => u.pathname.includes('/runs'))).toBe(false);
   });
 
-  it('warns when an unsupported type is selected, and says it will be counted as excluded', async () => {
+  it('warns when an unsupported type is selected, and says it will be recorded as not supported', async () => {
     mockApi({
       '/api/content-types': () => ({ types: TYPES }),
       '/api/content-types/scope': (url) => scopeFor(url.searchParams.get('types')!.split(',')),
@@ -76,7 +76,7 @@ describe('Content types page', () => {
     await userEvent.click(option);
     const alert = await screen.findByRole('alert');
     expect(within(alert).getByText(/not extracted yet/)).toBeInTheDocument();
-    expect(within(alert).getByText(/counted as excluded/)).toBeInTheDocument();
+    expect(within(alert).getByText(/recorded as not supported/)).toBeInTheDocument();
   });
 
   it('clearing the selection asks for at least one type', async () => {

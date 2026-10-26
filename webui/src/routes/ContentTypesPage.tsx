@@ -91,7 +91,7 @@ export default function ContentTypesPage() {
     <>
       <PageHeading
         title="Content types"
-        subtitle="Choose the kinds of files to look for on a site. Web pages are always read, because that is how links to files are found. Selected file types are fetched and extracted; files of types the engine cannot read yet are counted as excluded, not dropped."
+        subtitle="Choose the kinds of files to look for on a site. Web pages are always read, because that is how links to files are found. Selected file types are fetched and extracted; files of types the engine cannot read yet are recorded as not supported, with the reason, not dropped."
       />
       <QueryState
         query={types}
@@ -123,7 +123,7 @@ export default function ContentTypesPage() {
                 type="warning"
                 showIcon
                 message={`${unsupported.length} selected type${unsupported.length === 1 ? '' : 's'} not extracted yet`}
-                description={`${unsupported.map((t) => t.label).join(', ')}. Files of these types will be counted as excluded, with the reason in the report.`}
+                description={`${unsupported.map((t) => t.label).join(', ')}. Files of these types will be recorded as not supported, with the reason in the report.`}
               />
             )}
 
