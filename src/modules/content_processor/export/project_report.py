@@ -80,9 +80,9 @@ _CONTROL_WORDS = {
     "consent": ("consent banner", "consent banners"),
     "shadow_root": ("web component", "web components"),
 }
-A_IN_B = "URL's text found on Matching URL %"
-B_IN_A = "Matching URL's text found on URL %"
-MATCH_COLUMNS = ["URL", "Matching URL", A_IN_B, B_IN_A, "Example of the shared text"]
+A_IN_B = "% of A in B"
+B_IN_A = "% of B in A"
+MATCH_COLUMNS = ["URL (A)", "Matching URL (B)", A_IN_B, B_IN_A, "Example of the shared text"]
 
 _STATUS = {
     UrlBadge.VERIFIED_WITHIN_SCOPE: "Fully captured",
@@ -160,20 +160,21 @@ _NOTES: list[tuple[str, str]] = [
     ),
     ("Pages: What is missing", "In plain words, why the page is not fully extracted."),
     (
-        "Matching content: URL, Matching URL",
+        "Matching content: URL (A), Matching URL (B)",
         "Each pair of pages that share text is listed ONCE (A with B is not repeated as B "
         "with A), under the address that sorts first. To find every match of one page, look "
         f"for it in both columns. '{NO_MATCH}' when a page shares no text with any other.",
     ),
     (
-        "Matching content: URL's text found on Matching URL %",
-        "The share of the first page's text that also appears, word for word, on the second "
-        "page (runs of five words; menus, headers and footers are left out). Exact text "
+        "Matching content: % of A in B",
+        "The share of page A's text that also appears, word for word, on the second "
+        "page B (runs of five words; menus, headers and footers are left out). Exact text "
         "matching only, not meaning.",
     ),
     (
-        "Matching content: Matching URL's text found on URL %",
-        "The same in the other direction. The two differ when the pages differ in length: a "
+        "Matching content: % of B in A",
+        "The same in the other direction, from B to A. The two differ when the pages differ in "
+        "length: a "
         "short page can be 100% inside a long one while the long one is 20% inside the short "
         f"one. A pair is listed when either direction reaches {DEFAULT_MIN_MATCH_PCT:g}%.",
     ),
@@ -371,8 +372,8 @@ def match_rows(
         if not found and i not in in_a_pair:
             rows.append(
                 {
-                    "URL": docs[i].url,
-                    "Matching URL": NO_MATCH,
+                    "URL (A)": docs[i].url,
+                    "Matching URL (B)": NO_MATCH,
                     A_IN_B: None,
                     B_IN_A: None,
                     "Example of the shared text": "",
@@ -382,8 +383,8 @@ def match_rows(
         for first_in_second, second_in_first, j in found:
             rows.append(
                 {
-                    "URL": docs[i].url,
-                    "Matching URL": docs[j].url,
+                    "URL (A)": docs[i].url,
+                    "Matching URL (B)": docs[j].url,
                     A_IN_B: round(first_in_second, 1),
                     B_IN_A: round(second_in_first, 1),
                     "Example of the shared text": " … ".join(

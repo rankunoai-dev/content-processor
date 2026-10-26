@@ -553,3 +553,14 @@ git worktree add ../content-processor-lane4 -b lane/L4-verify
   - 15 earnings pages PARTIAL: the table sits in an `overflow-x:auto` box; its last column ("Total Net Assets") starts past `documentElement.scrollWidth`, so ANNOTATE_JS marked it offscreen/hidden. Content reachable by scrolling an `auto|scroll` ancestor is no longer offscreen; text parked before the box start or clipped by `overflow:hidden` stays hidden. Fixture `scroll_table` + live-browser test (fails on the old annotator).
   - 3 pages PARTIAL `render_failed: Page.goto timeout`: render tasks had `max_attempts=2` with a 2 s backoff. Now `RENDER_MAX_ATTEMPTS=4` with waits of 30/90/180 s (`RENDER_RETRY_DELAYS_S`, inside the default 300 s wait); test asserts the spacing.
 - **Not fixed (reported):** 4 NEEDS_REVIEW are R6 false alarms: OCR read cookie-banner and webchat fragments ("security of our website, improve your ex…", "assistant. Need help") that `_CONSENT_TEXT` does not match line by line. A circuit opened for 15 min still outlasts the 300 s wait; an in-engine second pass for unfinished pages is not built (the chunk driver does it).
+
+## [2026-10-26] Branch fix/tuning-wait-r6-headers: wait default, R6 chat text, report headers
+
+- **Branch / worktree:** `fix/tuning-wait-r6-headers` at `../content-processor-tuning`, from main `2e640d3`.
+- **What landed:**
+  - Default wait for held tasks raised from 60 to 360 seconds (`scheduler/runner.py`), so the render retry schedule (30, 90, 180 s) completes unattended.
+  - R6 visual check: chat-widget invitations ("Live chat", "Chat with an agent") join the consent-banner text the check already ignores. Specific phrases only, so articles that mention chatbots are still judged.
+  - Matching-content sheet headers: "URL (A)", "Matching URL (B)", "% of A in B", "% of B in A".
+- **Gate:** ruff, `mypy --strict` and the full test suite pass; coverage 94.4%.
+- **Not verified:** the four notice pages named in the request were not reproduced offline (the stored run has no chat-widget text and no screenshots of those pages). Re-run them to confirm they now verify.
+- **Note:** the CLI's `--max-wait` default was changed to match. The CLI parser is built inside `main()`, so no test covers that default yet.

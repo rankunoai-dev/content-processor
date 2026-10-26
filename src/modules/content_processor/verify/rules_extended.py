@@ -66,6 +66,13 @@ R6_PREFIX = 4
 _CONSENT_TEXT = re.compile(
     r"cooki|consent|necessar|privacy|preferenc|opt[- ]?out|tracking|advertis", re.IGNORECASE
 )
+# Chat-widget invitations ("Live chat", "Chat with us") are interface text, not page content.
+# Specific phrases only: a bare "chat" would also hide real articles about chat tools.
+_CHAT_TEXT = re.compile(
+    r"live chat|chat (with|now|online)\b|start (a )?chat|chat with (an? )?"
+    r"(agent|representative|advisor|specialist)\b",
+    re.IGNORECASE,
+)
 _A11Y_HINT = re.compile(
     r"^\(?(opens|open|links?) (in|to) (a )?new (tab|window)\)?\.?$", re.IGNORECASE
 )
@@ -188,6 +195,11 @@ def _seen(word: str, vocabulary: set[str], by_prefix: Mapping[str, list[str]]) -
     return False
 
 
+def _is_interface_text(text: str) -> bool:
+    """Consent banners and chat-widget invitations: left out of content by design."""
+    return bool(_CONSENT_TEXT.search(text) or _CHAT_TEXT.search(text))
+
+
 def unmapped_visual_lines(
     regions: Sequence[DetectedRegion], blocks: Sequence[ContentBlock]
 ) -> list[str]:
@@ -207,7 +219,7 @@ def unmapped_visual_lines(
             by_prefix.setdefault(token[:R6_PREFIX], []).append(token)
     unmapped: list[str] = []
     for region in regions:
-        if region.confidence < R6_MIN_LINE_CONFIDENCE or _CONSENT_TEXT.search(region.text):
+        if region.confidence < R6_MIN_LINE_CONFIDENCE or _is_interface_text(region.text):
             continue
         words = [w for w in _tokens(region.text) if len(w) >= 3 and not w.isdigit()]
         if len(words) < R6_MIN_WORDS or len("".join(words)) < R6_MIN_REGION_CHARS:

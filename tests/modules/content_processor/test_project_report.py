@@ -153,13 +153,13 @@ def test_each_pair_is_listed_once_with_both_directions():
     long = record("https://x.example/long", [short_text, words(2, 300)])
     other = record("https://x.example/other", [words(3, 120)])
     rows = match_rows([short, long, other])
-    pairs = [(r["URL"], r["Matching URL"]) for r in rows]
+    pairs = [(r["URL (A)"], r["Matching URL (B)"]) for r in rows]
     # one row for the pair, under the URL that sorts first ("long" < "short")
     assert pairs.count(("https://x.example/long", "https://x.example/short")) == 1
     assert ("https://x.example/short", "https://x.example/long") not in pairs
-    row = next(r for r in rows if r["Matching URL"] == "https://x.example/short")
-    assert 24.0 <= row["URL's text found on Matching URL %"] <= 26.0  # long in short
-    assert row["Matching URL's text found on URL %"] == 100.0  # short in long
+    row = next(r for r in rows if r["Matching URL (B)"] == "https://x.example/short")
+    assert 24.0 <= row["% of A in B"] <= 26.0  # long in short
+    assert row["% of B in A"] == 100.0  # short in long
     assert row["Example of the shared text"]
     # a page in no pair still gets one row; a page that is in a pair gets none of its own
     assert ("https://x.example/other", NO_MATCH) in pairs
@@ -170,7 +170,8 @@ def test_three_pages_with_the_same_text_make_three_rows_not_six():
     shared = words(4, 120)
     recs = [record(f"https://x.example/{n}", [shared]) for n in ("a", "b", "c")]
     pairs = [
-        (r["URL"].rsplit("/", 1)[1], r["Matching URL"].rsplit("/", 1)[1]) for r in match_rows(recs)
+        (r["URL (A)"].rsplit("/", 1)[1], r["Matching URL (B)"].rsplit("/", 1)[1])
+        for r in match_rows(recs)
     ]
     assert sorted(pairs) == [("a", "b"), ("a", "c"), ("b", "c")]
 
@@ -186,7 +187,7 @@ def test_text_shared_only_in_menus_and_footers_is_not_a_match():
         )
 
     rows = match_rows([page("https://x.example/a", 4), page("https://x.example/b", 5)])
-    assert {r["Matching URL"] for r in rows} == {NO_MATCH}
+    assert {r["Matching URL (B)"] for r in rows} == {NO_MATCH}
 
 
 def test_small_overlaps_below_the_minimum_are_not_listed():
@@ -194,7 +195,7 @@ def test_small_overlaps_below_the_minimum_are_not_listed():
     b = record("https://x.example/b", [words(6, 200)[:60] + " " + words(7, 300)])
     rows = match_rows([a, b], min_match_pct=10.0)
     # they share only a few words: under 10% both ways, so no pair; each says so
-    assert {(r["URL"], r["Matching URL"]) for r in rows} == {
+    assert {(r["URL (A)"], r["Matching URL (B)"]) for r in rows} == {
         ("https://x.example/a", NO_MATCH),
         ("https://x.example/b", NO_MATCH),
     }

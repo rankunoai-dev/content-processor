@@ -583,3 +583,24 @@ def test_r7_still_flags_a_paragraph_that_is_really_missing():
     ]
     (gap,) = rule_r7_channel_agreement(RUN, _res(), blocks=blocks)
     assert gap.reason.startswith("source_text_not_rendered:words=60/120")
+
+
+# -- R6 chat-widget text --------------------------------------------------------------
+
+
+def test_r6_chat_widget_invitations_are_not_judged_as_missed_content() -> None:
+    from src.modules.content_processor.verify.rules_extended import unmapped_visual_lines
+
+    blocks = [_block(1, "Eligibility applies only to annual plans.")]
+    widget = [_region("Live chat with us now"), _region("Chat with an agent today")]
+    assert unmapped_visual_lines(widget, blocks) == []
+
+
+def test_r6_does_not_hide_real_articles_about_chat_tools() -> None:
+    from src.modules.content_processor.verify.rules_extended import unmapped_visual_lines
+
+    blocks = [_block(1, "Eligibility applies only to annual plans.")]
+    article = [_region("Chatbots are changing customer support across retail banking")]
+    assert unmapped_visual_lines(article, blocks) == [
+        "Chatbots are changing customer support across retail banking"
+    ]

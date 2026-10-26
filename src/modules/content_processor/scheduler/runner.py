@@ -121,7 +121,12 @@ class RunOptions(StrictModel):
     idle_polls: int = Field(default=3, ge=1, le=50)
     poll_s: float = Field(default=0.5, gt=0.0)
     max_wait_s: float = Field(
-        default=60.0, ge=0.0, description="How long a stage waits for held tasks to become ready"
+        default=360.0,
+        ge=0.0,
+        description=(
+            "How long a stage waits for held tasks to become ready. The default covers the "
+            "render retry schedule (30, 90, 180 s) so unattended runs do not stop mid-retry."
+        ),
     )
 
 

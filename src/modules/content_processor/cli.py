@@ -357,7 +357,7 @@ def _options(args: argparse.Namespace, stages: list[StageName]) -> RunOptions:
         stages=stages,
         max_tasks_per_stage=getattr(args, "max_tasks", None),
         max_rounds=getattr(args, "max_rounds", 10),
-        max_wait_s=getattr(args, "max_wait", 60.0),
+        max_wait_s=getattr(args, "max_wait", 360.0),
     )
 
 
@@ -668,7 +668,12 @@ def _add_drive_options(p: argparse.ArgumentParser) -> None:
     )
     p.add_argument("--max-tasks", type=int, default=None, help="per stage, single round")
     p.add_argument("--max-rounds", type=int, default=10)
-    p.add_argument("--max-wait", type=float, default=60.0, help="seconds to wait for held tasks")
+    p.add_argument(
+        "--max-wait",
+        type=float,
+        default=360.0,
+        help="seconds to wait for held tasks (default covers the render retry schedule)",
+    )
     p.add_argument("--reports-dir", default=None, help="write the Stage 4 bundle here")
     p.add_argument(
         "--baseline", default=None, help="previous run's .records.jsonl: reuse unchanged pages"
