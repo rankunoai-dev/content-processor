@@ -8,7 +8,7 @@ Status: proposed, 2026-10-26. Builds on the extraction engine (UrlRecords with e
 2. **Offering catalog ("website theming")**: identify, in detail, every service, product, solution, consulting practice, platform, industry and capability a website offers, and map every page and chunk to the offerings it supports.
 3. **Knowledge nodes** for retrieval and question answering, with routing that sends a question only to the relevant nodes.
 4. **Competitor comparison**: the same offering structure for several sites, aligned to one industry taxonomy, so coverage, depth, claims and presentation can be compared and gaps found.
-5. **Least cost**: deterministic code first, local models (Ollama) for bulk work, Jev for bulk structured decisions on public content, cloud models only for small-volume, high-value steps. Every model call is metered and capped like paid crawling (playbook §10).
+5. **Robustness first, cost second** (operator decision, 2026-10-26). No cost saving may reduce the evidence a decision sees or remove a check. Within that rule, cost is minimised: deterministic code first, local models (Ollama) for bulk work, Jev for bulk structured decisions on public content, cloud models only for small-volume, high-value steps. Every model call is metered and capped like paid crawling (playbook §10).
 
 Non-goals for this RFC: the chat UI design, Postgres operations (K1), and paid cloud spend beyond approved caps.
 
@@ -61,9 +61,21 @@ Stored on a new `PageStamp` (one per URL per run):
 | `numbers[]` | prices, rates, percentages, durations with units | existing claim extraction (`analysis/claims.py`) |
 | `quality` | badge, gap types, verification share | UrlRecord |
 
-### 4.2 Chunking
+### 4.2 Chunking without losing page context
 
-Blocks are grouped by `heading_path` within the main corpus (boilerplate and chrome excluded, using `grouping/boilerplate.py`), split or merged to 200 to 500 tokens, never across a top-level heading. Each chunk keeps `block_ids[]`, `evidence_ids[]`, `ui_region` mix, `heading_path`, and a `chunk_kind` from code where it is obvious (FAQ question and answer from accordion or `FAQPage`; table; pricing table; form instructions; testimonial region).
+Blocks are grouped by `heading_path` within the main corpus (boilerplate and chrome excluded, using `grouping/boilerplate.py`) into chunks of about 200 to 500 tokens. Each chunk keeps `block_ids[]`, `evidence_ids[]`, `ui_region` mix, `heading_path`, `parent_section_id`, `prev_chunk_id`, `next_chunk_id`, and a `chunk_kind` from code where it is obvious (FAQ question and answer from accordion or `FAQPage`; table; pricing table; form instructions; testimonial region).
+
+Splitting a page can lose context; these rules prevent it:
+
+| Risk | Rule |
+|---|---|
+| A chunk does not say what page or offering it is about | **Context header**: the text that is embedded and classified is `site › page title › offering (once known) › heading path` plus a one-line page summary, followed by the chunk text. The stored chunk text stays verbatim for citations. |
+| References to earlier sections ("the plans above") | Neighbour links (`prev`, `next`) and a small overlap (one sentence) at split points; retrieval always returns neighbours (section 8). |
+| An answer spans several sections | **Parent and child**: chunks are the search unit, the parent section (or the whole page when it is short) is the answer unit. Page vectors and page cards are kept alongside chunk vectors. |
+| Tables, FAQ pairs, lists, numbered steps cut in half | **Atomic units** are never split; an oversized unit becomes its own chunk. |
+| Tiny or huge sections | Sections under about 80 tokens merge with siblings under the same parent; long sections split at paragraph boundaries, never mid-sentence, never across a top-level heading. |
+| Chunk vectors miss page-wide meaning | Optional **late chunking**: embed the whole page with a long-context model (`bge-m3`, about 8k tokens) and pool token embeddings per chunk; evaluated against plain chunk embeddings (section 11). |
+| Classifying a chunk without its page | **Chunks are never categorised alone.** The page is categorised first with all its evidence; a chunk inherits the page's offerings and gets a different label only on strong, evidenced disagreement (section 6.2). |
 
 ### 4.3 Output
 
@@ -101,6 +113,13 @@ For each offering, its own pages (from 5.1 and Stage C) are read:
 
 ## 6. Stage C: categorising every page and chunk
 
+### 6.0 Rules for every decision (robustness first)
+
+1. **Independent signals must agree.** A page-type or offering label is accepted only when at least two independent signal families agree: **structure** (menu placement, URL family, schema.org type, template group), **meaning** (embedding similarity to offering cards) and **a decision model** (Jev for public content, Ollama otherwise). Disagreement escalates (section 6.3); it is never resolved by picking the cheapest answer.
+2. **No evidence is dropped to save cost.** Jev's 32 KiB body cap limits a request, not what is examined: a long page is judged section by section in several requests and the results are combined (a primary offering must win on the page card and be supported by its sections). A summary card is never the only input for a long page.
+3. **Every label carries its evidence**: which signals, their values and agreement, engine and model version, confidence, timestamp. Labels can be audited, re-run and overridden by a reviewer.
+4. **Cost is saved only by skipping escalations when signals agree**, never by skipping signals, sections or checks.
+
 ### 6.1 Page-level decisions with Jev
 
 Jev (TypeSafe AI, hosted) returns typed decisions: `choice` (one option, per-option probabilities, confidence), `score` (ordered levels) and `noul` (probability of yes). Many questions are answered in one request over one shared `state`. The request body is capped at 32 KiB, so Jev receives a **page card** built from the stamp, not the whole page:
@@ -123,7 +142,7 @@ Large taxonomies are asked in two passes (family, then offering within it) to st
 
 ### 6.2 Chunk-level decisions
 
-Code labels the obvious chunks (FAQ, table, form steps, testimonial region). Remaining main-content chunks are labelled in batches (several chunks per request as separate questions where the cap allows): `chunk_role` (claim, definition, feature, benefit, how_to_step, pricing, proof_point, cta, disclaimer, other) and `offering` (choice among the page's offerings).
+Code labels the obvious chunks (FAQ, table, form steps, testimonial region). Remaining main-content chunks are labelled in batches (several chunks per request as separate questions where the cap allows), each sent with its context header and neighbours: `chunk_role` (claim, definition, feature, benefit, how_to_step, pricing, proof_point, cta, disclaimer, other) and `offering`, as a choice among the page's offerings with the page's primary offering as the default. A chunk's offering differs from its page's only when the decision is confident and its embedding similarity agrees.
 
 ### 6.3 Cascade and confidence
 
@@ -146,8 +165,9 @@ Code labels the obvious chunks (FAQ, table, form steps, testimonial region). Rem
 2. Select the top nodes by node-card similarity and the Jev scores.
 3. Hybrid retrieval inside those nodes (vector plus full-text), filtered by facets.
 4. Re-rank locally (`bge-reranker-v2-m3`).
-5. Answer with citations to block and evidence ids (Ollama for routine answers, a frontier model for client-facing analysis).
-6. Site-wide questions ("what does each competitor offer in spend analytics?") are answered from offering and node cards, not by scanning all chunks.
+5. Expand each hit to its neighbours and parent section (or the whole page when short) before answering, so no answer is built from an isolated fragment.
+6. Answer with citations to block and evidence ids (Ollama for routine answers, a frontier model for client-facing analysis).
+7. Site-wide questions ("what does each competitor offer in spend analytics?") are answered from offering and node cards, not by scanning all chunks.
 
 ## 9. Stage F: competitor comparison
 
@@ -187,6 +207,8 @@ Call volume for a 5,000-page site: Stage A none; Jev about 5,000 to 10,000 page 
 - **Head-to-head**: Jev against Ollama 7B and 14B on public pages; choose per question, set cascade thresholds from calibration curves.
 - **Catalog quality**: precision and recall of discovered offerings against a hand-built catalog for two sites; every offering attribute must cite evidence (release gate: zero attributes without a supporting chunk).
 - **Routing**: 30 to 50 real questions with known answer pages; top-3 node recall.
+- **Context loss**: questions whose answer needs two or more sections of one page, or a reference to an earlier section; compare answer accuracy for (a) plain chunks, (b) chunks with context headers, (c) parent expansion, (d) late chunking. The chunking used in production must not score below whole-page retrieval on these questions.
+- **Release gates (robustness first)**: zero offering attributes without a supporting chunk; per-question accuracy at or above target on the gold set; no loss on the context-loss set. An engine that fails a gate is not used for that task regardless of cost.
 
 ## 12. Build plan
 
