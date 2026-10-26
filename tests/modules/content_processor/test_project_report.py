@@ -147,19 +147,32 @@ def test_content_column_wraps_and_has_a_width(tmp_path: Path):
     assert "Heading\nParagraph under it." in sheet
 
 
-def test_matches_are_directional_and_every_url_gets_a_row():
+def test_each_pair_is_listed_once_with_both_directions():
     short_text = words(1, 100)
     short = record("https://x.example/short", [short_text])
     long = record("https://x.example/long", [short_text, words(2, 300)])
     other = record("https://x.example/other", [words(3, 120)])
     rows = match_rows([short, long, other])
-    got = {(r["URL"], r["Matching URL"]): r["Same content %"] for r in rows}
+    pairs = [(r["URL"], r["Matching URL"]) for r in rows]
+    # one row for the pair, under the URL that sorts first ("long" < "short")
+    assert pairs.count(("https://x.example/long", "https://x.example/short")) == 1
+    assert ("https://x.example/short", "https://x.example/long") not in pairs
+    row = next(r for r in rows if r["Matching URL"] == "https://x.example/short")
+    assert 24.0 <= row["URL's text found on Matching URL %"] <= 26.0  # long in short
+    assert row["Matching URL's text found on URL %"] == 100.0  # short in long
+    assert row["Example of the shared text"]
+    # a page in no pair still gets one row; a page that is in a pair gets none of its own
+    assert ("https://x.example/other", NO_MATCH) in pairs
+    assert not any(u == "https://x.example/short" for u, _ in pairs)
 
-    assert got[("https://x.example/short", "https://x.example/long")] == 100.0
-    assert 24.0 <= got[("https://x.example/long", "https://x.example/short")] <= 26.0
-    assert got[("https://x.example/other", NO_MATCH)] is None
-    shared = next(r for r in rows if r["URL"] == "https://x.example/short")
-    assert shared["Example of the shared text"]
+
+def test_three_pages_with_the_same_text_make_three_rows_not_six():
+    shared = words(4, 120)
+    recs = [record(f"https://x.example/{n}", [shared]) for n in ("a", "b", "c")]
+    pairs = [
+        (r["URL"].rsplit("/", 1)[1], r["Matching URL"].rsplit("/", 1)[1]) for r in match_rows(recs)
+    ]
+    assert sorted(pairs) == [("a", "b"), ("a", "c"), ("b", "c")]
 
 
 def test_text_shared_only_in_menus_and_footers_is_not_a_match():
@@ -180,8 +193,11 @@ def test_small_overlaps_below_the_minimum_are_not_listed():
     a = record("https://x.example/a", [words(6, 200)])
     b = record("https://x.example/b", [words(6, 200)[:60] + " " + words(7, 300)])
     rows = match_rows([a, b], min_match_pct=10.0)
-    pct = {(r["URL"], r["Matching URL"]): r["Same content %"] for r in rows}
-    assert ("https://x.example/a", NO_MATCH) in pct  # a shares under 10% with b
+    # they share only a few words: under 10% both ways, so no pair; each says so
+    assert {(r["URL"], r["Matching URL"]) for r in rows} == {
+        ("https://x.example/a", NO_MATCH),
+        ("https://x.example/b", NO_MATCH),
+    }
 
 
 def test_workbook_is_written_with_three_sheets(tmp_path: Path):

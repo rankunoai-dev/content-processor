@@ -80,7 +80,9 @@ _CONTROL_WORDS = {
     "consent": ("consent banner", "consent banners"),
     "shadow_root": ("web component", "web components"),
 }
-MATCH_COLUMNS = ["URL", "Matching URL", "Same content %", "Example of the shared text"]
+A_IN_B = "URL's text found on Matching URL %"
+B_IN_A = "Matching URL's text found on URL %"
+MATCH_COLUMNS = ["URL", "Matching URL", A_IN_B, B_IN_A, "Example of the shared text"]
 
 _STATUS = {
     UrlBadge.VERIFIED_WITHIN_SCOPE: "Fully captured",
@@ -157,19 +159,23 @@ _NOTES: list[tuple[str, str]] = [
         "page's code is 100%, text read from images (OCR) is lower.",
     ),
     ("Pages: What is missing", "In plain words, why the page is not fully extracted."),
-    ("Matching content: URL", "Every page with text gets at least one row."),
     (
-        "Matching content: Matching URL",
-        "Another page of the same run that carries some of the same text. A URL can match "
-        f"several pages, one row each. '{NO_MATCH}' when none does.",
+        "Matching content: URL, Matching URL",
+        "Each pair of pages that share text is listed ONCE (A with B is not repeated as B "
+        "with A), under the address that sorts first. To find every match of one page, look "
+        f"for it in both columns. '{NO_MATCH}' when a page shares no text with any other.",
     ),
     (
-        "Matching content: Same content %",
-        "The share of this URL's text that also appears, word for word, on the matching URL "
-        "(runs of five words; menus, headers and footers are left out). It is directional: "
-        "a short page can be 100% inside a long one while the long one is 20% inside the "
-        "short one. Exact text matching only, not meaning. Matches below "
-        f"{DEFAULT_MIN_MATCH_PCT:g}% are not listed.",
+        "Matching content: URL's text found on Matching URL %",
+        "The share of the first page's text that also appears, word for word, on the second "
+        "page (runs of five words; menus, headers and footers are left out). Exact text "
+        "matching only, not meaning.",
+    ),
+    (
+        "Matching content: Matching URL's text found on URL %",
+        "The same in the other direction. The two differ when the pages differ in length: a "
+        "short page can be 100% inside a long one while the long one is 20% inside the short "
+        f"one. A pair is listed when either direction reaches {DEFAULT_MIN_MATCH_PCT:g}%.",
     ),
     ("Matching content: Example", "Up to two passages the two pages share, quoted as captured."),
 ]
@@ -341,36 +347,48 @@ def _containment(docs: Sequence[OverlapDoc]) -> dict[tuple[int, int], int]:
 def match_rows(
     records: Sequence[UrlRecord], *, min_match_pct: float = DEFAULT_MIN_MATCH_PCT
 ) -> list[dict[str, Cell]]:
-    """Sheet "Matching content": one row per (URL, matching URL), both directions."""
+    """Sheet "Matching content": each pair of URLs once, with both directions.
+
+    A pair is listed when either direction reaches `min_match_pct`. It sits under
+    the URL that sorts first, so A-B is never repeated as B-A; the two percentages
+    say how much of each page's text the other one carries. A URL in no pair gets
+    one row saying so.
+    """
     docs, _ = docs_from_records(records, OverlapConfig(include_boilerplate=False))
-    matches: dict[int, list[tuple[float, int]]] = defaultdict(list)
+    pairs: dict[int, list[tuple[float, float, int]]] = defaultdict(list)
+    in_a_pair: set[int] = set()
     for (a, b), count in _containment(docs).items():
-        for this, other in ((a, b), (b, a)):
-            pct = 100.0 * count / len(docs[this].shingles)
-            if pct >= min_match_pct:
-                matches[this].append((pct, other))
+        first, second = (a, b) if docs[a].url <= docs[b].url else (b, a)
+        first_in_second = 100.0 * count / len(docs[first].shingles)
+        second_in_first = 100.0 * count / len(docs[second].shingles)
+        if max(first_in_second, second_in_first) < min_match_pct:
+            continue
+        pairs[first].append((first_in_second, second_in_first, second))
+        in_a_pair.update((first, second))
     rows: list[dict[str, Cell]] = []
-    order = sorted(range(len(docs)), key=lambda i: docs[i].url)
-    for i in order:
-        found = sorted(matches.get(i, []), key=lambda m: (-m[0], docs[m[1]].url))
-        if not found:
+    for i in sorted(range(len(docs)), key=lambda i: docs[i].url):
+        found = sorted(pairs.get(i, []), key=lambda m: (-max(m[0], m[1]), docs[m[2]].url))
+        if not found and i not in in_a_pair:
             rows.append(
                 {
                     "URL": docs[i].url,
                     "Matching URL": NO_MATCH,
-                    "Same content %": None,
+                    A_IN_B: None,
+                    B_IN_A: None,
                     "Example of the shared text": "",
                 }
             )
             continue
-        for pct, j in found:
-            example = " … ".join(_shared_spans(docs[i], docs[j], limit=2))
+        for first_in_second, second_in_first, j in found:
             rows.append(
                 {
                     "URL": docs[i].url,
                     "Matching URL": docs[j].url,
-                    "Same content %": round(pct, 1),
-                    "Example of the shared text": example,
+                    A_IN_B: round(first_in_second, 1),
+                    B_IN_A: round(second_in_first, 1),
+                    "Example of the shared text": " … ".join(
+                        _shared_spans(docs[i], docs[j], limit=2)
+                    ),
                 }
             )
     return rows
