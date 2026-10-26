@@ -29,7 +29,11 @@ from selectolax.parser import HTMLParser
 
 from src.core.logger import get_logger
 from src.core.schemas import StrictModel
-from src.integrations.sniff import parse_content_disposition_name, sniff_media_type
+from src.integrations.sniff import (
+    parse_content_disposition_name,
+    refine_zip_media_type,
+    sniff_media_type,
+)
 
 __all__ = [
     "ChainFetcher",
@@ -382,7 +386,7 @@ class ChainFetcher(ABC):
             headers=headers,
             body=body,
             declared_mime=declared.split(";", 1)[0].strip().lower() if declared else None,
-            sniffed_mime=sniff_media_type(body, declared),
+            sniffed_mime=refine_zip_media_type(body, sniff_media_type(body, declared)),
             content_disposition_name=parse_content_disposition_name(
                 headers.get("content-disposition")
             ),

@@ -7,10 +7,27 @@ UNSUPPORTED rather than guessing.
 
 from __future__ import annotations
 
+import io
 import re
+import zipfile
 from email.message import Message
 
-__all__ = ["parse_content_disposition_name", "sniff_media_type"]
+__all__ = [
+    "OOXML_MEDIA_TYPES",
+    "parse_content_disposition_name",
+    "refine_zip_media_type",
+    "sniff_media_type",
+]
+
+# Office Open XML files are zip containers. The magic bytes say "zip"; the part names say which
+# Office format it is. These are the media types the content-type section filters on.
+OOXML_MEDIA_TYPES: dict[str, str] = {
+    "word/document.xml": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "xl/workbook.xml": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "ppt/presentation.xml": (
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+    ),
+}
 
 _MAGIC: tuple[tuple[bytes, str], ...] = (
     (b"%PDF-", "application/pdf"),
@@ -75,3 +92,21 @@ def parse_content_disposition_name(header: str | None) -> str | None:
     msg["content-disposition"] = header
     name = msg.get_filename()
     return name or None
+
+
+def refine_zip_media_type(body: bytes, sniffed: str) -> str:
+    """Replace a generic `application/zip` with the Office type when the container holds one.
+
+    Needs the whole body (the zip directory sits at the end of the file), so it runs where
+    the full payload is in memory, not on the 4 KB sniffing head. Plain zips stay zip.
+    """
+    if sniffed != "application/zip":
+        return sniffed
+    try:
+        names = set(zipfile.ZipFile(io.BytesIO(body)).namelist())
+    except zipfile.BadZipFile:
+        return sniffed
+    for part, media_type in OOXML_MEDIA_TYPES.items():
+        if part in names:
+            return media_type
+    return sniffed

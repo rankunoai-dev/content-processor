@@ -16,6 +16,7 @@ const ContradictionsPage = lazy(() => import('./routes/ContradictionsPage'));
 const ReviewPage = lazy(() => import('./routes/ReviewPage'));
 const DownloadsPage = lazy(() => import('./routes/DownloadsPage'));
 const NotFoundPage = lazy(() => import('./routes/NotFoundPage'));
+const ContentTypesPage = lazy(() => import('./routes/ContentTypesPage'));
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const mode = usePreferences((s) => s.theme);
@@ -50,6 +51,7 @@ export function AppRoutes() {
     <Routes>
       <Route element={<AppLayout />}>
         <Route index element={<RunsPage />} />
+        <Route path="content-types" element={<ContentTypesPage />} />
         <Route path="runs/:runId" element={<OverviewPage />} />
         <Route path="runs/:runId/pages" element={<PagesPage />} />
         <Route path="runs/:runId/pages/:pageKey" element={<PageDetailPage />} />

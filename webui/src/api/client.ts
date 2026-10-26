@@ -1,4 +1,6 @@
 import type {
+  ContentTypesResponse,
+  ScopeFragment,
   ContradictionsResponse,
   DecisionIn,
   DecisionOut,
@@ -135,4 +137,8 @@ export const api = {
   downloadUrl: (run: string, file: string) => `/api/runs/${enc(run)}/downloads/${enc(file)}`,
   saveDecision: (run: string, decision: DecisionIn) =>
     postJson<DecisionOut>(`/api/runs/${enc(run)}/decisions`, decision),
+  contentTypes: (signal?: AbortSignal) =>
+    getJson<ContentTypesResponse>('/api/content-types', signal),
+  contentTypeScope: (types: string[], signal?: AbortSignal) =>
+    getJson<ScopeFragment>(`/api/content-types/scope?types=${enc(types.join(','))}`, signal),
 };

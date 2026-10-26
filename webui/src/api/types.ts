@@ -278,3 +278,26 @@ export interface DecisionOut extends Omit<DecisionIn, 'reviewer'> {
   at: string;
   reviewer: string;
 }
+
+
+/** One content type a run can select, with what the engine supports today. */
+export interface ContentType {
+  id: string;
+  label: string;
+  families: string[];
+  extensions: string[];
+  status: 'supported' | 'not_supported';
+  note: string;
+}
+
+export interface ContentTypesResponse {
+  types: ContentType[];
+}
+
+/** What a selection means for a run: the filter, the unsupported picks and the command. */
+export interface ScopeFragment {
+  selected: string[];
+  allowed_mime_families: string[];
+  unsupported_selected: string[];
+  command: string;
+}

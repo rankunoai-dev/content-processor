@@ -21,6 +21,7 @@ export const APP = {
     contradictions: 'Contradictions',
     review: 'Needs your review',
     downloads: 'Downloads',
+    contentTypes: 'Content types',
   },
   runPicker: 'Run',
   runPickerPlaceholder: 'Choose a run',

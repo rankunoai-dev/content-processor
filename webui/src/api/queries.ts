@@ -21,6 +21,8 @@ export const queryKeys = {
   contradictions: (run: string) => ['run', run, 'contradictions'] as const,
   review: (run: string) => ['run', run, 'review'] as const,
   downloads: (run: string) => ['run', run, 'downloads'] as const,
+  contentTypes: () => ['content-types'] as const,
+  contentTypeScope: (types: string[]) => ['content-types', 'scope', types] as const,
 };
 
 const POLL_MS = 5000;
@@ -48,6 +50,22 @@ function useRunPolling(run: string): number | false {
   const client = useQueryClient();
   const overview = client.getQueryData<{ summary: { running: number } }>(queryKeys.overview(run));
   return overview && overview.summary.running > 0 ? POLL_MS : false;
+}
+
+export function useContentTypes() {
+  return useQuery({
+    queryKey: queryKeys.contentTypes(),
+    queryFn: ({ signal }) => api.contentTypes(signal),
+    staleTime: Infinity,
+  });
+}
+
+export function useContentTypeScope(types: string[]) {
+  return useQuery({
+    queryKey: queryKeys.contentTypeScope(types),
+    queryFn: ({ signal }) => api.contentTypeScope(types, signal),
+    enabled: types.length > 0,
+  });
 }
 
 export function useRuns() {

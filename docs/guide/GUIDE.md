@@ -1,6 +1,6 @@
 # Content Processor: A Plain-Language Guide
 
-Last updated: 22 October 2026 · Code version: main after paid access with approvals and spending limits, and the project report's completeness and confidence columns · Maintained by every session that adds a significant feature (see "Keeping this guide current" at the end)
+Last updated: 26 October 2026 · Code version: content-type section and Office type detection, on top of main after paid access with approvals and spending limits
 
 ## 1. What this is, in one paragraph
 
@@ -144,6 +144,8 @@ At the end of a run the engine writes a bundle of files. Every file name starts 
 
 Besides the files, there is a web app for reviewing runs in a browser on your own computer. It never changes a run's results; the one thing you can save in it is your own decisions. It shows all runs; an overview of each run with charts of verdicts, the most common reasons pages were not verified and what to do about them; a searchable, filterable table of pages; a detail view per page (its content, issues, facts and technical details); duplicate content; possible contradictions; the pages that need your review; downloads of every report; and a dark mode.
 
+A **content types** section lets you choose which kinds of files a crawl should look for: web pages (always read, because that is how links to files are found), PDF documents, images, Word, Excel and PowerPoint files, and, marked as not supported yet, older Office files, plain spreadsheet text files, zip archives, audio and video, and email files. Each choice shows whether the engine can read that kind of file today. Picking a type it cannot read yet is allowed, but the report then says those files were found and counted as excluded, with the reason. The section does not start a crawl: it produces the filter and the command for you to run in a terminal, so the web app stays read-only.
+
 Reviewers can record decisions directly in the app: for each possible contradiction (confirmed, not a contradiction, different context) and for each page that needs review (for example "get the content by hand" or "leave out of the results", with a note). You enter your name once; every decision is saved with your name and the time, and every earlier answer is kept, so there is a full history. The next report for that run starts with these decisions already filled in, in the Excel files too.
 
 ## 5. Safety and cost promises
@@ -197,6 +199,7 @@ Reviewers can record decisions directly in the app: for each possible contradict
 
 | Date | Significant change |
 |---|---|
+| 2026-10-26 | Content-type section in the analyst app: choose which kinds of files to look for (PDF, images, Word, Excel, PowerPoint), with an honest mark on types the engine cannot read yet; it produces the filter and command for a crawl. Word, Excel and PowerPoint files are now recognised by their real type, not as generic zip archives, so selecting them works. |
 | 2026-10-22 | Paid access (Bright Data) built but off by default: one approval per website with a spending cap, checked before every paid request, with a spending log. |
 | 2026-10-21 | Reviewers save decisions in the web app (with name, time and full history); the next report carries them forward. |
 | 2026-10-21 | Live John Hancock: 32 of 34 verified again with all checks on (the 2 others are placeholder pages). FAQ sections built as web components are now opened, text is matched the way the browser shows it, and a brief network hiccup no longer pauses a whole website. |

@@ -124,6 +124,7 @@ export function AppLayout() {
   }, [runId, prefs]);
 
   const selected = useMemo(() => {
+    if (location.pathname.startsWith('/content-types')) return 'content-types';
     if (!runId) return 'runs';
     const section = location.pathname.split('/')[3];
     return section ?? 'overview';
@@ -132,6 +133,11 @@ export function AppLayout() {
   const base = runId ? `/runs/${encodeURIComponent(runId)}` : '';
   const items = [
     { key: 'runs', icon: <AppstoreOutlined />, label: <Link to="/">{APP.nav.runs}</Link> },
+    {
+      key: 'content-types',
+      icon: <FileSearchOutlined />,
+      label: <Link to="/content-types">{APP.nav.contentTypes}</Link>,
+    },
     ...(runId
       ? [
           { type: 'divider' as const },

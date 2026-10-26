@@ -26,6 +26,7 @@ from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import ValidationError
 
+from src.modules.content_processor.content_types import catalogue, scope_fragment
 from src.modules.content_processor.export.bundle import BUNDLE_FILES, bundle_file_name
 from src.modules.content_processor.export.decisions import (
     Decision,
@@ -254,6 +255,22 @@ def create_app(
         if file_name in BUNDLE_FILES:
             download_name = bundle_file_name(run, file_name)
         return FileResponse(path, filename=download_name, content_disposition_type="attachment")
+
+    @app.get("/api/content-types")
+    def content_types() -> dict[str, Any]:
+        """The content types a run can select, with what the engine supports (read-only)."""
+        return {"types": [t.model_dump() for t in catalogue()]}
+
+    @app.get("/api/content-types/scope")
+    def content_type_scope(
+        types: Annotated[str, Query(max_length=300, description="comma-separated ids")] = "",
+    ) -> dict[str, Any]:
+        """The scope filter and command for a selection; nothing is started (read-only)."""
+        selected = [t.strip() for t in types.split(",") if t.strip()]
+        try:
+            return scope_fragment(selected).model_dump()
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     @app.get("/api/{rest:path}")
     def api_not_found(rest: str) -> JSONResponse:

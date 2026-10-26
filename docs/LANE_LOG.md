@@ -542,3 +542,15 @@ git worktree add ../content-processor-lane4 -b lane/L4-verify
 - **Gate:** ruff format and check clean, mypy strict clean (113 files), 925 passed and 11 skipped, coverage 94.29%.
 - **Not verified:** a live Bright Data request (by policy: $0 until the operator enables it). The first real use should be one approved host with a small cap, then `cli spend` compared with the Bright Data dashboard.
 - **Not built:** Scraping Browser (T5 browser), rendering through the paid exit IP, nightly reconciliation against invoices, an API approval endpoint, the before/after comparison report, cross-process cap reservation.
+
+## [2026-10-26] Feature branch feat/content-type-section: content-type section, Office type detection
+
+- **Branch / worktree:** `feat/content-type-section` at `../content-processor-types`, from main `a92a4a6`.
+- **What landed:**
+  - `integrations/sniff.py` `refine_zip_media_type`: a zip that holds Word, Excel or PowerPoint parts is recognised as that type (previously every such file was a generic zip, so a type filter could never select it). Used in `integrations/http_client.py` after sniffing.
+  - `modules/content_processor/content_types.py`: the catalogue of content types, each with its media types and an honest status (supported, or not supported yet), plus `scope_fragment()` which builds the filter and the run command for a selection. Unknown or empty selections are refused.
+  - Read-only API: `GET /api/content-types` and `GET /api/content-types/scope?types=...`.
+  - Web UI: "Content types" page (`webui/src/routes/ContentTypesPage.tsx`) with checkboxes, status tags, warnings for unsupported picks, and copyable filter and command. It does not start crawls.
+- **Gate:** ruff clean, `mypy --strict` clean (114 files), Python tests passing, coverage 94.4%. Web: typecheck, eslint, vitest (5 files) and production build passing.
+- **Not done (next):** the filter currently applies to linked files found on pages, not to the pages themselves; enforcing it on every discovered URL needs the planner change. Starting crawls from the UI was declined for now (the web app stays read-only).
+- **Needs review:** `fetch_worker` behaviour is unchanged, but downloads of Office files now carry their real media type, which affects which linked files are followed at depth 1.
