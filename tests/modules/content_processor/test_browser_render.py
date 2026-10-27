@@ -206,3 +206,13 @@ async def test_table_columns_reached_by_scrolling_their_box_are_not_hidden(
     assert layers["Screen reader note about the table"] != "rendered_visible"
     assert layers["Fourth slide far out of view"] != "rendered_visible"
     assert layers["First slide on show"] == "rendered_visible"
+
+
+async def test_cookie_and_chat_widgets_are_read_at_screenshot_time(
+    renderer: BrowserRenderer, server_url: str
+):
+    """The webchat tooltip's HTML is captured with the screenshot (R6 overlay text)."""
+    result = await renderer.render(f"{server_url}/pages/site_utilities")
+    assert result.rendered, result.transport_error
+    assert "virtual assistant" in result.overlay_html
+    assert "monthly distribution" not in result.overlay_html  # page content is not taken

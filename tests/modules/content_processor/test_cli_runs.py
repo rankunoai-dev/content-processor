@@ -220,3 +220,32 @@ async def test_build_fetchers_t2_when_available():
     finally:
         for f in (t1, *escalation):
             await f.aclose()
+
+
+def test_dryruns_remember_urls_and_the_next_run_starts_from_the_history(
+    wired: FakeDurable, tmp_path: Path, capsys
+):
+    scope = _small_scope(tmp_path, ["/pages/static_ok"])
+    args = ["dryrun", "--scope", str(scope), "--no-render", "--max-wait", "0.5", "--out"]
+    assert cli.main([*args, str(tmp_path / "runs" / "one.json")]) == 0
+    first = _last_json(capsys)
+    assert first["baseline"] is None, "nothing scraped before"
+    assert first["history"]["remembered"] >= 1
+    assert cli.main([*args, str(tmp_path / "runs" / "two.json")]) == 0
+    second = _last_json(capsys)
+    assert second["baseline"]["source"] == "history" and second["baseline"]["urls"] >= 1
+    assert second["changes"].get("unchanged", 0) >= 1
+    # --no-history scrapes afresh and leaves the history alone
+    assert cli.main([*args, str(tmp_path / "runs" / "three.json"), "--no-history"]) == 0
+    third = _last_json(capsys)
+    assert third["baseline"] is None and "history" not in third
+
+    spec = json.loads(scope.read_text("utf-8"))
+    urls = tmp_path / "urls.txt"
+    urls.write_text(f"{spec['input_urls'][0]}\nhttp://127.0.0.1:8765/never\n", encoding="utf-8")
+    out_csv = tmp_path / "check.csv"
+    cmd = ["history", "--urls", str(urls), "--tenant", spec["tenant_id"], "--out", str(out_csv)]
+    assert cli.main(cmd) == 0
+    checked = _last_json(capsys)
+    assert checked["scraped_before"] == 1 and checked["new"] == 1
+    assert "Scraped before" in out_csv.read_text("utf-8-sig").splitlines()[0]

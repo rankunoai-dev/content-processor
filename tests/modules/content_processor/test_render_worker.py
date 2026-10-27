@@ -155,6 +155,41 @@ async def test_render_verifies_hydrated_content(tmp_path: Path):
     assert all(store.exists(e.split(":", 1)[1]) for e in ledger.events[-1].evidence_ids)
 
 
+async def test_cookie_and_chat_widgets_on_the_screenshot_are_kept_as_third_party(
+    tmp_path: Path,
+):
+    """Widgets that load after the DOM is saved: their text backs R6, never the content."""
+    ledger = MemoryLedger(base_delay_s=0)
+    res = _seed(ledger)
+    result = _ok_result().model_copy(
+        update={
+            "overlay_html": (
+                '<html><body><div id="onetrust-banner-sdk"><p>We use cookies to improve your '
+                "experience and personalize content.</p></div>"
+                '<div class="jh-webchat-tooltip"><p>Hi, I am the virtual assistant. Need help?'
+                "</p></div></body></html>"
+            )
+        }
+    )
+    worker = RenderWorker(
+        ledger=ledger,
+        renderer=FakeRenderer(result),
+        evidence=LocalEvidenceStore(tmp_path, "t1"),
+        scope=_scope(),
+        run_id="run-t",
+        worker_id="r1",
+    )
+    await worker.run_until_idle(idle_polls=1, poll_s=0, max_wait_s=0)
+    overlay = [b for b in ledger.get_blocks(res.resource_id) if b.state_id == "run-t|overlay"]
+    assert {b.layer.value for b in overlay} == {"third_party_chrome"}
+    texts = " ".join(b.normalized_text for b in overlay)
+    assert "personalize content" in texts and "Need help?" in texts
+    store = LocalEvidenceStore(tmp_path, "t1")
+    assert all(store.exists(e.split(":", 1)[1]) for b in overlay for e in b.evidence_ids)
+    updated = ledger.get_resource(res.resource_id)
+    assert updated is not None and updated.status is EntityStatus.VERIFIED_EXTRACTED
+
+
 async def test_render_block_at_t3_asks_for_paid_tier(tmp_path: Path):
     ledger = MemoryLedger(base_delay_s=0)
     res = _seed(ledger)

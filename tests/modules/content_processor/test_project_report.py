@@ -45,7 +45,9 @@ def test_pages_say_completeness_confidence_and_confirmed_share():
     image = record("https://x.example/logo.png", [], badge=UrlBadge.PARTIAL)
     rows = _by_url(page_rows([full, partial, image]))
 
-    assert rows["https://x.example/full"] | {"Content": None} == {
+    full = rows["https://x.example/full"]
+    assert full["Action"] == "New: scraped in full" and full["Last checked"]
+    assert full | {"Content": None, "Last checked": None, "Site last updated": None} == {
         "URL": "https://x.example/full",
         "Content": None,
         "Fully extracted": "Yes",
@@ -56,6 +58,9 @@ def test_pages_say_completeness_confidence_and_confirmed_share():
         "Words": 6,
         "Status": "Fully captured",
         "What is missing": "",
+        "Last checked": None,
+        "Site last updated": None,
+        "Action": "New: scraped in full",
     }
 
     p = rows["https://x.example/partial"]

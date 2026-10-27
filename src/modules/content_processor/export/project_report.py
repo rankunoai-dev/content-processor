@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 from collections.abc import Sequence
+from datetime import datetime
 
 from src.modules.content_processor.analysis.overlap import (
     OverlapConfig,
@@ -26,7 +27,7 @@ from src.modules.content_processor.analysis.overlap import (
     docs_from_records,
 )
 from src.modules.content_processor.contracts import ContentBlock, UrlRecord
-from src.modules.content_processor.enums import EntityStatus, GapType, UrlBadge
+from src.modules.content_processor.enums import ChangeStatus, EntityStatus, GapType, UrlBadge
 from src.modules.content_processor.export.content import (
     DEFAULT_LAYERS,
     drop_duplicates,
@@ -59,6 +60,9 @@ PAGES_COLUMNS = [
     "Words",
     "Status",
     "What is missing",
+    "Last checked",
+    "Site last updated",
+    "Action",
 ]
 HIGH, MEDIUM, LOW, NOT_RATED = "High", "Medium", "Low", "Not rated"
 _PLACEHOLDER_WORDS = ("lorem ipsum",)
@@ -159,6 +163,21 @@ _NOTES: list[tuple[str, str]] = [
         "page's code is 100%, text read from images (OCR) is lower.",
     ),
     ("Pages: What is missing", "In plain words, why the page is not fully extracted."),
+    ("Pages: Last checked", "The day this run checked the page."),
+    (
+        "Pages: Site last updated",
+        "The date the website itself gives for the page's last update (from the page's data, "
+        "its HTTP headers or the PDF). Empty when the site does not say.",
+    ),
+    (
+        "Pages: Action",
+        "What this run did. 'New: scraped in full' for a page never captured before. "
+        "'Reused: unchanged since <date>' when the page was captured before and has not "
+        "changed: the earlier content is kept and the page is not scraped again. "
+        "'Re-scraped: changed since the last capture' when it changed. Whether a page changed is "
+        "decided by its text first, then the site's date, so a page edited without a new "
+        "date is still re-scraped.",
+    ),
     (
         "Matching content: URL (A), Matching URL (B)",
         "Each pair of pages that share text is listed ONCE (A with B is not repeated as B "
@@ -300,6 +319,24 @@ def page_confidence(
     return MEDIUM
 
 
+def _day(value: datetime | None) -> str:
+    return value.date().isoformat() if value is not None else ""
+
+
+def action(record: UrlRecord) -> str:
+    """What the run did with the page: new, reused unchanged, or re-scraped."""
+    status = record.change_status
+    if status is ChangeStatus.UNCHANGED:
+        dates = [b.extracted_at for b in record.blocks if b.extracted_at is not None]
+        since = _day(min(dates)) if dates else ""
+        return f"Reused: unchanged since {since}" if since else "Reused: unchanged"
+    if status is ChangeStatus.CHANGED:
+        return "Re-scraped: changed since the last capture"
+    if status is ChangeStatus.UNKNOWN:
+        return "Scraped in full: could not compare with the earlier capture"
+    return "New: scraped in full"
+
+
 def page_rows(records: Sequence[UrlRecord]) -> list[dict[str, Cell]]:
     """Sheet "Pages": one row per requested URL."""
     rows: list[dict[str, Cell]] = []
@@ -324,6 +361,9 @@ def page_rows(records: Sequence[UrlRecord]) -> list[dict[str, Cell]]:
                 "Words": total,
                 "Status": _STATUS.get(record.badge, record.badge.value),
                 "What is missing": _missing(record),
+                "Last checked": _day(record.captured_at),
+                "Site last updated": _day(record.page_modified_at),
+                "Action": action(record),
             }
         )
     return rows

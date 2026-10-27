@@ -1,6 +1,6 @@
 # Content Processor: A Plain-Language Guide
 
-Last updated: 26 October 2026 · Code version: main after page stamping and context-keeping sections (step 1 of the knowledge base) · Maintained by every session that adds a significant feature (see "Keeping this guide current" at the end)
+Last updated: 27 October 2026 · Code version: main after page stamping and context-keeping sections (step 1 of the knowledge base), the URL history (only new or changed pages are scraped again), the report's Last checked / Site last updated / Action columns, and cookie and chat widgets read at screenshot time · Maintained by every session that adds a significant feature (see "Keeping this guide current" at the end)
 
 ## 1. What this is, in one paragraph
 
@@ -80,6 +80,16 @@ Each page is downloaded, its type is checked (for example, is this really a PDF,
 
 Evidence is stored compactly. Web pages carry the same fonts and style sheets on every page of a site, and a page photographed in several states repeats them each time, so the engine keeps each of those large repeated pieces once and compresses the rest. Nothing is lost: every original reads back exactly as it was captured, and the evidence-integrity check still proves it. On the live John Hancock run this cut evidence from about 1.2 GB to 65 MB (about 18 times smaller), so a 5,000-page run fits comfortably within the 20 GB storage budget.
 
+### Running again: only new or changed pages are scraped
+
+The engine keeps a URL history: for every address it has ever captured, the latest capture, the day it was scraped, and the date the website itself gives for the page's last update. Every run checks it automatically, whatever list of addresses you give it and whichever earlier runs they came from.
+
+- An address never seen before is scraped in full.
+- An address seen before gets one light "has this changed since our last visit?" request. If the site answers "not changed", or the page's text is word for word the same, the earlier content is kept and the slow browser step is skipped.
+- If the text changed, the page is scraped again, even when the site's update date did not move (sites often edit pages without changing the date). If only the date moved and the text is the same, the earlier content is kept.
+
+After each run the history is updated, so the next run starts from the newest captures. Before a run you can check a list of addresses: for each one, whether it was scraped before, when, and the site's last-update date. The history can be switched off for a run that should scrape everything afresh.
+
 ### Step 5: Reading the page's text
 
 The engine reads the page's HTML and splits it into blocks (headings, paragraphs, tables), and labels each block by layer: visible content, hidden text, navigation and footer, third-party widgets such as chat boxes, icon codes, and so on. Hidden and decorative text is kept but never mixed into the main content.
@@ -115,7 +125,7 @@ Before giving a verdict, the engine runs a set of checks on each page. Each chec
 | Access (R2) | Was the page (and its parts) actually obtained, or blocked or failed? |
 | Frames (R3) | Were embedded frames inside the page also read? |
 | Visible-text coverage | Is every line of text the browser shows on the page also in what was extracted? If not, the page is marked "partly captured" and the missing lines are quoted. |
-| Visual text (R6) | Does every line of text visible on the screenshot appear in what was extracted? |
+| Visual text (R6) | Does every line of text visible on the screenshot appear in what was extracted? Cookie banners and chat bubbles that appear on the screenshot are read at the same moment and recognised as widget text, so they do not cause false alarms. |
 | Channel agreement (R7) | Do the raw page and the browser agree? Is the text disguised with scrambled fonts? |
 | PDF images (R8) | Were images inside PDFs read, and does the OCR agree with the PDF's own text? |
 | Critical facts (R9) | Were numbers, prices, percentages, "not" and footnote marks preserved exactly? |
@@ -138,7 +148,7 @@ At the end of a run the engine writes a bundle of files. Every file name starts 
 
 | File | What you use it for |
 |---|---|
-| Project report (Excel) | The one workbook most people need. Sheet "Pages": every address with its whole text (line breaks shown), whether it was fully extracted (Yes/No), a plain "Extraction completeness" statement ("Complete", "Incomplete: 1 tab not opened (Pricing)", "Complete, but the page kept changing", "Placeholder page (Lorem ipsum)"), an overall Confidence of High, Medium or Low that can only be High when the page is fully captured, the share of the captured text confirmed against the live page, how reliably it was read (text from the page's code is 100%, text read from images lower), and what is missing. Sheet "Matching content": every pair of addresses that carry the same text, listed once (A with B is never repeated as B with A), by exact word-for-word matching (menus, headers and footers left out), with two percentages: how much of the first page's text is on the second, and how much of the second's is on the first. They differ when the pages differ in length: a short page can be 100% inside a long page while the long page is only 20% inside the short one. To see every match of one page, look for it in both address columns. Very long page text that does not fit in one Excel cell continues in extra "Content_part_2", "Content_part_3" columns; "Content_parts" says how many cells the text uses and "Content_split" says whether it was split (normally 1 and FALSE). Sheet "How to read" explains every column. |
+| Project report (Excel) | The one workbook most people need. Sheet "Pages": every address with its whole text (line breaks shown), whether it was fully extracted (Yes/No), a plain "Extraction completeness" statement ("Complete", "Incomplete: 1 tab not opened (Pricing)", "Complete, but the page kept changing", "Placeholder page (Lorem ipsum)"), an overall Confidence of High, Medium or Low that can only be High when the page is fully captured, the share of the captured text confirmed against the live page, how reliably it was read (text from the page's code is 100%, text read from images lower), what is missing, the day the page was last checked, the date the website gives for its last update, and what the run did ("New: scraped in full", "Reused: unchanged since 26 October" or "Re-scraped: changed since the last capture"). Sheet "Matching content": every pair of addresses that carry the same text, listed once (A with B is never repeated as B with A), by exact word-for-word matching (menus, headers and footers left out), with two percentages: how much of the first page's text is on the second, and how much of the second's is on the first. They differ when the pages differ in length: a short page can be 100% inside a long page while the long page is only 20% inside the short one. To see every match of one page, look for it in both address columns. Very long page text that does not fit in one Excel cell continues in extra "Content_part_2", "Content_part_3" columns; "Content_parts" says how many cells the text uses and "Content_split" says whether it was split (normally 1 and FALSE). Sheet "How to read" explains every column. |
 | R1 URL content (Excel, CSV) | One row per address: verdict, word count, gaps, and the whole extracted text. Long text is split across columns so Excel never cuts it off. |
 | Review queue (Excel, CSV) | The pages that need a human decision, most serious first, with a blank column for the reviewer. |
 | R2 overlap (Excel, CSV) | Groups of pages that share the same text (duplicate or near-duplicate content), with the shared passages quoted. |
@@ -201,7 +211,7 @@ On the John Hancock run (39 addresses) it took about 9 seconds: 12 pages went in
 - Semantic similarity: finding pages that say the same thing in different words (planned with a vector database).
 - The rest of the knowledge base: the list of each website's offerings, labelling every page and section with them, search across sections, and competitor comparison and gap reports are designed but not built yet (step 1, stamping and sections, is done).
 - Hidden page text: some text present in the page code (for example frequently-asked-question answers) is not yet revealed and captured by the browser exploration; the engine flags these pages for review rather than counting them complete.
-- A text-joining fault (20 October) glues neighbouring words on some live pages; until it is fixed those pages are flagged for review.
+- Skipping a page without asking the website at all (for example from the dates in the site's sitemap): every page seen before still gets one light request.
 
 ## 8. Glossary
 
@@ -227,6 +237,7 @@ On the John Hancock run (39 addresses) it took about 9 seconds: 12 pages went in
 
 | Date | Significant change |
 |---|---|
+| 2026-10-27 | URL history: any list of addresses is checked against every earlier run; unchanged pages keep their earlier content and are not scraped again, only new or changed ones are. A pre-run check lists which addresses were scraped before and when. The project report shows Last checked, Site last updated and Action for every page. Cookie banners and chat bubbles on the screenshot no longer cause false "needs a check" verdicts. |
 | 2026-10-27 | Knowledge base step 1: a "stamp" command records each page's facts (titles, descriptions, structured data, menus, calls to action, numbers, dates), builds the site's full menu tree including mega-menus, leaves out images, error, placeholder and duplicate pages with the reason, and splits each page into sections that keep their page, heading and neighbours. John Hancock: 12 pages, 51 sections, a 72-entry menu tree, in about 9 seconds at $0. |
 | 2026-10-26 | Matching-content sheet columns renamed for clarity: "URL (A)", "Matching URL (B)", "% of A in B" and "% of B in A". Chat-widget invitations (for example "Live chat") are no longer treated as missed page content. Unattended runs wait up to six minutes for held work, so render retries (30, 90 and 180 seconds) finish before a run stops. |
 | 2026-10-26 | Columns of wide tables that you scroll sideways are captured (they were wrongly treated as hidden). A page the browser cannot open is retried by itself over about five minutes instead of a few seconds. Live John Hancock, 303 pages: 279 verified. |

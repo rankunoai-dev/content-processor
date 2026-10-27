@@ -278,8 +278,12 @@ class RenderWorker:
         state_blocks, explore_facts = self._apply_exploration(
             resource_id, result, rendered_blocks, exploration, evidence_ids
         )
+        overlay_blocks = self._overlay_blocks(resource_id, result)
         self._ledger.upsert_blocks(
-            resource_id, stamp_blocks([*source_blocks, *rendered_blocks, *state_blocks], resource)
+            resource_id,
+            stamp_blocks(
+                [*source_blocks, *rendered_blocks, *state_blocks, *overlay_blocks], resource
+            ),
         )
 
         summary: dict[str, Any] = {
@@ -392,6 +396,26 @@ class RenderWorker:
         return status if _worse(status, EntityStatus.PARTIAL) else EntityStatus.PARTIAL
 
     # -- exploration ------------------------------------------------------------
+
+    def _overlay_blocks(self, resource_id: str, result: RenderResult) -> list[ContentBlock]:
+        """Cookie and chat widget text seen at screenshot time, as third-party blocks.
+
+        Such widgets often load just after the DOM is saved. Without their text the
+        visual-text check (R6) reads them off the screenshot as page text that was
+        never extracted. They stay out of the content: every block is third-party.
+        """
+        overlay_html = getattr(result, "overlay_html", "")
+        if not overlay_html:
+            return []
+        ref = self._evidence.put(overlay_html.encode("utf-8"), "text/html")
+        blocks = extract_html_source(
+            overlay_html.encode("utf-8"),
+            base_url=result.final_url,
+            evidence_id=f"evidence:{ref.sha256}",
+            resource_id=resource_id,
+            state_id=f"{self._run_id}|overlay",
+        ).blocks
+        return [b.model_copy(update={"layer": ContentLayer.THIRD_PARTY_CHROME}) for b in blocks]
 
     def _apply_exploration(
         self,

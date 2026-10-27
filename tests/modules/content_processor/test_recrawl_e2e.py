@@ -22,9 +22,11 @@ from src.modules.content_processor.enums import (
     TaskKind,
     UiRegion,
 )
+from src.modules.content_processor.export.project_report import action
 from src.modules.content_processor.ledger.memory import MemoryLedger
 from src.modules.content_processor.planner import fetch_tasks_for
 from src.modules.content_processor.recrawl import Baseline
+from src.modules.content_processor.recrawl.history import UrlHistory
 from src.modules.content_processor.scheduler import (
     RunOptions,
     assemble_run_records,
@@ -189,3 +191,32 @@ async def test_changed_text_with_stale_date_is_still_re_extracted(tmp_path: Path
     )
     assert second.change_status is ChangeStatus.CHANGED
     assert second.change_basis == "visible_text_changed;site_modified_date_not_updated"
+
+
+async def test_url_history_is_the_baseline_without_naming_a_previous_run(tmp_path: Path):
+    """Run 1 is remembered; run 2 finds it in the history and reuses the unchanged page."""
+    history = UrlHistory(tmp_path / "history", "t1")
+    _, first, _ = await _run(tmp_path / "a", "run-1", None)
+    assert history.remember([first], run_name="first") == 1
+    ledger, second, sent = await _run(tmp_path / "b", "run-2", history.baseline_for([URL]))
+    assert sent == ['"v1"'], "the history supplied the previous ETag"
+    assert second.change_status is ChangeStatus.UNCHANGED
+    assert _render_tasks(ledger) == 0
+    assert action(second) == f"Reused: unchanged since {first.captured_at.date().isoformat()}"
+    # the history now points at the newer check, still with the first capture's text date
+    history.remember([second], run_name="second")
+    entry = UrlHistory(tmp_path / "history", "t1").lookup(URL)
+    assert entry is not None and entry.run_name == "second"
+    assert entry.content_captured_at is not None
+    assert entry.content_captured_at.date() == first.captured_at.date()
+
+
+async def test_url_history_sees_a_changed_page_and_re_extracts(tmp_path: Path):
+    history = UrlHistory(tmp_path / "history", "t1")
+    _, first, _ = await _run(tmp_path / "a", "run-1", None)
+    history.remember([first])
+    server.FRESH_PAGE.update(etag='"v2"', text="Our annual fee is $150 for every plan.")
+    ledger, second, _ = await _run(tmp_path / "b", "run-2", history.baseline_for([URL]))
+    assert second.change_status is ChangeStatus.CHANGED
+    assert _render_tasks(ledger) == 1
+    assert action(second) == "Re-scraped: changed since the last capture"

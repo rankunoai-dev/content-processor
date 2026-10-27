@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import csv
 import json
 import sys
 import time
@@ -65,6 +66,7 @@ from src.modules.content_processor.ledger.memory import MemoryLedger
 from src.modules.content_processor.ledger.tasks import TaskLedger, new_run_id
 from src.modules.content_processor.planner import fetch_tasks_for
 from src.modules.content_processor.recrawl import Baseline
+from src.modules.content_processor.recrawl.history import UrlHistory, describe
 from src.modules.content_processor.scheduler import (
     DurableLedger,
     LazyRenderStage,
@@ -347,6 +349,23 @@ def _baseline_from_file(args: argparse.Namespace) -> Baseline | None:
     return Baseline.from_jsonl(Path(path)) if path else None
 
 
+def _history_for(scope: RunScope, args: argparse.Namespace) -> UrlHistory | None:
+    """The tenant's URL history, unless `--no-history`."""
+    if getattr(args, "no_history", False):
+        return None
+    return UrlHistory(get_settings().cp_url_history_root, scope.tenant_id)
+
+
+def _baseline_from_history(
+    history: UrlHistory | None, plan: FrontierPlan
+) -> tuple[Baseline | None, str | None]:
+    """Earlier captures of this run's URLs from the history (any earlier run)."""
+    if history is None:
+        return None, None
+    baseline = history.baseline_for(e.requested_url for e in plan.entries)
+    return (baseline, "history") if len(baseline) else (None, None)
+
+
 def _baseline_info(baseline: Baseline | None, source: str | None) -> dict[str, Any] | None:
     if baseline is None:
         return None
@@ -372,13 +391,14 @@ def _finish(
     report: dict[str, Any],
     out: str | None,
     reports_dir: str | None = None,
+    history: UrlHistory | None = None,
 ) -> dict[str, Any]:
     """Assemble UrlRecords, write outputs and the Stage 4 bundle, return the report.
 
     `--out` writes the run report, full records, content and review queue next
     to it, plus the Stage 4 bundle in `<out stem>_reports/` unless
     `--reports-dir` names another directory. `--reports-dir` alone writes only
-    the bundle.
+    the bundle. With a URL history, the run's captures are remembered in it.
     """
     records = assemble_run_records(
         reader,
@@ -420,6 +440,9 @@ def _finish(
             Path(out), reader=reader, run_id=run_id, records=records, report=full
         )
         full["outputs"] = outputs.model_dump()
+    if history is not None:
+        remembered = history.remember(records, run_name=Path(out).stem if out else None)
+        full["history"] = {"remembered": remembered, "known_urls": len(history)}
     return full
 
 
@@ -456,7 +479,11 @@ async def _dryrun(args: argparse.Namespace) -> int:
     ledger.enqueue(fetch_tasks_for(run_id, plan))
     evidence = LocalEvidenceStore(get_settings().cp_evidence_root, scope.tenant_id)
     stages = _parse_stages(args.stages, no_render=args.no_render, no_docs=args.no_docs)
+    history = _history_for(scope, args)
     baseline = _baseline_from_file(args)
+    baseline_source = getattr(args, "baseline", None)
+    if baseline is None:
+        baseline, baseline_source = _baseline_from_history(history, plan)
     execution = await _drive(
         ledger,
         scope=scope,
@@ -472,7 +499,7 @@ async def _dryrun(args: argparse.Namespace) -> int:
         "run_id": run_id,
         "mode": "dryrun_memory_ledger",
         "paid_tiers": paid_tier_status(scope),
-        "baseline": _baseline_info(baseline, getattr(args, "baseline", None)),
+        "baseline": _baseline_info(baseline, baseline_source),
         "scheduled": len(plan.entries),
         "excluded_at_plan": [x.model_dump() for x in plan.excluded],
         "execution": execution.model_dump(),
@@ -488,6 +515,7 @@ async def _dryrun(args: argparse.Namespace) -> int:
             report=report,
             out=args.out,
             reports_dir=args.reports_dir,
+            history=history,
         )
     )
     return 0
@@ -555,6 +583,9 @@ async def _durable(args: argparse.Namespace, *, create: bool) -> int:
                 )
             )
             baseline_source = f"run:{prior_run}"
+        history = _history_for(scope, args)
+        if baseline is None:
+            baseline, baseline_source = _baseline_from_history(history, plan)
         execution = await _drive(
             ledger,
             scope=scope,
@@ -588,6 +619,7 @@ async def _durable(args: argparse.Namespace, *, create: bool) -> int:
                 report=report,
                 out=getattr(args, "out", None),
                 reports_dir=getattr(args, "reports_dir", None),
+                history=history,
             )
         )
     finally:
@@ -679,6 +711,35 @@ def _add_drive_options(p: argparse.ArgumentParser) -> None:
     p.add_argument(
         "--baseline", default=None, help="previous run's .records.jsonl: reuse unchanged pages"
     )
+    p.add_argument(
+        "--no-history",
+        action="store_true",
+        help="neither compare with nor update the URL history (every page scraped afresh)",
+    )
+
+
+def cmd_history(args: argparse.Namespace) -> int:
+    """Before scraping: which of these URLs were scraped before, when, and site dates."""
+    history = UrlHistory(get_settings().cp_url_history_root, args.tenant)
+    urls = [
+        u.strip() for u in Path(args.urls).read_text(encoding="utf-8").splitlines() if u.strip()
+    ]
+    rows = [{"URL": u, **describe(history.lookup(u))} for u in dict.fromkeys(urls)]
+    if args.out:
+        with Path(args.out).open("w", encoding="utf-8-sig", newline="") as fh:
+            writer = csv.DictWriter(fh, fieldnames=list(rows[0]) if rows else ["URL"])
+            writer.writeheader()
+            writer.writerows(rows)
+    _emit(
+        {
+            "urls": len(rows),
+            "scraped_before": sum(1 for r in rows if r["Scraped before"] == "Yes"),
+            "new": sum(1 for r in rows if r["Scraped before"] == "No"),
+            "known_urls": len(history),
+            "out": args.out,
+        }
+    )
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -704,6 +765,12 @@ def main(argv: list[str] | None = None) -> int:
     p_run.add_argument("--baseline-run", default=None, help="durable run id to compare with")
     _add_drive_options(p_run)
     p_run.set_defaults(func=cmd_run)
+
+    p_hist = sub.add_parser("history", help="which URLs were scraped before, and when")
+    p_hist.add_argument("--urls", required=True, help="text file, one URL per line")
+    p_hist.add_argument("--tenant", default="rankuno-dev")
+    p_hist.add_argument("--out", default=None, help="write a CSV with one row per URL")
+    p_hist.set_defaults(func=cmd_history)
 
     p_start = sub.add_parser("start", help="durable: create a run and enqueue fetches only")
     p_start.add_argument("--scope", required=True)

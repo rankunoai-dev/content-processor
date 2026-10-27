@@ -32,6 +32,13 @@ def _isolate_settings_cache() -> Iterator[None]:
 
 
 @pytest.fixture(autouse=True)
+def _isolate_url_history(tmp_path, monkeypatch) -> None:
+    """Runs never share the developer's URL history (each test starts with none)."""
+    monkeypatch.setenv("CP_URL_HISTORY_ROOT", str(tmp_path / "url_history"))
+    reset_settings_cache()
+
+
+@pytest.fixture(autouse=True)
 def _isolate_registry() -> Iterator[None]:
     registry.clear()
     yield

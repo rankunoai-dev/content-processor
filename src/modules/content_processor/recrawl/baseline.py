@@ -16,7 +16,7 @@ from src.modules.content_processor.contracts import UrlRecord
 from src.modules.content_processor.enums import EntityStatus, UrlBadge
 from src.modules.content_processor.scope.normalize import InvalidInputUrl, normalize_url
 
-__all__ = ["Baseline", "conditional_headers"]
+__all__ = ["Baseline", "conditional_headers", "url_key"]
 
 _REUSABLE_BADGES = frozenset(
     {UrlBadge.VERIFIED_WITHIN_SCOPE, UrlBadge.PARTIAL, UrlBadge.NEEDS_REVIEW}
@@ -24,7 +24,8 @@ _REUSABLE_BADGES = frozenset(
 _UNUSABLE_STATUSES = frozenset({EntityStatus.FAILED, EntityStatus.BLOCKED})
 
 
-def _key(url: str | None) -> str | None:
+def url_key(url: str | None) -> str | None:
+    """The normalized key a URL is stored under (any spelling of one page matches)."""
     if not url:
         return None
     try:
@@ -41,19 +42,19 @@ class Baseline:
         self._by_key: dict[str, UrlRecord] = {}
         self.skipped = 0
         for record in records:
-            if not self._reusable(record):
+            if not self.reusable(record):
                 self.skipped += 1
                 continue
             for key in {
                 record.schedule_key,
-                _key(record.requested_url),
-                _key(record.final_url),
+                url_key(record.requested_url),
+                url_key(record.final_url),
             }:
                 if key:
                     self._by_key[key] = record
 
     @staticmethod
-    def _reusable(record: UrlRecord) -> bool:
+    def reusable(record: UrlRecord) -> bool:
         """A failed, blocked or never-acquired capture is nothing to compare with."""
         if record.badge not in _REUSABLE_BADGES or record.payload_sha256 is None:
             return False
@@ -76,7 +77,7 @@ class Baseline:
     def lookup(self, *urls: str | None) -> UrlRecord | None:
         """The previous capture for any of these URLs or schedule keys."""
         for url in urls:
-            key = url if url in self._by_key else _key(url)
+            key = url if url in self._by_key else url_key(url)
             if key and key in self._by_key:
                 return self._by_key[key]
         return None

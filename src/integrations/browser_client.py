@@ -213,6 +213,28 @@ SETTLE_PROBE_JS = """
 }
 """
 
+# Cookie-consent and chat widgets often load a moment after the page settles: they can
+# be missing from the saved DOM yet on the screenshot taken just after it. Their HTML
+# is read at screenshot time so the visual-text check (R6) can account for them; it is
+# kept as third-party text, never as page content. Outermost matches only.
+OVERLAY_SELECTORS = (
+    "#onetrust-consent-sdk,#onetrust-banner-sdk,#CybotCookiebotDialog,#didomi-host,"
+    ".truste_box_overlay,#usercentrics-root,.qc-cmp2-container,"
+    '[class*="webchat" i],[id*="webchat" i],[class*="chat-widget" i],'
+    '[class*="virtual-assistant" i]'
+)
+OVERLAY_JS = """
+(selectors) => {
+  const out = [];
+  for (const el of document.querySelectorAll(selectors)) {
+    if (el.parentElement && el.parentElement.closest(selectors)) { continue; }
+    if (!(el.innerText || '').trim()) { continue; }
+    out.push(el.outerHTML.slice(0, 200000));
+  }
+  return out;
+}
+"""
+
 # DOM and visible text read in one call, so nothing can change between the two reads.
 SNAPSHOT_JS = """
 () => {
@@ -306,6 +328,7 @@ class RenderResult(StrictModel):
     captured_responses: list[CapturedResponse] = Field(default_factory=list)
     settle: dict[str, Any] = Field(default_factory=dict)
     annotation: dict[str, int] = Field(default_factory=dict)
+    overlay_html: str = ""
     elapsed_ms: float = 0.0
     transport_error: str | None = None
 
@@ -509,6 +532,15 @@ class BrowserRenderer:
             except PlaywrightError as exc:
                 screenshot = b""
                 console_errors.append(f"screenshot_failed:{str(exc)[:120]}")
+            try:
+                overlays = list(await page.evaluate(OVERLAY_JS, OVERLAY_SELECTORS))
+            except PlaywrightError:
+                overlays = []
+            overlay_html = (
+                "<html><body>" + "".join(str(o) for o in overlays) + "</body></html>"
+                if overlays
+                else ""
+            )
             final_url = page.url
             if on_page is not None:
                 try:
@@ -545,6 +577,7 @@ class BrowserRenderer:
                 captured_responses=captured,
                 settle=settle,
                 annotation=annotation,
+                overlay_html=overlay_html,
             )
         finally:
             await context.close()
