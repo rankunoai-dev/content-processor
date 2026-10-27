@@ -84,6 +84,8 @@ Evidence is stored compactly. Web pages carry the same fonts and style sheets on
 
 The engine keeps a URL history: for every address it has ever captured, the latest capture, the day it was scraped, and the date the website itself gives for the page's last update. Every run checks it automatically, whatever list of addresses you give it and whichever earlier runs they came from.
 
+The site's update date is taken from what the page itself states (its structured data or tags). A web server's own "last modified" time is used only when it is at least a week old: many sites send the time the page was last rebuilt on their servers, not the time someone edited it. When a site does not say, the column is left empty rather than guessed.
+
 - An address never seen before is scraped in full.
 - An address seen before gets one light "has this changed since our last visit?" request. If the site answers "not changed", or the page's text is word for word the same, the earlier content is kept and the slow browser step is skipped.
 - If the text changed, the page is scraped again, even when the site's update date did not move (sites often edit pages without changing the date). If only the date moved and the text is the same, the earlier content is kept.

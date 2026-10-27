@@ -29,6 +29,11 @@ from src.core.schemas import StrictModel
 __all__ = ["PageDates", "extract_page_dates", "parse_date"]
 
 _DYNAMIC_WINDOW = timedelta(seconds=120)
+# Many CMS and CDNs send a web page's Last-Modified as the time the page was last
+# regenerated or cached, not edited (live John Hancock: 49 of 51 pages, minutes to
+# hours before the fetch, on press releases from 2021). For HTML a recent header is
+# therefore not taken as the page's update date; an older one usually is a real edit.
+_HTML_HEADER_MIN_AGE = timedelta(days=7)
 _MODIFIED_META = (
     ("article:modified_time", "meta:article_modified_time"),
     ("og:updated_time", "meta:og_updated_time"),
@@ -152,7 +157,8 @@ def extract_page_dates(
     now = fetched_at or datetime.now(UTC)
     http_lm = headers.get("last-modified")
     http_lm_dt = parse_date(http_lm)
-    dynamic = http_lm_dt is not None and abs(now - http_lm_dt) <= _DYNAMIC_WINDOW
+    window = _HTML_HEADER_MIN_AGE if sniffed_mime == "text/html" else _DYNAMIC_WINDOW
+    dynamic = http_lm_dt is not None and abs(now - http_lm_dt) < window
     dates = PageDates(
         http_last_modified=http_lm,
         http_etag=headers.get("etag"),

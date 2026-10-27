@@ -79,6 +79,22 @@ def test_http_last_modified_used_unless_it_is_just_now():
     assert dynamic.modified_at is None and dynamic.http_last_modified_is_dynamic
 
 
+def test_a_web_pages_recent_last_modified_is_a_cache_time_not_an_edit():
+    """Live John Hancock: a 2021 press release served with Last-Modified hours ago."""
+    header = {"last-modified": "Mon, 01 Sep 2026 10:00:00 GMT"}
+    page = extract_page_dates(
+        body=_html(""), headers=header, sniffed_mime="text/html", fetched_at=T0 + timedelta(hours=7)
+    )
+    assert page.modified_at is None and page.http_last_modified == header["last-modified"]
+    pdf = extract_page_dates(
+        body=b"%PDF-1.4",
+        headers=header,
+        sniffed_mime="application/pdf",
+        fetched_at=T0 + timedelta(hours=7),
+    )
+    assert pdf.modified_at == T0 and pdf.modified_source == "http:last-modified"
+
+
 def test_pdf_moddate():
     body = b"%PDF-1.7\n1 0 obj << /ModDate (D:20260901100000+00'00') >> endobj"
     d = extract_page_dates(body=body, headers={}, sniffed_mime="application/pdf")

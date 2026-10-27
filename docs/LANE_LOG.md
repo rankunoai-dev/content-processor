@@ -585,3 +585,9 @@ git worktree add ../content-processor-lane4 -b lane/L4-verify
 - **Tests:** history unit tests, two e2e recrawls through the history (unchanged reused with no render; changed re-extracted), CLI dryrun ×3 (history, history, `--no-history`) and `cli history`, overlay blocks in the render worker, live-browser overlay capture. Tests isolate `CP_URL_HISTORY_ROOT` per test.
 - **Gate:** ruff format and check clean, mypy strict clean (114 files), pytest full run with one stale row-equality test (updated for the new columns), coverage 94.39%.
 - **Not built:** skipping known URLs with no request at all (sitemap `lastmod`); a shared history and evidence root across checkouts (set `CP_URL_HISTORY_ROOT` and `CP_EVIDENCE_ROOT` together).
+
+## [2026-10-27] Recent HTML Last-Modified is a cache time, not an edit date
+
+- **Branch:** `fix/html-last-modified` (on `main` `464f86b`). For `text/html`, an HTTP Last-Modified newer than 7 days (`_HTML_HEADER_MIN_AGE`) is not used as `page_modified_at` (it is kept as `http_last_modified` for conditional requests); files keep the 120 s rule. Live jh_full: 49 of 51 header dates were 0–8 h before the fetch on pages from 2021–2026; those 49 cleared in `exports/jh_full` and the URL history (the change decision was unaffected: text is compared before dates).
+- **jh_full final:** 301 of 303 supplied URLs VERIFIED_WITHIN_SCOPE after re-running the 15 table pages, 3 timed-out pages and 4 R6 pages on the fixes; the 2 others are placeholder pages. Seeded into the URL history (308 URLs). Evidence of the jh_full worktrees copied into the main checkout's store (content-addressed; 36,550 references resolve).
+- **Gate:** ruff, mypy strict (120 files), pytest rc 0, coverage 94.36%.
