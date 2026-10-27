@@ -217,6 +217,24 @@ def _clean(text: str) -> str:
     return _NEW_TAB.sub("", out).strip()[:_LABEL_CHARS]
 
 
+_NOT_A_PAGE = ("#", "javascript:", "mailto:", "tel:", "data:")
+
+
+def _menu_href(base_url: str, raw: str | None) -> str | None:
+    """Where a menu link goes, or None for a script button or a link to the page itself.
+
+    A consent button written as `<a href="#">` resolves to whatever page it is on;
+    taken as an address it would look like a different destination on every page.
+    """
+    raw = (raw or "").strip()
+    if not raw or raw.lower().startswith(_NOT_A_PAGE):
+        return None
+    href = urljoin(base_url, raw)
+    if href.split("#", 1)[0].rstrip("/") == base_url.split("#", 1)[0].rstrip("/"):
+        return None
+    return href
+
+
 def _own_label(li: Node, base_url: str) -> tuple[str, str | None]:
     """The text and link of a list item, leaving out its nested lists."""
     parts: list[str] = []
@@ -228,8 +246,10 @@ def _own_label(li: Node, base_url: str) -> tuple[str, str | None]:
             if child.tag == "-text":
                 parts.append(child.text(deep=False) or "")
             elif child.tag not in ("ul", "ol", "script", "style", "svg"):
-                if child.tag == "a" and not hrefs and child.attributes.get("href"):
-                    hrefs.append(urljoin(base_url, child.attributes.get("href") or ""))
+                if child.tag == "a" and not hrefs:
+                    href = _menu_href(base_url, child.attributes.get("href"))
+                    if href:
+                        hrefs.append(href)
                 walk(child)
             child = child.next
 
@@ -269,12 +289,12 @@ def _nearest_li(node: Node) -> Node | None:
 
 def _flat_links(container: Node, base_url: str, budget: list[int]) -> list[MenuItem]:
     items: list[MenuItem] = []
-    seen: set[tuple[str, str]] = set()
+    seen: set[tuple[str, str | None]] = set()
     for a in container.css("a[href]"):
         if budget[0] <= 0:
             break
         label = _clean(a.text(deep=True, separator=" ") or a.attributes.get("aria-label") or "")
-        href = urljoin(base_url, a.attributes.get("href") or "")
+        href = _menu_href(base_url, a.attributes.get("href"))
         if not label or (label, href) in seen:
             continue
         seen.add((label, href))

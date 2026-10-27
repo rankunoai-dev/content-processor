@@ -178,14 +178,33 @@ class _Draft:
         return token_estimate(self.text)
 
 
+def _bounded_sentences(text: str) -> list[str]:
+    """Sentences, with any single sentence longer than the target cut between words."""
+    out: list[str] = []
+    for start, end in split_sentences(text):
+        sentence = text[start:end]
+        if token_estimate(sentence) <= TARGET_TOKENS:
+            out.append(sentence)
+            continue
+        part = ""
+        for word in sentence.split():
+            if part and token_estimate(f"{part} {word}") > TARGET_TOKENS:
+                out.append(part)
+                part = word
+            else:
+                part = f"{part} {word}".strip()
+        if part:
+            out.append(part)
+    return out
+
+
 def _split_long(block: ContentBlock) -> list[_Piece]:
     text = block.normalized_text
     if token_estimate(text) <= TARGET_TOKENS:
         return [_Piece(block, text)]
     pieces: list[_Piece] = []
     current = ""
-    for start, end in split_sentences(text):
-        sentence = text[start:end]
+    for sentence in _bounded_sentences(text):
         candidate = f"{current} {sentence}".strip()
         if current and token_estimate(candidate) > TARGET_TOKENS:
             pieces.append(_Piece(block, current))
