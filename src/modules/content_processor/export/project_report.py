@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 from collections.abc import Sequence
+from datetime import UTC, datetime
 
 from src.modules.content_processor.analysis.overlap import (
     OverlapConfig,
@@ -26,13 +27,14 @@ from src.modules.content_processor.analysis.overlap import (
     docs_from_records,
 )
 from src.modules.content_processor.contracts import ContentBlock, UrlRecord
-from src.modules.content_processor.enums import EntityStatus, GapType, UrlBadge
+from src.modules.content_processor.enums import ChangeStatus, EntityStatus, GapType, UrlBadge
 from src.modules.content_processor.export.content import (
     DEFAULT_LAYERS,
     drop_duplicates,
     whole_content,
 )
 from src.modules.content_processor.export.tabular import Cell, Table, expand_split_column
+from src.modules.content_processor.recrawl.baseline import extraction_time
 
 __all__ = [
     "DEFAULT_MIN_MATCH_PCT",
@@ -58,9 +60,20 @@ PAGES_COLUMNS = [
     "Reading confidence %",
     "Words",
     "Status",
+    "Last scraped",
+    "Site last modified",
+    "Scrape action",
     "What is missing",
 ]
 HIGH, MEDIUM, LOW, NOT_RATED = "High", "Medium", "Low", "Not rated"
+_CHANGE_REASONS = {
+    "http_304_not_modified": "server said not modified",
+    "payload_identical": "same file",
+    "visible_text_identical": "same visible text",
+    "site_modified_date_newer": "the site's date is newer",
+    "visible_text_changed": "visible text changed",
+    "payload_changed": "file changed",
+}
 _PLACEHOLDER_WORDS = ("lorem ipsum",)
 # Plain names of the controls the explorer can leave unopened.
 _CONTROL_WORDS = {
@@ -157,6 +170,25 @@ _NOTES: list[tuple[str, str]] = [
         "Pages: Reading confidence %",
         "How reliably the captured words were read, weighted by words: text taken from the "
         "page's code is 100%, text read from images (OCR) is lower.",
+    ),
+    (
+        "Pages: Last scraped",
+        "When the content in this row was extracted (UTC). For a page reused from an "
+        "earlier run because it had not changed, this is the earlier extraction.",
+    ),
+    (
+        "Pages: Site last modified",
+        "When the website says the page or file was last changed (structured data, page "
+        "tags or the server's Last-Modified header); empty when it does not say.",
+    ),
+    (
+        "Pages: Scrape action",
+        "What this run did compared with all earlier runs: 'New page' (never captured "
+        "before), 'Reused (unchanged: ...)' (the server said not modified, or the file or "
+        "its visible text is identical, so the earlier extraction was kept), 'Re-scraped "
+        "(updated: ...)' (the page changed and was extracted again; the visible text is "
+        "compared, so an edit is caught even when the site's date was not updated), or "
+        "'Re-scraped (unchanged, but the earlier capture was too old to reuse)'.",
     ),
     ("Pages: What is missing", "In plain words, why the page is not fully extracted."),
     (
@@ -299,6 +331,29 @@ def page_confidence(
     return MEDIUM
 
 
+def _when(moment: datetime | None) -> str:
+    return moment.astimezone(UTC).strftime("%Y-%m-%d %H:%M") if moment is not None else ""
+
+
+def scrape_action(record: UrlRecord) -> str:
+    """What this run did with the page compared with earlier runs, in plain words."""
+    status = record.change_status
+    basis = record.change_basis or ""
+    reason = _CHANGE_REASONS.get(basis.split(";", 1)[0], "")
+    if status is None:
+        return "Scraped (not compared with earlier runs)"
+    if status is ChangeStatus.NEW:
+        return "New page"
+    if status is ChangeStatus.UNCHANGED:
+        if "reuse_not_allowed" in basis:
+            return "Re-scraped (unchanged, but the earlier capture was too old to reuse)"
+        return f"Reused (unchanged: {reason})" if reason else "Reused (unchanged)"
+    if status is ChangeStatus.CHANGED:
+        note = "; the site's date was not updated" if "date_not_updated" in basis else ""
+        return f"Re-scraped (updated: {reason}{note})" if reason else "Re-scraped (updated)"
+    return "Scraped (change unknown)"
+
+
 def page_rows(records: Sequence[UrlRecord]) -> list[dict[str, Cell]]:
     """Sheet "Pages": one row per requested URL."""
     rows: list[dict[str, Cell]] = []
@@ -322,6 +377,9 @@ def page_rows(records: Sequence[UrlRecord]) -> list[dict[str, Cell]]:
                 "Reading confidence %": reading_pct,
                 "Words": total,
                 "Status": _STATUS.get(record.badge, record.badge.value),
+                "Last scraped": _when(extraction_time(record)),
+                "Site last modified": _when(record.page_modified_at),
+                "Scrape action": scrape_action(record),
                 "What is missing": _missing(record),
             }
         )

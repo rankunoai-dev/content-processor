@@ -15,9 +15,16 @@ Reports (no database):
 
 Every `--out` also writes the Stage 4 bundle to `<out stem>_reports/` (or `--reports-dir`).
 
-Recrawl: `--baseline <previous .records.jsonl>` (any run) or `--baseline-run <run id>`
-(durable) makes fetches conditional; a URL whose bytes or visible text did not change
-reuses the previous extraction instead of rendering, exploring and OCR-ing it again.
+Recrawl: every run looks each URL up in the tenant's global history
+(`<evidence root>/<tenant>/history.sqlite`, all earlier runs) and adds its own records
+to it at the end. `--baseline <previous .records.jsonl>` or `--baseline-run <run id>`
+(durable) compare with one named run instead. Fetches are conditional; a URL whose
+bytes or visible text did not change reuses the previous extraction instead of
+rendering, exploring and OCR-ing it again. History captures are reused only when
+extracted in the last 30 days (`--reuse-max-age-days`, `--reuse-since <date>`);
+older ones are compared and extracted again. `--no-history` turns history off.
+    ... history import --records x.records.jsonl --tenant t   add a past run to history
+    ... history show --url <url> --tenant t                    every capture of a URL
     ... fetch  --scope <scope.json> --run <id>                           work --stages fetch
     ... status --run <id>                                                task and resource counts
 
@@ -34,6 +41,7 @@ import sys
 import time
 from collections import Counter
 from collections.abc import Callable, Sequence
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -64,7 +72,13 @@ from src.modules.content_processor.knowledge.commands import register as registe
 from src.modules.content_processor.ledger.memory import MemoryLedger
 from src.modules.content_processor.ledger.tasks import TaskLedger, new_run_id
 from src.modules.content_processor.planner import fetch_tasks_for
-from src.modules.content_processor.recrawl import Baseline
+from src.modules.content_processor.recrawl import (
+    Baseline,
+    HistoryBaseline,
+    HistoryIndex,
+    history_path,
+)
+from src.modules.content_processor.recrawl.commands import register as register_history_command
 from src.modules.content_processor.scheduler import (
     DurableLedger,
     LazyRenderStage,
@@ -342,15 +356,60 @@ async def _drive(
             await fetcher.aclose()
 
 
+HISTORY_MAX_AGE_DAYS = 30
+"""Default age limit for reusing a capture found in the global history."""
+
+
+def _reuse_since(args: argparse.Namespace, *, history: bool) -> datetime | None:
+    """The oldest extraction time that may be reused, from the flags (or the default)."""
+    limits: list[datetime] = []
+    since = getattr(args, "reuse_since", None)
+    if since:
+        moment = datetime.fromisoformat(since)
+        limits.append(moment if moment.tzinfo else moment.replace(tzinfo=UTC))
+    days = getattr(args, "reuse_max_age_days", None)
+    if days is None and history:
+        days = HISTORY_MAX_AGE_DAYS
+    if days is not None:
+        limits.append(datetime.now(UTC) - timedelta(days=days))
+    return max(limits) if limits else None
+
+
 def _baseline_from_file(args: argparse.Namespace) -> Baseline | None:
     path = getattr(args, "baseline", None)
-    return Baseline.from_jsonl(Path(path)) if path else None
+    if not path:
+        return None
+    baseline = Baseline.from_jsonl(Path(path))
+    baseline.reuse_since = _reuse_since(args, history=False)
+    return baseline
+
+
+def _open_history(args: argparse.Namespace, tenant: str) -> HistoryIndex | None:
+    if getattr(args, "no_history", False):
+        return None
+    return HistoryIndex(history_path(get_settings().cp_evidence_root, tenant))
+
+
+def _history_baseline(
+    args: argparse.Namespace, history: HistoryIndex | None, evidence: EvidenceStore
+) -> tuple[Baseline | None, str | None]:
+    if history is None:
+        return None, None
+    baseline = HistoryBaseline(
+        history, reuse_since=_reuse_since(args, history=True), evidence_exists=evidence.exists
+    )
+    return baseline, f"history:{history.path}"
 
 
 def _baseline_info(baseline: Baseline | None, source: str | None) -> dict[str, Any] | None:
     if baseline is None:
         return None
-    return {"source": source, "urls": len(baseline), "not_reusable": baseline.skipped}
+    return {
+        "source": source,
+        "urls": len(baseline),
+        "not_reusable": baseline.skipped,
+        "reuse_since": baseline.reuse_since.isoformat() if baseline.reuse_since else None,
+    }
 
 
 def _options(args: argparse.Namespace, stages: list[StageName]) -> RunOptions:
@@ -372,6 +431,7 @@ def _finish(
     report: dict[str, Any],
     out: str | None,
     reports_dir: str | None = None,
+    history: HistoryIndex | None = None,
 ) -> dict[str, Any]:
     """Assemble UrlRecords, write outputs and the Stage 4 bundle, return the report.
 
@@ -396,6 +456,9 @@ def _finish(
         ),
         "url_records": badge_summary(records),
     }
+    if history is not None:
+        added = history.add_records(records)
+        full["history"] = {"path": str(history.path), **vars(added)}
     bundle_dir: Path | None = Path(reports_dir) if reports_dir else None
     if bundle_dir is None and out:
         bundle_dir = Path(out).parent / f"{Path(out).stem}_reports"
@@ -456,7 +519,28 @@ async def _dryrun(args: argparse.Namespace) -> int:
     ledger.enqueue(fetch_tasks_for(run_id, plan))
     evidence = LocalEvidenceStore(get_settings().cp_evidence_root, scope.tenant_id)
     stages = _parse_stages(args.stages, no_render=args.no_render, no_docs=args.no_docs)
+    history = _open_history(args, scope.tenant_id)
+    try:
+        return await _dryrun_with(args, scope, plan, run_id, ledger, evidence, stages, history)
+    finally:
+        if history is not None:
+            history.close()
+
+
+async def _dryrun_with(
+    args: argparse.Namespace,
+    scope: RunScope,
+    plan: FrontierPlan,
+    run_id: str,
+    ledger: MemoryLedger,
+    evidence: EvidenceStore,
+    stages: list[StageName],
+    history: HistoryIndex | None,
+) -> int:
     baseline = _baseline_from_file(args)
+    baseline_source = getattr(args, "baseline", None)
+    if baseline is None:
+        baseline, baseline_source = _history_baseline(args, history, evidence)
     execution = await _drive(
         ledger,
         scope=scope,
@@ -472,7 +556,7 @@ async def _dryrun(args: argparse.Namespace) -> int:
         "run_id": run_id,
         "mode": "dryrun_memory_ledger",
         "paid_tiers": paid_tier_status(scope),
-        "baseline": _baseline_info(baseline, getattr(args, "baseline", None)),
+        "baseline": _baseline_info(baseline, baseline_source),
         "scheduled": len(plan.entries),
         "excluded_at_plan": [x.model_dump() for x in plan.excluded],
         "execution": execution.model_dump(),
@@ -488,6 +572,7 @@ async def _dryrun(args: argparse.Namespace) -> int:
             report=report,
             out=args.out,
             reports_dir=args.reports_dir,
+            history=history,
         )
     )
     return 0
@@ -525,6 +610,7 @@ async def _durable(args: argparse.Namespace, *, create: bool) -> int:
     scope = load_scope(args.scope)
     plan = build_frontier(scope)
     ledger = _open_durable_ledger()
+    history: HistoryIndex | None = None
     try:
         if create:
             ledger.create_schema()
@@ -555,6 +641,9 @@ async def _durable(args: argparse.Namespace, *, create: bool) -> int:
                 )
             )
             baseline_source = f"run:{prior_run}"
+        history = _open_history(args, scope.tenant_id)
+        if baseline is None:
+            baseline, baseline_source = _history_baseline(args, history, evidence)
         execution = await _drive(
             ledger,
             scope=scope,
@@ -588,10 +677,13 @@ async def _durable(args: argparse.Namespace, *, create: bool) -> int:
                 report=report,
                 out=getattr(args, "out", None),
                 reports_dir=getattr(args, "reports_dir", None),
+                history=history,
             )
         )
     finally:
         ledger.close()
+        if history is not None:
+            history.close()
     return 0
 
 
@@ -674,6 +766,20 @@ def _add_drive_options(p: argparse.ArgumentParser) -> None:
     p.add_argument(
         "--baseline", default=None, help="previous run's .records.jsonl: reuse unchanged pages"
     )
+    p.add_argument(
+        "--no-history", action="store_true", help="do not use or update the global URL history"
+    )
+    p.add_argument(
+        "--reuse-since",
+        default=None,
+        help="reuse only captures extracted at or after this date (ISO, e.g. 2026-10-26)",
+    )
+    p.add_argument(
+        "--reuse-max-age-days",
+        type=int,
+        default=None,
+        help=f"reuse only captures extracted within N days (history: {HISTORY_MAX_AGE_DAYS})",
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -731,6 +837,7 @@ def main(argv: list[str] | None = None) -> int:
     register_report_command(sub)
     register_paid_commands(sub)
     register_stamp_command(sub)
+    register_history_command(sub)
 
     p_status = sub.add_parser("status", help="durable: task and resource counts")
     p_status.add_argument("--run", required=True)

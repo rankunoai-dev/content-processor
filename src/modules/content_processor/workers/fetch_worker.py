@@ -300,7 +300,8 @@ class FetchWorker:
         )
         if prior is not None:
             self._priors[resource.resource_id] = prior
-        validators = conditional_headers(prior)
+        # A capture too old to reuse is still compared, but fetched in full.
+        validators = conditional_headers(prior) if self._may_reuse(prior) else {}
         result = await (
             fetcher.fetch(requested_url, headers=validators)
             if validators
@@ -458,7 +459,7 @@ class FetchWorker:
                 modified_at=resource.page_modified_at,
             )
             self._note_change(resource, prior, decision)
-            if decision.reuse:
+            if decision.reuse and self._reuse_or_note(resource, prior):
                 self._reuse(task, resource, prior, decision, depth)
                 return
         self._ledger.upsert_blocks(resource.resource_id, stamp_blocks(extraction.blocks, resource))
@@ -607,10 +608,22 @@ class FetchWorker:
             modified_at=resource.page_modified_at,
         )
         self._note_change(resource, prior, decision)
-        if not decision.reuse:
+        if not decision.reuse or not self._reuse_or_note(resource, prior):
             return False
         self._reuse(task, resource, prior, decision, depth)
         return True
+
+    def _may_reuse(self, prior: UrlRecord | None) -> bool:
+        return (
+            prior is not None and self._baseline is not None and self._baseline.reuse_allowed(prior)
+        )
+
+    def _reuse_or_note(self, resource: Resource, prior: UrlRecord) -> bool:
+        """True when an unchanged page may reuse `prior`; otherwise say why it is re-extracted."""
+        if self._may_reuse(prior):
+            return True
+        resource.change_basis = f"{resource.change_basis};reuse_not_allowed:capture_too_old"
+        return False
 
     def _reuse(
         self,

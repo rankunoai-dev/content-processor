@@ -1,6 +1,6 @@
 # Content Processor: A Plain-Language Guide
 
-Last updated: 26 October 2026 · Code version: main after page stamping (step 1) and the offering catalog (step 2) of the knowledge base · Maintained by every session that adds a significant feature (see "Keeping this guide current" at the end)
+Last updated: 26 October 2026 · Code version: main after page stamping (step 1), the offering catalog (step 2) and the URL history across runs · Maintained by every session that adds a significant feature (see "Keeping this guide current" at the end)
 
 ## 1. What this is, in one paragraph
 
@@ -80,6 +80,18 @@ Each page is downloaded, its type is checked (for example, is this really a PDF,
 
 Evidence is stored compactly. Web pages carry the same fonts and style sheets on every page of a site, and a page photographed in several states repeats them each time, so the engine keeps each of those large repeated pieces once and compresses the rest. Nothing is lost: every original reads back exactly as it was captured, and the evidence-integrity check still proves it. On the live John Hancock run this cut evidence from about 1.2 GB to 65 MB (about 18 times smaller), so a 5,000-page run fits comfortably within the 20 GB storage budget.
 
+### Remembering every page across runs (re-visits)
+
+The engine remembers every page it has captured, in every run, for each client account. When a new list of addresses arrives (some seen before, some new), each address is looked up in that memory first:
+
+- **Never seen before**: captured in full ("New page").
+- **Seen before**: the engine asks the website politely whether the page changed since last time (a light request that the server can answer with "not modified"). If the server says it did not change, or the file is identical, or its visible text is word-for-word the same, the earlier extraction is reused: no browser, no exploring, no image reading ("Reused (unchanged)"). Only pages that changed go through the full process again ("Re-scraped (updated)").
+- **The text decides, not the date**: a page whose wording changed is captured again even when the website forgot to update its "last modified" date, and a page whose date moved but whose text is identical is reused.
+- **Old memories are not trusted forever**: an extraction older than 30 days (changeable per run, or "only reuse what was captured after a given date", for example after an improvement to the engine) is compared but captured again in full, so improvements to the engine reach every page. A page reused run after run still ages from the day it was actually read.
+- **A bad day never erases what is known**: a failed or blocked visit is recorded but does not replace the last good capture, and a capture whose stored evidence is missing is not reused.
+
+The memory lives next to the evidence for that client account, and one command can add older runs to it. This makes repeat runs much faster and gentler on websites: unchanged pages cost one light request instead of a full browser visit. On the two John Hancock runs it holds 357 captures of 308 pages from 16 batches, in under 5 MB.
+
 ### Step 5: Reading the page's text
 
 The engine reads the page's HTML and splits it into blocks (headings, paragraphs, tables), and labels each block by layer: visible content, hidden text, navigation and footer, third-party widgets such as chat boxes, icon codes, and so on. Hidden and decorative text is kept but never mixed into the main content.
@@ -138,7 +150,7 @@ At the end of a run the engine writes a bundle of files. Every file name starts 
 
 | File | What you use it for |
 |---|---|
-| Project report (Excel) | The one workbook most people need. Sheet "Pages": every address with its whole text (line breaks shown), whether it was fully extracted (Yes/No), a plain "Extraction completeness" statement ("Complete", "Incomplete: 1 tab not opened (Pricing)", "Complete, but the page kept changing", "Placeholder page (Lorem ipsum)"), an overall Confidence of High, Medium or Low that can only be High when the page is fully captured, the share of the captured text confirmed against the live page, how reliably it was read (text from the page's code is 100%, text read from images lower), and what is missing. Sheet "Matching content": every pair of addresses that carry the same text, listed once (A with B is never repeated as B with A), by exact word-for-word matching (menus, headers and footers left out), with two percentages: how much of the first page's text is on the second, and how much of the second's is on the first. They differ when the pages differ in length: a short page can be 100% inside a long page while the long page is only 20% inside the short one. To see every match of one page, look for it in both address columns. Very long page text that does not fit in one Excel cell continues in extra "Content_part_2", "Content_part_3" columns; "Content_parts" says how many cells the text uses and "Content_split" says whether it was split (normally 1 and FALSE). Sheet "How to read" explains every column. |
+| Project report (Excel) | The one workbook most people need. Sheet "Pages": every address with its whole text (line breaks shown), whether it was fully extracted (Yes/No), when its content was last scraped, when the site says it last changed, and what this run did with it ("New page", "Reused (unchanged: server said not modified)", "Re-scraped (updated: visible text changed)"), a plain "Extraction completeness" statement ("Complete", "Incomplete: 1 tab not opened (Pricing)", "Complete, but the page kept changing", "Placeholder page (Lorem ipsum)"), an overall Confidence of High, Medium or Low that can only be High when the page is fully captured, the share of the captured text confirmed against the live page, how reliably it was read (text from the page's code is 100%, text read from images lower), and what is missing. Sheet "Matching content": every pair of addresses that carry the same text, listed once (A with B is never repeated as B with A), by exact word-for-word matching (menus, headers and footers left out), with two percentages: how much of the first page's text is on the second, and how much of the second's is on the first. They differ when the pages differ in length: a short page can be 100% inside a long page while the long page is only 20% inside the short one. To see every match of one page, look for it in both address columns. Very long page text that does not fit in one Excel cell continues in extra "Content_part_2", "Content_part_3" columns; "Content_parts" says how many cells the text uses and "Content_split" says whether it was split (normally 1 and FALSE). Sheet "How to read" explains every column. |
 | R1 URL content (Excel, CSV) | One row per address: verdict, word count, gaps, and the whole extracted text. Long text is split across columns so Excel never cuts it off. |
 | Review queue (Excel, CSV) | The pages that need a human decision, most serious first, with a blank column for the reviewer. |
 | R2 overlap (Excel, CSV) | Groups of pages that share the same text (duplicate or near-duplicate content), with the shared passages quoted. |
@@ -236,6 +248,7 @@ On the live John Hancock run (303 addresses), without AI, in a few seconds: 5 fa
 | Exploration | Clicking tabs, expanding sections and scrolling to reveal hidden content. |
 | Fixture | A test page built on purpose to trick the engine. |
 | Release gate | The test that must pass before release: no page may be wrongly marked VERIFIED. |
+| URL history | The engine's memory of every page captured in every run, used to reuse unchanged pages. |
 | Stamp | The set of facts recorded about one page before it goes into the knowledge base. |
 | Chunk (section) | A piece of a page's content, a few hundred words long, that keeps a note of which page and heading it came from. |
 | Offering | A service, product or practice a website offers; the knowledge base maps every page to them. |
@@ -245,6 +258,7 @@ On the live John Hancock run (303 addresses), without AI, in a few seconds: 5 fa
 
 | Date | Significant change |
 |---|---|
+| 2026-10-27 | URL history across runs: every run checks each address against all earlier runs, reuses pages that did not change (the server says so, or the file or its visible text is identical), captures changed and new pages in full, and never reuses an extraction older than 30 days. The project report gains "Last scraped", "Site last modified" and "Scrape action" columns. |
 | 2026-10-27 | Knowledge base step 2: a "catalog" command builds each website's offering catalog from its menus, structured data and folders, places every page under an offering or section, and fills evidence-backed cards; optional local AI adds checked features and suggestions. John Hancock (303 addresses): 5 families, 15 more offerings, 271 of 272 pages placed, at $0. Menu links that are script buttons are no longer read as page addresses. |
 | 2026-10-26 | Knowledge base step 1: a "stamp" command records each page's facts (titles, descriptions, structured data, menus, calls to action, numbers, dates), builds the site's full menu tree including mega-menus, leaves out images, error, placeholder and duplicate pages with the reason, and splits each page into sections that keep their page, heading and neighbours. John Hancock: 12 pages, 51 sections, a 72-entry menu tree, in about 9 seconds at $0. |
 | 2026-10-26 | Columns of wide tables that you scroll sideways are captured (they were wrongly treated as hidden). A page the browser cannot open is retried by itself over about five minutes instead of a few seconds. Live John Hancock, 303 pages: 279 verified. |

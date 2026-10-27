@@ -55,6 +55,9 @@ def test_pages_say_completeness_confidence_and_confirmed_share():
         "Reading confidence %": 100.0,
         "Words": 6,
         "Status": "Fully captured",
+        "Last scraped": "2026-10-16 09:00",
+        "Site last modified": "",
+        "Scrape action": "Scraped (not compared with earlier runs)",
         "What is missing": "",
     }
 
