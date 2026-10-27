@@ -1,6 +1,6 @@
 # Content Processor: A Plain-Language Guide
 
-Last updated: 26 October 2026 · Code version: main after page stamping and context-keeping sections (step 1 of the knowledge base) · Maintained by every session that adds a significant feature (see "Keeping this guide current" at the end)
+Last updated: 26 October 2026 · Code version: main after page stamping (step 1) and the offering catalog (step 2) of the knowledge base · Maintained by every session that adds a significant feature (see "Keeping this guide current" at the end)
 
 ## 1. What this is, in one paragraph
 
@@ -171,6 +171,23 @@ The next stage of the project turns a finished run into a knowledge base: every 
 
 On the John Hancock run (39 addresses) it took about 9 seconds: 12 pages went into the knowledge base (20 exact copies, 4 images, 1 tracking pixel, 1 error page and 1 placeholder page left out), giving 51 sections of about 155 words on average (none over about 400), a header menu tree of 72 entries and a footer of 58.
 
+### Step 12: The offering catalog ("website theming")
+
+A second command ("catalog") turns the stamps into the website's catalog of offerings: every service, product and programme it offers, arranged as a tree of families, offerings and sub-offerings, with a card for each. It writes a file for other tools and an Excel workbook (`<run>_offering_catalog.xlsx`).
+
+**How the list is found.** The engine reads the website's own menus, including the mega-menus, and sorts every entry: an offering group ("Products & services") holds offerings; tasks ("File a claim", "Sign in"), tools ("calculators"), content ("Insights"), corporate pages ("Careers", privacy links) and audiences ("Individuals", "Financial professionals") are set aside and listed separately. Entries that point to the same page, or that have the same name once words such as "insurance" are set aside, become one offering with both names kept. Products and services the pages declare in their structured data are added, and so are folders of the website shared by several pages.
+
+**Every page is placed.** Each page is put under the offering whose web address it sits in (or that its breadcrumb or structured data names); pages that belong to no offering are filed under the section that covers them (for example News); the rest are listed as unplaced.
+
+**Every value has its proof.** A card holds the offering's description, audiences, numbers (prices, ages, periods), questions, calls to action, tools and pages. Each value names where it came from: the menu entry, the page, the structured-data field, or the exact section and sentence. Nothing without proof is written. Each offering also shows how many independent places list it, so a reviewer can see which rest on a single menu.
+
+**Optional local AI, never trusted blindly.** When the company's own AI server (Ollama) is connected, two extra steps can run; only servers on this computer or the company network are accepted, so client content never leaves the company and nothing is paid:
+
+- Similar names are compared by meaning; two offerings are merged only when they are also in the same family and share words. Otherwise the pair is listed as a suggestion for a reviewer.
+- The AI reads each offering's sections and proposes features, deliverables, audiences and pricing. Each proposal must quote the section word for word; the engine checks the quote and drops anything that does not match. A proposed kind of offering (product, service, ...) is applied only when the page's structured data agrees; otherwise it is a suggestion.
+
+On the live John Hancock run (303 addresses), without AI, in a few seconds: 5 families (Life insurance with Permanent, Hybrid, Term, Executive benefits and Vitality; Long-term care; Annuities with Individual and Group annuities; Investments; Retirement with IRAs) and 7 more offerings listed only in the footer (for example College savings, Rollover, Travel insurance), with 63 menu entries set aside as tasks, tools, content and corporate pages. 271 of the 272 pages were placed: 4 under Individual annuities, 267 under News and the podcast sections (this run's addresses were mostly news releases); 1 privacy PDF is unplaced.
+
 ## 5. Safety and cost promises
 
 - Read-only: the engine never submits forms, logs in, buys, unsubscribes or clicks anything that changes the website.
@@ -199,7 +216,7 @@ On the John Hancock run (39 addresses) it took about 9 seconds: 12 pages went in
 - Starting runs from the web: the analyst web app reviews finished runs, but runs are still started from the command line, and there is no live progress feed or deployment package yet.
 - Some content types: text drawn on canvas or in CSS, product variant selectors, audio and video, archives and email files, and old-style .doc and .xls files.
 - Semantic similarity: finding pages that say the same thing in different words (planned with a vector database).
-- The rest of the knowledge base: the list of each website's offerings, labelling every page and section with them, search across sections, and competitor comparison and gap reports are designed but not built yet (step 1, stamping and sections, is done).
+- The rest of the knowledge base: labelling every page and section by its content (not only by its address), search across sections, and competitor comparison and gap reports are designed but not built yet (steps 1 and 2, stamping and the offering catalog, are done). The AI steps of the catalog have been tested against a simulated server only, until the company's Ollama server address is available.
 - Hidden page text: some text present in the page code (for example frequently-asked-question answers) is not yet revealed and captured by the browser exploration; the engine flags these pages for review rather than counting them complete.
 - A text-joining fault (20 October) glues neighbouring words on some live pages; until it is fixed those pages are flagged for review.
 
@@ -222,11 +239,13 @@ On the John Hancock run (39 addresses) it took about 9 seconds: 12 pages went in
 | Stamp | The set of facts recorded about one page before it goes into the knowledge base. |
 | Chunk (section) | A piece of a page's content, a few hundred words long, that keeps a note of which page and heading it came from. |
 | Offering | A service, product or practice a website offers; the knowledge base maps every page to them. |
+| Offering catalog | The tree of a website's offerings (families, offerings, sub-offerings), each with a card of evidenced facts. |
 
 ## 9. Change log
 
 | Date | Significant change |
 |---|---|
+| 2026-10-27 | Knowledge base step 2: a "catalog" command builds each website's offering catalog from its menus, structured data and folders, places every page under an offering or section, and fills evidence-backed cards; optional local AI adds checked features and suggestions. John Hancock (303 addresses): 5 families, 15 more offerings, 271 of 272 pages placed, at $0. Menu links that are script buttons are no longer read as page addresses. |
 | 2026-10-26 | Knowledge base step 1: a "stamp" command records each page's facts (titles, descriptions, structured data, menus, calls to action, numbers, dates), builds the site's full menu tree including mega-menus, leaves out images, error, placeholder and duplicate pages with the reason, and splits each page into sections that keep their page, heading and neighbours. John Hancock: 12 pages, 51 sections, a 72-entry menu tree, in about 9 seconds at $0. |
 | 2026-10-26 | Columns of wide tables that you scroll sideways are captured (they were wrongly treated as hidden). A page the browser cannot open is retried by itself over about five minutes instead of a few seconds. Live John Hancock, 303 pages: 279 verified. |
 | 2026-10-26 | Project report: each pair of matching pages is listed once, with the shared share in both directions. |
