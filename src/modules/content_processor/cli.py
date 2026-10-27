@@ -301,6 +301,7 @@ async def _drive(
             escalation_fetchers=escalation,
             baseline=baseline,
             approvals=approvals,
+            browser_handoff="render" in stage_names,
         )
     if "render" in stage_names:
         renderer = MeteredRenderer(build_renderer(scope), meter)

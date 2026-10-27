@@ -261,6 +261,14 @@ class RenderWorker:
             self._ledger.complete(task.id or 0, self._worker_id)
             return
 
+        if (
+            resource.block_verdict is not None
+            and resource.block_verdict.is_block
+            and not block.is_block
+        ):
+            # The browser got past a bot check the download met (hand-off): the page it
+            # loaded is the evidence now, so its verdict replaces the download's.
+            resource.block_verdict = block
         rendered = extract_html_source(
             result.dom_html,
             base_url=result.final_url,

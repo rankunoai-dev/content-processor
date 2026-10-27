@@ -142,6 +142,7 @@ class FetchWorker:
         escalation_fetchers: Sequence[Fetcher] = (),
         baseline: Baseline | None = None,
         approvals: Callable[[str], Approval | None] | None = None,
+        browser_handoff: bool = False,
     ) -> None:
         """Bind the worker to one run.
 
@@ -156,12 +157,16 @@ class FetchWorker:
                 for T2). A host escalated to one of these tiers is fetched with it.
             baseline: Previous run's records. When a URL is in it, the fetch is
                 conditional and an unchanged page reuses the previous extraction.
+            browser_handoff: The run renders pages (T3). A page whose download met a
+                bot check that the browser tier may pass is handed to it instead of
+                ending BLOCKED; the browser reports the block if it is challenged too.
             approvals: `host -> active paid-tier approval` (A-8). An approved
                 host's ceiling rises to its approved tier (never past the
                 scope's); every other host stays at the free tiers.
         """
         self._ledger = ledger
         self._fetcher = fetcher
+        self._browser_handoff = browser_handoff
         self._fetchers: dict[AccessTier, Fetcher] = {AccessTier(fetcher.tier_name): fetcher}
         for extra in escalation_fetchers:
             self._fetchers[AccessTier(extra.tier_name)] = extra
@@ -761,6 +766,14 @@ class FetchWorker:
         elif action.kind is ActionKind.ESCALATE and action.tier in self._fetchers:
             self._requeue_at_tier(task, resource, action, tier_note)
             self._event("host", task.host, None, host_state.tier.value, action.reason)
+        elif (
+            self._browser_handoff
+            and action.kind is ActionKind.ESCALATE
+            and action.tier is AccessTier.T3_FIDELITY_BROWSER
+            and expected[0] == "text/html"
+        ):
+            self._hand_to_browser(task, resource, tier_note)
+            self._event("host", task.host, None, host_state.tier.value, action.reason)
         else:
             self._upsert(task, resource, EntityStatus.BLOCKED, tier_note)
             if action.kind is ActionKind.NEEDS_APPROVAL and action.proposed_tier is not None:
@@ -774,6 +787,33 @@ class FetchWorker:
             elif action.kind is ActionKind.ESCALATE:
                 self._event("host", task.host, None, host_state.tier.value, action.reason)
         self._ledger.complete(task.id or 0, self._worker_id)
+
+    def _hand_to_browser(self, task: Task, resource: Resource, note: str) -> None:
+        """A bot check met by the download: let the real browser (T3) try the page.
+
+        The page stays BLOCKED until the browser either gets through (it then
+        extracts and verifies the page and records T3 as the tier reached) or is
+        challenged too (it then records the block at T3).
+        """
+        resource.acquired_at_tier = None
+        self._upsert(task, resource, EntityStatus.BLOCKED, f"{note}:handed_to_browser")
+        self._ledger.enqueue_followups(
+            [
+                Task(
+                    run_id=self._run_id,
+                    kind=TaskKind.RENDER,
+                    idempotency_key=task_key(self._run_id, TaskKind.RENDER, resource.schedule_key),
+                    host=task.host,
+                    priority=task.priority,
+                    max_attempts=RENDER_MAX_ATTEMPTS,
+                    payload={
+                        "resource_id": resource.resource_id,
+                        "requested_url": resource.final_url or str(task.payload["requested_url"]),
+                        "schedule_key": resource.schedule_key,
+                    },
+                )
+            ]
+        )
 
     def _requeue_at_tier(self, task: Task, resource: Resource, action: Action, note: str) -> None:
         """The host moved to a tier this worker can fetch at: try the URL again there (A-2)."""

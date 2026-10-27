@@ -1,6 +1,6 @@
 # Content Processor: A Plain-Language Guide
 
-Last updated: 27 October 2026 · Code version: main after page stamping (step 1) and the offering catalog (step 2) of the knowledge base, URL history (only new or changed pages are scraped again), the report's Last checked / Site last updated / Action columns, and cookie/chat widgets read at screenshot time · Maintained by every session that adds a significant feature (see "Keeping this guide current" at the end)
+Last updated: 27 October 2026 · Code version: main after pages that meet a bot check being handed to the real browser, page stamping (step 1) and the offering catalog (step 2) of the knowledge base, URL history (only new or changed pages are scraped again), the report's Last checked / Site last updated / Action columns, and cookie/chat widgets read at screenshot time · Maintained by every session that adds a significant feature (see "Keeping this guide current" at the end)
 
 ## 1. What this is, in one paragraph
 
@@ -73,6 +73,8 @@ Access works like a ladder, cheapest and gentlest first:
 | T6 | Special access | Off; needs two people's written sign-off |
 
 The engine climbs the ladder only as far as needed. It never enters a paid rung on its own: it stops and asks.
+
+When a download meets a bot check (for example Cloudflare's "Just a moment..." page), the page is handed to the real browser (T3) instead of being given up. If the browser gets through, the page is read and checked like any other; if the browser is stopped too, the page is reported as blocked, with the rung where it happened, and paid access can be approved for that website.
 
 ### Step 4: Downloading and keeping the evidence
 
@@ -257,6 +259,7 @@ On the live John Hancock run (303 addresses), without AI, in a few seconds: 5 fa
 
 | Date | Significant change |
 |---|---|
+| 2026-10-27 | A page whose download meets a bot check is now tried in the real browser before being reported blocked; if the browser gets through, the page is captured normally. |
 | 2026-10-27 | Knowledge base step 2: a "catalog" command builds each website's offering catalog from its menus, structured data and folders, places every page under an offering or section, and fills evidence-backed cards; optional local AI adds checked features and suggestions. John Hancock (303 addresses): 5 families, 15 more offerings, 271 of 272 pages placed, at $0. Menu links that are script buttons are no longer read as page addresses. |
 | 2026-10-27 | URL history: any list of addresses is checked against every earlier run; unchanged pages keep their earlier content and are not scraped again, only new or changed ones are. A pre-run check lists which addresses were scraped before and when. The project report shows Last checked, Site last updated and Action for every page. Cookie banners and chat bubbles on the screenshot no longer cause false "needs a check" verdicts. |
 | 2026-10-27 | Knowledge base step 1: a "stamp" command records each page's facts (titles, descriptions, structured data, menus, calls to action, numbers, dates), builds the site's full menu tree including mega-menus, leaves out images, error, placeholder and duplicate pages with the reason, and splits each page into sections that keep their page, heading and neighbours. John Hancock: 12 pages, 51 sections, a 72-entry menu tree, in about 9 seconds at $0. |

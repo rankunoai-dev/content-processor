@@ -605,3 +605,9 @@ git worktree add ../content-processor-lane4 -b lane/L4-verify
 - **Gate:** ruff format and check clean, mypy strict clean (123 files), full suite passed (no failures), coverage 94.12%; new modules: catalog 89%, assist 92%, commands 92%, html_facts 92%, stamp 91%, chunking 97%.
 - **Not verified:** the Ollama steps against a real server (no Ollama on this machine; tested with mock endpoints). Needs the company server URL and model names (`bge-m3`, an 8–14B instruct model).
 - **Not built:** labelling content pages by meaning (Stage C), hub-card and sitemap candidates, reviewer edits of the tree in the web app, offering type from code alone (single signal, left `unspecified`).
+
+## [2026-10-27] Bot check at download hands the page to the browser (T3)
+
+- **Branch:** `fix/challenge-to-browser`. Found on flynns.com: a Cloudflare JS challenge at T1 escalated the host to T3, but `FetchWorker` only re-queues to tiers it has a fetcher for, so the page ended BLOCKED without a render. Now, with `browser_handoff` (set by the CLI when the run has a render stage) and an expected `text/html`, the resource stays BLOCKED (`...:handed_to_browser`, `acquired_at_tier` cleared) and a RENDER task is queued. `RenderWorker`: when the rendered page is not a block, its verdict replaces the download's block verdict (otherwise R10 `block_page_stored_as_content` keeps it BLOCKED); a page challenged in the browser too ends BLOCKED at T3 as before.
+- **Live check:** flynns.com Xerox post stays on "Just a moment..." (403) in headless real Chrome as well, so it remains BLOCKED; paid T4/T5 needs operator approval for the host.
+- **Tests:** `test_challenge_handoff.py` (browser passes: extracted, tier T3, not BLOCKED; browser challenged: BLOCKED at T3; no render stage: BLOCKED at once, no RENDER task).
