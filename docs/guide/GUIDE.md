@@ -1,6 +1,6 @@
 # Content Processor: A Plain-Language Guide
 
-Last updated: 26 October 2026 · Code version: main after the visible-text coverage check, matching pairs listed once, columns in sideways-scrolling tables and spaced-out browser retries · Maintained by every session that adds a significant feature (see "Keeping this guide current" at the end)
+Last updated: 26 October 2026 · Code version: main after page stamping and context-keeping sections (step 1 of the knowledge base) · Maintained by every session that adds a significant feature (see "Keeping this guide current" at the end)
 
 ## 1. What this is, in one paragraph
 
@@ -151,6 +151,26 @@ Besides the files, there is a web app for reviewing runs in a browser on your ow
 
 Reviewers can record decisions directly in the app: for each possible contradiction (confirmed, not a contradiction, different context) and for each page that needs review (for example "get the content by hand" or "leave out of the results", with a note). You enter your name once; every decision is saved with your name and the time, and every earlier answer is kept, so there is a full history. The next report for that run starts with these decisions already filled in, in the Excel files too.
 
+### Step 11: Getting pages ready for the knowledge base ("stamping")
+
+The next stage of the project turns a finished run into a knowledge base: every service and product a website offers, with all of its content mapped to them, so websites can be searched, compared with competitors and checked for gaps. Step 1 of that work is done: one command ("stamp") reads a finished run and its stored evidence, without visiting the website again and without any AI model, and writes three files.
+
+- **A stamp per page**: its title, description, canonical address, language versions, social-media tags, the page's main heading, its breadcrumb trail, where it sits in the site's address structure, the services, products, prices, questions and dates it declares in its structured data, the calls to action in its content (for example "Get a quote"), the numbers it states, word counts, a readability score for English pages, a one-sentence summary, and its verdict and dates from the run.
+- **The site's menus, once per run**: the full menu tree as visitors see it, including mega-menus that only appear when a visitor opens them (the engine merges every opened menu into one tree). On John Hancock this gives the whole product hierarchy, for example Life insurance › Products & services › Term life insurance. This is the starting point for the list of offerings in the next step.
+- **Sections of each page ("chunks")**: each page's main content split into sections of a few hundred words, ready for search.
+
+**Which pages go in.** Images, tracking pixels, blocked pages, "page not found" pages, error pages, placeholder pages ("Lorem ipsum") and exact copies of another page are left out, each with the reason written on its stamp. Pages that are only nearly the same are kept, because they may differ in the details that matter (for example two fund notices that differ only in their numbers); the near-copies are listed on each page's stamp.
+
+**Splitting pages without losing their meaning.** Cutting a page into sections can lose context, so every section keeps what it needs:
+
+- a header naming the website, the page and the headings above it, plus the page's one-line summary, so a section never loses what it is about;
+- links to the sections before and after it, and the last sentence of the previous section when a long passage had to be split;
+- tables, question-and-answer panels and forms are never cut in half;
+- a long passage is split between sentences, never inside one; very short sections are joined to their neighbours;
+- the section text itself is kept exactly as extracted, with links back to the evidence, so every answer can be cited.
+
+On the John Hancock run (39 addresses) it took about 9 seconds: 12 pages went into the knowledge base (20 exact copies, 4 images, 1 tracking pixel, 1 error page and 1 placeholder page left out), giving 51 sections of about 155 words on average (none over about 400), a header menu tree of 72 entries and a footer of 58.
+
 ## 5. Safety and cost promises
 
 - Read-only: the engine never submits forms, logs in, buys, unsubscribes or clicks anything that changes the website.
@@ -179,6 +199,7 @@ Reviewers can record decisions directly in the app: for each possible contradict
 - Starting runs from the web: the analyst web app reviews finished runs, but runs are still started from the command line, and there is no live progress feed or deployment package yet.
 - Some content types: text drawn on canvas or in CSS, product variant selectors, audio and video, archives and email files, and old-style .doc and .xls files.
 - Semantic similarity: finding pages that say the same thing in different words (planned with a vector database).
+- The rest of the knowledge base: the list of each website's offerings, labelling every page and section with them, search across sections, and competitor comparison and gap reports are designed but not built yet (step 1, stamping and sections, is done).
 - Hidden page text: some text present in the page code (for example frequently-asked-question answers) is not yet revealed and captured by the browser exploration; the engine flags these pages for review rather than counting them complete.
 - A text-joining fault (20 October) glues neighbouring words on some live pages; until it is fixed those pages are flagged for review.
 
@@ -198,11 +219,15 @@ Reviewers can record decisions directly in the app: for each possible contradict
 | Exploration | Clicking tabs, expanding sections and scrolling to reveal hidden content. |
 | Fixture | A test page built on purpose to trick the engine. |
 | Release gate | The test that must pass before release: no page may be wrongly marked VERIFIED. |
+| Stamp | The set of facts recorded about one page before it goes into the knowledge base. |
+| Chunk (section) | A piece of a page's content, a few hundred words long, that keeps a note of which page and heading it came from. |
+| Offering | A service, product or practice a website offers; the knowledge base maps every page to them. |
 
 ## 9. Change log
 
 | Date | Significant change |
 |---|---|
+| 2026-10-26 | Knowledge base step 1: a "stamp" command records each page's facts (titles, descriptions, structured data, menus, calls to action, numbers, dates), builds the site's full menu tree including mega-menus, leaves out images, error, placeholder and duplicate pages with the reason, and splits each page into sections that keep their page, heading and neighbours. John Hancock: 12 pages, 51 sections, a 72-entry menu tree, in about 9 seconds at $0. |
 | 2026-10-26 | Columns of wide tables that you scroll sideways are captured (they were wrongly treated as hidden). A page the browser cannot open is retried by itself over about five minutes instead of a few seconds. Live John Hancock, 303 pages: 279 verified. |
 | 2026-10-26 | Project report: each pair of matching pages is listed once, with the shared share in both directions. |
 | 2026-10-24 | New check that every line of text the browser shows was extracted. Web components no longer mistaken for hidden text; a duplicate copy of text never replaces the visible one; site tools (sign-in, country picker, chat) kept out of the content; words in side-by-side boxes no longer glued; a page is judged settled by its text, not by background elements. |

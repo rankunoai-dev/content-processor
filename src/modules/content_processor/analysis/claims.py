@@ -31,6 +31,7 @@ __all__ = [
     "claims_from_records",
     "codes_of",
     "extract_claims",
+    "quantities_in",
     "split_sentences",
     "terms_of",
 ]
@@ -214,6 +215,19 @@ _ABBREVIATIONS = frozenset(
         "pp.",
         "u.s.",
         "u.k.",
+        # month abbreviations in dates: "Oct. 31, 2024"
+        "jan.",
+        "feb.",
+        "mar.",
+        "apr.",
+        "jun.",
+        "jul.",
+        "aug.",
+        "sep.",
+        "sept.",
+        "oct.",
+        "nov.",
+        "dec.",
     }
 )
 
@@ -303,6 +317,11 @@ def terms_of(text: str) -> frozenset[str]:
 
 def _number(raw: str) -> float:
     return float(raw.replace(",", ""))
+
+
+def quantities_in(text: str) -> tuple[Quantity, ...]:
+    """Money, percentages and other numbers with units, as the claim reader sees them."""
+    return _quantities(text)
 
 
 def _quantities(text: str) -> tuple[Quantity, ...]:
