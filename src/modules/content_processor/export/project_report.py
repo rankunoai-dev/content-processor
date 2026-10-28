@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 from collections.abc import Sequence
-from datetime import datetime
+from datetime import UTC, datetime
 
 from src.modules.content_processor.analysis.overlap import (
     OverlapConfig,
@@ -34,6 +34,7 @@ from src.modules.content_processor.export.content import (
     whole_content,
 )
 from src.modules.content_processor.export.tabular import Cell, Table, expand_split_column
+from src.modules.content_processor.recrawl.baseline import extraction_time
 
 __all__ = [
     "DEFAULT_MIN_MATCH_PCT",
@@ -59,12 +60,20 @@ PAGES_COLUMNS = [
     "Reading confidence %",
     "Words",
     "Status",
+    "Last scraped",
+    "Site last modified",
+    "Scrape action",
     "What is missing",
-    "Last checked",
-    "Site last updated",
-    "Action",
 ]
 HIGH, MEDIUM, LOW, NOT_RATED = "High", "Medium", "Low", "Not rated"
+_CHANGE_REASONS = {
+    "http_304_not_modified": "server said not modified",
+    "payload_identical": "same file",
+    "visible_text_identical": "same visible text",
+    "site_modified_date_newer": "the site's date is newer",
+    "visible_text_changed": "visible text changed",
+    "payload_changed": "file changed",
+}
 _PLACEHOLDER_WORDS = ("lorem ipsum",)
 # Plain names of the controls the explorer can leave unopened.
 _CONTROL_WORDS = {
@@ -162,22 +171,26 @@ _NOTES: list[tuple[str, str]] = [
         "How reliably the captured words were read, weighted by words: text taken from the "
         "page's code is 100%, text read from images (OCR) is lower.",
     ),
+    (
+        "Pages: Last scraped",
+        "When the content in this row was extracted (UTC). For a page reused from an "
+        "earlier run because it had not changed, this is the earlier extraction.",
+    ),
+    (
+        "Pages: Site last modified",
+        "When the website says the page or file was last changed (structured data, page "
+        "tags or the server's Last-Modified header); empty when it does not say.",
+    ),
+    (
+        "Pages: Scrape action",
+        "What this run did compared with all earlier runs: 'New page' (never captured "
+        "before), 'Reused (unchanged: ...)' (the server said not modified, or the file or "
+        "its visible text is identical, so the earlier extraction was kept), 'Re-scraped "
+        "(updated: ...)' (the page changed and was extracted again; the visible text is "
+        "compared, so an edit is caught even when the site's date was not updated), or "
+        "'Re-scraped (unchanged, but the earlier capture was too old to reuse)'.",
+    ),
     ("Pages: What is missing", "In plain words, why the page is not fully extracted."),
-    ("Pages: Last checked", "The day this run checked the page."),
-    (
-        "Pages: Site last updated",
-        "The date the website itself gives for the page's last update (from the page's data, "
-        "its HTTP headers or the PDF). Empty when the site does not say.",
-    ),
-    (
-        "Pages: Action",
-        "What this run did. 'New: scraped in full' for a page never captured before. "
-        "'Reused: unchanged since <date>' when the page was captured before and has not "
-        "changed: the earlier content is kept and the page is not scraped again. "
-        "'Re-scraped: changed since the last capture' when it changed. Whether a page changed is "
-        "decided by its text first, then the site's date, so a page edited without a new "
-        "date is still re-scraped.",
-    ),
     (
         "Matching content: URL (A), Matching URL (B)",
         "Each pair of pages that share text is listed ONCE (A with B is not repeated as B "
@@ -319,22 +332,29 @@ def page_confidence(
     return MEDIUM
 
 
-def _day(value: datetime | None) -> str:
-    return value.date().isoformat() if value is not None else ""
+def _when(moment: datetime | None) -> str:
+    return moment.astimezone(UTC).strftime("%Y-%m-%d %H:%M") if moment is not None else ""
 
 
-def action(record: UrlRecord) -> str:
-    """What the run did with the page: new, reused unchanged, or re-scraped."""
+def scrape_action(record: UrlRecord) -> str:
+    """What this run did with the page compared with earlier runs, in plain words."""
     status = record.change_status
+    basis = record.change_basis or ""
+    reason = _CHANGE_REASONS.get(basis.split(";", 1)[0], "")
+    if status is None:
+        return "Scraped (not compared with earlier runs)"
+    if status is ChangeStatus.NEW:
+        return "New page"
     if status is ChangeStatus.UNCHANGED:
-        dates = [b.extracted_at for b in record.blocks if b.extracted_at is not None]
-        since = _day(min(dates)) if dates else ""
-        return f"Reused: unchanged since {since}" if since else "Reused: unchanged"
+        if "reuse_not_allowed" in basis:
+            return "Re-scraped (unchanged, but the earlier capture was too old to reuse)"
+        moment = extraction_time(record) if record.reused_from_run_id else None
+        since = f" since {moment.date().isoformat()}" if moment is not None else ""
+        return f"Reused (unchanged{since}: {reason})" if reason else f"Reused (unchanged{since})"
     if status is ChangeStatus.CHANGED:
-        return "Re-scraped: changed since the last capture"
-    if status is ChangeStatus.UNKNOWN:
-        return "Scraped in full: could not compare with the earlier capture"
-    return "New: scraped in full"
+        note = "; the site's date was not updated" if "date_not_updated" in basis else ""
+        return f"Re-scraped (updated: {reason}{note})" if reason else "Re-scraped (updated)"
+    return "Scraped (change unknown)"
 
 
 def page_rows(records: Sequence[UrlRecord]) -> list[dict[str, Cell]]:
@@ -360,10 +380,10 @@ def page_rows(records: Sequence[UrlRecord]) -> list[dict[str, Cell]]:
                 "Reading confidence %": reading_pct,
                 "Words": total,
                 "Status": _STATUS.get(record.badge, record.badge.value),
+                "Last scraped": _when(extraction_time(record)),
+                "Site last modified": _when(record.page_modified_at),
+                "Scrape action": scrape_action(record),
                 "What is missing": _missing(record),
-                "Last checked": _day(record.captured_at),
-                "Site last updated": _day(record.page_modified_at),
-                "Action": action(record),
             }
         )
     return rows

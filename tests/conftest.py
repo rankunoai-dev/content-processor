@@ -51,6 +51,10 @@ def settings(tmp_path) -> Settings:
         _env_file=None,
         environment=Environment.DEVELOPMENT,
         audit_log_path=tmp_path / "audit.jsonl",
+        # Evidence and URL history stay inside the test's folder: a history left
+        # by another test would otherwise make a page "reused" here.
+        cp_evidence_root=tmp_path / "evidence",
+        cp_url_history_root=tmp_path / "url_history",
         max_session_spend_usd=1.0,
         default_requests_per_minute=600,
         default_timeout_s=2.0,

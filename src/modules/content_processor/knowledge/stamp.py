@@ -57,6 +57,7 @@ __all__ = [
     "PayloadLoader",
     "StampResult",
     "page_key",
+    "rendered_views",
     "stamp_records",
 ]
 
@@ -141,15 +142,16 @@ def _site_of(host: str) -> str:
     return host[4:] if host.startswith("www.") else host
 
 
-def _rendered_evidence(record: UrlRecord) -> list[str]:
-    """Evidence hashes of the rendered views (base first, then explored states)."""
+def rendered_views(record: UrlRecord) -> list[tuple[str, str]]:
+    """(channel, evidence hash) of the rendered views: base view first, then explored states."""
     by_channel: dict[str, str] = {}
     for block in record.blocks:
         channel = block_channel(block.state_id)
         if channel == "src" or channel in by_channel or not block.evidence_ids:
             continue
         by_channel[channel] = block.evidence_ids[0].removeprefix("evidence:")
-    return [by_channel[k] for k in sorted(by_channel, key=lambda c: (c != "rendered", len(c), c))]
+    order = sorted(by_channel, key=lambda c: (c != "rendered", len(c), c))
+    return [(c, by_channel[c]) for c in order]
 
 
 def _parse_html(body: bytes, url: str, views: Sequence[bytes]) -> _Html:
@@ -339,7 +341,7 @@ def _load_page(record: UrlRecord, load_payload: PayloadLoader) -> _Page:
     body = load_payload(record.payload_sha256) if record.payload_sha256 else None
     if body is None:
         return _Page(record, url, None, "missing_evidence")
-    views = [v for sha in _rendered_evidence(record) if (v := load_payload(sha)) is not None]
+    views = [v for _, sha in rendered_views(record) if (v := load_payload(sha)) is not None]
     return _Page(record, url, _parse_html(body, url, views), "stored_html")
 
 

@@ -1,6 +1,6 @@
 # Content Processor: A Plain-Language Guide
 
-Last updated: 27 October 2026 · Code version: main after pages that meet a bot check being handed to the real browser, page stamping (step 1) and the offering catalog (step 2) of the knowledge base, URL history (only new or changed pages are scraped again), the report's Last checked / Site last updated / Action columns, and cookie/chat widgets read at screenshot time · Maintained by every session that adds a significant feature (see "Keeping this guide current" at the end)
+Last updated: 28 October 2026 · Code version: main after pages that meet a bot check being handed to the real browser, page stamping (step 1) and the offering catalog (step 2) of the knowledge base, the URL history across runs (one memory, only new or changed pages scraped again) and the SEO and GEO inventory · Maintained by every session that adds a significant feature (see "Keeping this guide current" at the end)
 
 ## 1. What this is, in one paragraph
 
@@ -84,15 +84,17 @@ Evidence is stored compactly. Web pages carry the same fonts and style sheets on
 
 ### Running again: only new or changed pages are scraped
 
-The engine keeps a URL history: for every address it has ever captured, the latest capture, the day it was scraped, and the date the website itself gives for the page's last update. Every run checks it automatically, whatever list of addresses you give it and whichever earlier runs they came from.
+The engine remembers every page it has captured, in every run, for each client account: each capture, the day its content was read, and the date the website itself gives for the page's last update. Every run checks this memory automatically, whatever list of addresses you give it (some seen before, some new) and whichever earlier runs they came from:
+
+- **Never seen before**: scraped in full ("New page").
+- **Seen before**: the engine asks the website politely whether the page changed since last time (a light request that the server can answer with "not modified"). If the server says it did not change, or the file is identical, or its visible text is word for word the same, the earlier content is kept and the slow browser step is skipped ("Reused (unchanged since <date>)").
+- **The text decides, not the date**: a page whose wording changed is scraped again even when the website did not update its date (sites often edit pages without changing it), and a page whose date moved but whose text is identical is reused.
+- **Old memories are not trusted forever**: content read more than 30 days ago (changeable per run, or "only reuse what was read after a given date", for example after an improvement to the engine) is compared but read again in full, so improvements to the engine reach every page. A page reused run after run still ages from the day it was actually read.
+- **A bad day never erases what is known**: a failed or blocked visit is recorded but does not replace the last good capture, and a capture whose stored evidence is missing is not reused.
 
 The site's update date is taken from what the page itself states (its structured data or tags). A web server's own "last modified" time is used only when it is at least a week old: many sites send the time the page was last rebuilt on their servers, not the time someone edited it. When a site does not say, the column is left empty rather than guessed.
 
-- An address never seen before is scraped in full.
-- An address seen before gets one light "has this changed since our last visit?" request. If the site answers "not changed", or the page's text is word for word the same, the earlier content is kept and the slow browser step is skipped.
-- If the text changed, the page is scraped again, even when the site's update date did not move (sites often edit pages without changing the date). If only the date moved and the text is the same, the earlier content is kept.
-
-After each run the history is updated, so the next run starts from the newest captures. Before a run you can check a list of addresses: for each one, whether it was scraped before, when, and the site's last-update date. The history can be switched off for a run that should scrape everything afresh.
+After each run the memory is updated, so the next run starts from the newest captures. Before a run you can check a list of addresses: for each one, whether it was scraped before, when, and the site's last-update date. Older runs can be added to the memory with one command, every capture of one address can be listed, and the memory can be switched off for a run that should scrape everything afresh. It is kept in one small database file per client account; the earlier file format is imported into it automatically the first time and the old files are kept. On the John Hancock runs it holds 357 captures of 308 pages in under 5 MB.
 
 ### Step 5: Reading the page's text
 
@@ -152,7 +154,7 @@ At the end of a run the engine writes a bundle of files. Every file name starts 
 
 | File | What you use it for |
 |---|---|
-| Project report (Excel) | The one workbook most people need. Sheet "Pages": every address with its whole text (line breaks shown), whether it was fully extracted (Yes/No), a plain "Extraction completeness" statement ("Complete", "Incomplete: 1 tab not opened (Pricing)", "Complete, but the page kept changing", "Placeholder page (Lorem ipsum)"), an overall Confidence of High, Medium or Low that can only be High when the page is fully captured, the share of the captured text confirmed against the live page, how reliably it was read (text from the page's code is 100%, text read from images lower), what is missing, the day the page was last checked, the date the website gives for its last update, and what the run did ("New: scraped in full", "Reused: unchanged since 26 October" or "Re-scraped: changed since the last capture"). Sheet "Matching content": every pair of addresses that carry the same text, listed once (A with B is never repeated as B with A), by exact word-for-word matching (menus, headers and footers left out), with two percentages: how much of the first page's text is on the second, and how much of the second's is on the first. They differ when the pages differ in length: a short page can be 100% inside a long page while the long page is only 20% inside the short one. To see every match of one page, look for it in both address columns. Very long page text that does not fit in one Excel cell continues in extra "Content_part_2", "Content_part_3" columns; "Content_parts" says how many cells the text uses and "Content_split" says whether it was split (normally 1 and FALSE). Sheet "How to read" explains every column. |
+| Project report (Excel) | The one workbook most people need. Sheet "Pages": every address with its whole text (line breaks shown), whether it was fully extracted (Yes/No), when its content was last scraped, when the site says it last changed, and what this run did with it ("New page", "Reused (unchanged: server said not modified)", "Re-scraped (updated: visible text changed)"), a plain "Extraction completeness" statement ("Complete", "Incomplete: 1 tab not opened (Pricing)", "Complete, but the page kept changing", "Placeholder page (Lorem ipsum)"), an overall Confidence of High, Medium or Low that can only be High when the page is fully captured, the share of the captured text confirmed against the live page, how reliably it was read (text from the page's code is 100%, text read from images lower), and what is missing. Sheet "Matching content": every pair of addresses that carry the same text, listed once (A with B is never repeated as B with A), by exact word-for-word matching (menus, headers and footers left out), with two percentages: how much of the first page's text is on the second, and how much of the second's is on the first. They differ when the pages differ in length: a short page can be 100% inside a long page while the long page is only 20% inside the short one. To see every match of one page, look for it in both address columns. Very long page text that does not fit in one Excel cell continues in extra "Content_part_2", "Content_part_3" columns; "Content_parts" says how many cells the text uses and "Content_split" says whether it was split (normally 1 and FALSE). Sheet "How to read" explains every column. |
 | R1 URL content (Excel, CSV) | One row per address: verdict, word count, gaps, and the whole extracted text. Long text is split across columns so Excel never cuts it off. |
 | Review queue (Excel, CSV) | The pages that need a human decision, most serious first, with a blank column for the reviewer. |
 | R2 overlap (Excel, CSV) | Groups of pages that share the same text (duplicate or near-duplicate content), with the shared passages quoted. |
@@ -202,6 +204,22 @@ A second command ("catalog") turns the stamps into the website's catalog of offe
 
 On the live John Hancock run (303 addresses), without AI, in a few seconds: 5 families (Life insurance with Permanent, Hybrid, Term, Executive benefits and Vitality; Long-term care; Annuities with Individual and Group annuities; Investments; Retirement with IRAs) and 7 more offerings listed only in the footer (for example College savings, Rollover, Travel insurance), with 63 menu entries set aside as tasks, tools, content and corporate pages. 271 of the 272 pages were placed: 4 under Individual annuities, 267 under News and the podcast sections (this run's addresses were mostly news releases); 1 privacy PDF is unplaced.
 
+### Step 13: The SEO and GEO inventory
+
+A third command ("inventory") lists everything on each page that matters to search engines and to AI answer engines (ChatGPT, Perplexity, Google's AI answers), not only the text a visitor reads. It re-reads the pages the run already saved, so it visits no website and costs nothing, and writes a file for other tools and an Excel workbook (`<run>_seo_inventory.xlsx`).
+
+- **Every link**: where it points, the words it is shown with, whether it goes to the same website, another part of it, another website, a download, an email address or a phone number, its "do not follow" and "sponsored" markings, the part of the page it sits in (menu, main content, card, footer) and the heading above it.
+- **Every image**: its description for blind visitors and for search engines (the "alt text"), flagged when missing, empty, or just a file name; its caption, size, whether it loads late, and where it links to.
+- **Every video, audio clip and embedded frame** (YouTube, maps, forms, chat widgets), who provides it, and whether a video has captions.
+- **The page's labels**: title and description with their length, the "official address" (canonical), instructions to search engines (for example "do not index"), language and language versions, link-preview tags for social media, and the outline of headings.
+- **Structured data** (the machine-readable facts some pages carry, for example a product's price) is listed in full and checked against the fields Google requires before it shows a rich result.
+
+**Where each item was found.** Every link, image and video says whether it is in the page the server sends ("HTML and browser"), only appears once the page's scripts have run ("Browser only (needs scripts)"), or only appears after a click on a tab, menu or "show more" ("After a click only"). This matters because many AI crawlers do not run scripts: anything that needs them is invisible to those crawlers.
+
+**Issues, in plain words.** Each page gets a list of problems, graded error, warning or notice, with examples: titles too long, missing descriptions, several main headings, skipped heading levels, links with no words or with "read more", links marked "do not follow" to the site's own pages, images without descriptions, videos without captions, structured data that cannot be read or lacks required fields. An "Issue summary" sheet counts how many pages each problem affects.
+
+On the John Hancock run (281 pages read, about a minute, $0): 15,813 links, 2,139 images and 311 videos and frames. Nearly every link on the site (15,636) exists only after scripts run, because the menus and links are drawn by the page's scripts rather than sent by the server, and 11,722 appear only once a menu or tab is opened. 262 pages have titles longer than search results show, 230 have no description, 242 have more than one main heading, and 1,033 images are marked as decoration, so crawlers learn nothing from them.
+
 ## 5. Safety and cost promises
 
 - Read-only: the engine never submits forms, logs in, buys, unsubscribes or clicks anything that changes the website.
@@ -250,18 +268,23 @@ On the live John Hancock run (303 addresses), without AI, in a few seconds: 5 fa
 | Exploration | Clicking tabs, expanding sections and scrolling to reveal hidden content. |
 | Fixture | A test page built on purpose to trick the engine. |
 | Release gate | The test that must pass before release: no page may be wrongly marked VERIFIED. |
+| URL history | The engine's memory of every page captured in every run, used to reuse unchanged pages. |
 | Stamp | The set of facts recorded about one page before it goes into the knowledge base. |
 | Chunk (section) | A piece of a page's content, a few hundred words long, that keeps a note of which page and heading it came from. |
 | Offering | A service, product or practice a website offers; the knowledge base maps every page to them. |
 | Offering catalog | The tree of a website's offerings (families, offerings, sub-offerings), each with a card of evidenced facts. |
+| SEO / GEO | Search engine optimisation / generative engine optimisation: making pages easy for search engines and for AI answer engines to find, read and cite. |
+| Alt text | The written description of an image, read by screen readers, search engines and AI tools. |
+| Structured data | Machine-readable facts in a page's code (schema.org), for example a product's name and price. |
 
 ## 9. Change log
 
 | Date | Significant change |
 |---|---|
 | 2026-10-27 | A page whose download meets a bot check is now tried in the real browser before being reported blocked; if the browser gets through, the page is captured normally. |
+| 2026-10-28 | SEO and GEO inventory: an "inventory" command lists every link, image, video and embedded frame of each page, its title, description, canonical and search-engine instructions, and its structured data checked against Google's required fields; each item says whether it needs scripts or a click to appear, and each page gets graded issues. John Hancock: 281 pages, about a minute, $0. |
+| 2026-10-27 | URL history across runs: any list of addresses is checked against every earlier run; pages that did not change (the server says so, or the file or its visible text is identical) keep their earlier content and are not scraped again, changed and new pages are scraped in full, and content older than 30 days is read again. Before a run, a list of addresses can be checked (scraped before? when?). The project report gains "Last scraped", "Site last modified" and "Scrape action" columns. |
 | 2026-10-27 | Knowledge base step 2: a "catalog" command builds each website's offering catalog from its menus, structured data and folders, places every page under an offering or section, and fills evidence-backed cards; optional local AI adds checked features and suggestions. John Hancock (303 addresses): 5 families, 15 more offerings, 271 of 272 pages placed, at $0. Menu links that are script buttons are no longer read as page addresses. |
-| 2026-10-27 | URL history: any list of addresses is checked against every earlier run; unchanged pages keep their earlier content and are not scraped again, only new or changed ones are. A pre-run check lists which addresses were scraped before and when. The project report shows Last checked, Site last updated and Action for every page. Cookie banners and chat bubbles on the screenshot no longer cause false "needs a check" verdicts. |
 | 2026-10-27 | Knowledge base step 1: a "stamp" command records each page's facts (titles, descriptions, structured data, menus, calls to action, numbers, dates), builds the site's full menu tree including mega-menus, leaves out images, error, placeholder and duplicate pages with the reason, and splits each page into sections that keep their page, heading and neighbours. John Hancock: 12 pages, 51 sections, a 72-entry menu tree, in about 9 seconds at $0. |
 | 2026-10-26 | Matching-content sheet columns renamed for clarity: "URL (A)", "Matching URL (B)", "% of A in B" and "% of B in A". Chat-widget invitations (for example "Live chat") are no longer treated as missed page content. Unattended runs wait up to six minutes for held work, so render retries (30, 90 and 180 seconds) finish before a run stops. |
 | 2026-10-26 | Columns of wide tables that you scroll sideways are captured (they were wrongly treated as hidden). A page the browser cannot open is retried by itself over about five minutes instead of a few seconds. Live John Hancock, 303 pages: 279 verified. |

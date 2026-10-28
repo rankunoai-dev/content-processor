@@ -46,8 +46,7 @@ def test_pages_say_completeness_confidence_and_confirmed_share():
     rows = _by_url(page_rows([full, partial, image]))
 
     full = rows["https://x.example/full"]
-    assert full["Action"] == "New: scraped in full" and full["Last checked"]
-    assert full | {"Content": None, "Last checked": None, "Site last updated": None} == {
+    assert full | {"Content": None} == {
         "URL": "https://x.example/full",
         "Content": None,
         "Fully extracted": "Yes",
@@ -57,10 +56,10 @@ def test_pages_say_completeness_confidence_and_confirmed_share():
         "Reading confidence %": 100.0,
         "Words": 6,
         "Status": "Fully captured",
+        "Last scraped": "2026-10-16 09:00",
+        "Site last modified": "",
+        "Scrape action": "Scraped (not compared with earlier runs)",
         "What is missing": "",
-        "Last checked": None,
-        "Site last updated": None,
-        "Action": "New: scraped in full",
     }
 
     p = rows["https://x.example/partial"]

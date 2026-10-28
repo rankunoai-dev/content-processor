@@ -229,7 +229,8 @@ def test_dryruns_remember_urls_and_the_next_run_starts_from_the_history(
     args = ["dryrun", "--scope", str(scope), "--no-render", "--max-wait", "0.5", "--out"]
     assert cli.main([*args, str(tmp_path / "runs" / "one.json")]) == 0
     first = _last_json(capsys)
-    assert first["baseline"] is None, "nothing scraped before"
+    assert first["baseline"]["urls"] == 0, "nothing scraped before"
+    assert first["changes"].get("new", 0) >= 1
     assert first["history"]["remembered"] >= 1
     assert cli.main([*args, str(tmp_path / "runs" / "two.json")]) == 0
     second = _last_json(capsys)

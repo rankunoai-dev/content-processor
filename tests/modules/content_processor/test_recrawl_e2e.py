@@ -22,7 +22,7 @@ from src.modules.content_processor.enums import (
     TaskKind,
     UiRegion,
 )
-from src.modules.content_processor.export.project_report import action
+from src.modules.content_processor.export.project_report import scrape_action
 from src.modules.content_processor.ledger.memory import MemoryLedger
 from src.modules.content_processor.planner import fetch_tasks_for
 from src.modules.content_processor.recrawl import Baseline
@@ -202,7 +202,8 @@ async def test_url_history_is_the_baseline_without_naming_a_previous_run(tmp_pat
     assert sent == ['"v1"'], "the history supplied the previous ETag"
     assert second.change_status is ChangeStatus.UNCHANGED
     assert _render_tasks(ledger) == 0
-    assert action(second) == f"Reused: unchanged since {first.captured_at.date().isoformat()}"
+    since = first.captured_at.date().isoformat()
+    assert scrape_action(second) == f"Reused (unchanged since {since}: server said not modified)"
     # the history now points at the newer check, still with the first capture's text date
     history.remember([second], run_name="second")
     entry = UrlHistory(tmp_path / "history", "t1").lookup(URL)
@@ -219,4 +220,4 @@ async def test_url_history_sees_a_changed_page_and_re_extracts(tmp_path: Path):
     ledger, second, _ = await _run(tmp_path / "b", "run-2", history.baseline_for([URL]))
     assert second.change_status is ChangeStatus.CHANGED
     assert _render_tasks(ledger) == 1
-    assert action(second) == "Re-scraped: changed since the last capture"
+    assert scrape_action(second).startswith("Re-scraped (updated: ")
