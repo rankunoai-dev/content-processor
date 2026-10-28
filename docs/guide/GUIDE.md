@@ -1,6 +1,6 @@
 # Content Processor: A Plain-Language Guide
 
-Last updated: 28 October 2026 · Code version: main after pages that meet a bot check being handed to the real browser, page stamping (step 1) and the offering catalog (step 2) of the knowledge base, the URL history across runs (one memory, only new or changed pages scraped again) and the SEO and GEO inventory · Maintained by every session that adds a significant feature (see "Keeping this guide current" at the end)
+Last updated: 28 October 2026 · Code version: main after pages that meet a bot check being handed to the real browser, page stamping (step 1) and the offering catalog (step 2) of the knowledge base, the URL history across runs (one memory, only new or changed pages scraped again), the SEO and GEO inventory, and page outlines with page types · Maintained by every session that adds a significant feature (see "Keeping this guide current" at the end)
 
 ## 1. What this is, in one paragraph
 
@@ -220,6 +220,16 @@ A third command ("inventory") lists everything on each page that matters to sear
 
 On the John Hancock run (281 pages read, about a minute, $0): 15,813 links, 2,139 images and 311 videos and frames. Nearly every link on the site (15,636) exists only after scripts run, because the menus and links are drawn by the page's scripts rather than sent by the server, and 11,722 appear only once a menu or tab is opened. 262 pages have titles longer than search results show, 230 have no description, 242 have more than one main heading, and 1,033 images are marked as decoration, so crawlers learn nothing from them.
 
+### Step 14: Page outlines and page types
+
+A fourth command ("structure") rewrites every page as a clean outline in the order a visitor sees it, and says what kind of page it is. It writes one Markdown file per page (readable by people and by AI tools such as Claude or ChatGPT), a file for other tools, and an Excel workbook (`<run>_page_types.xlsx`).
+
+**The outline.** Each page starts with its title, summary, address, publication and update dates, author, page type and breadcrumb trail, then its content: sections by heading, paragraphs (with their links), lists, tables, images with their descriptions and captions, videos, forms and buttons. The page's building blocks keep their shape: tabs are listed with their labels ("Tab: Pricing"), accordions and questions-and-answers with each question and its answer, groups of cards with each card's title, and carousels. Header, footer, menus, cookie and chat boxes and video-player controls are left out; the site's menus are kept once for the whole site. Text inside a closed tab or accordion is kept and marked "shown after a click"; text that only appeared once the engine clicked something is placed under the button that revealed it and marked "appears after a click". When a page is built from web components, the outline is read from the engine's composed view, which includes their contents. Each piece of text is matched to the engine's extracted text, so it can still be traced to the stored evidence.
+
+**The page type.** Code decides whether a page is a product, a category (a grid of products), a service, an article, a case study, questions and answers, contact, about, careers, legal, pricing, a location, an event, a form, the home page, a document or other. It weighs independent signals: the page's structured data, its address ("/products/", "/blog/", "/case-studies/"), and what it shows (an add-to-cart button, prices, size or colour choices, a grid of priced items, filters, an author and date, a form). The reasons are listed in plain words with a confidence; a page with no clear signal is "other" rather than a guess. From all pages the engine also names the kind of website: e-commerce, B2B services, publisher or mixed.
+
+On the John Hancock run (303 pages, about a minute, $0): 7,455 paragraphs, 551 sections, 756 cards, 255 accordion items in 33 question-and-answer blocks, 244 tables and 760 images; 89% of the outline's text is matched to extracted text; 268 pages are articles (news releases) and 33 are help-centre question pages, so this run reads as a publisher site.
+
 ## 5. Safety and cost promises
 
 - Read-only: the engine never submits forms, logs in, buys, unsubscribes or clicks anything that changes the website.
@@ -276,11 +286,14 @@ On the John Hancock run (281 pages read, about a minute, $0): 15,813 links, 2,13
 | SEO / GEO | Search engine optimisation / generative engine optimisation: making pages easy for search engines and for AI answer engines to find, read and cite. |
 | Alt text | The written description of an image, read by screen readers, search engines and AI tools. |
 | Structured data | Machine-readable facts in a page's code (schema.org), for example a product's name and price. |
+| Page outline | A page rewritten in reading order with its sections, tabs, accordions, cards and tables, as Markdown. |
+| Page type | What kind of page it is (product, category, service, article...), decided by code from several signals. |
 
 ## 9. Change log
 
 | Date | Significant change |
 |---|---|
+| 2026-10-28 | Page outlines and page types: a "structure" command rewrites every page as an outline in reading order (sections, tabs, accordions, questions and answers, cards, tables, images, videos, forms), one Markdown file per page, with text behind clicks marked, and labels each page as product, category, service, article and so on, and the site as e-commerce, B2B services, publisher or mixed. John Hancock: 303 pages, about a minute, $0. |
 | 2026-10-27 | A page whose download meets a bot check is now tried in the real browser before being reported blocked; if the browser gets through, the page is captured normally. |
 | 2026-10-28 | SEO and GEO inventory: an "inventory" command lists every link, image, video and embedded frame of each page, its title, description, canonical and search-engine instructions, and its structured data checked against Google's required fields; each item says whether it needs scripts or a click to appear, and each page gets graded issues. John Hancock: 281 pages, about a minute, $0. |
 | 2026-10-27 | URL history across runs: any list of addresses is checked against every earlier run; pages that did not change (the server says so, or the file or its visible text is identical) keep their earlier content and are not scraped again, changed and new pages are scraped in full, and content older than 30 days is read again. Before a run, a list of addresses can be checked (scraped before? when?). The project report gains "Last scraped", "Site last modified" and "Scrape action" columns. |

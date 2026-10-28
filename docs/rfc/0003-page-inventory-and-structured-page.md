@@ -1,6 +1,6 @@
 # RFC 0003: Page inventory and structured page (SEO and GEO extraction)
 
-Status: draft for discussion · 2026-10-28 · research only, nothing built yet
+Status: accepted · 2026-10-28 · step A (inventory) and step B (structured page, page types) built; variant and facet actions built on `feat/variant-facet-actions`
 
 ## 1. The ask
 
@@ -208,3 +208,21 @@ Each step follows the usual rules: guide update, full test gate, lane-log entry.
   https://developers.google.com/search/docs/appearance/structured-data/product ,
   https://developers.google.com/search/blog/2022/09/merchant-listings
 - GEO tactics overview (vendor, unverified figures): https://www.airops.com/blog/generative-engine-optimization-geo
+
+## 8. Site types (decision, 2026-10-28)
+
+One shared core (evidence, layers, verification, badges, safety) for every website. What
+differs by kind of site is added on top, never forked:
+
+- **Page type per page** (`knowledge/page_types.py`): product, category, service, article,
+  case study, FAQ, contact, about, careers, legal, pricing, location, event, form, home,
+  document, other. Scored from independent signals; reasons and confidence kept.
+- **Site profile per run**: e-commerce, B2B services, publisher, mixed, unknown. Later it
+  sets budgets and strategy only (template sampling, filter and pagination limits, reuse
+  window), never the trust rules.
+- **Read-only e-commerce actions** `select_variant` and `apply_facet` (opt-in in the scope's
+  `interaction_policy.allowed`): one variant dimension at a time, filters recorded as links
+  or applied in place one at a time, never a cart, form submission or navigation.
+- **Next:** page-type modules (typed records such as Product, Variant, Offer, Service, Case
+  study, with expected fields that become completeness gaps), template sampling for large
+  shops, and entity history (price and stock over time).

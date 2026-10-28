@@ -1,4 +1,4 @@
-"""`stamp`, `catalog` and `inventory` subcommands (RFC 0002 steps 1-2, RFC 0003 step A).
+"""`stamp`, `catalog`, `inventory`, `structure` (RFC 0002 steps 1-2, RFC 0003 steps A-B).
 
     python -m src.modules.content_processor.cli stamp --records out/jh.records.jsonl \
         --tenant rankuno-dev
@@ -18,6 +18,10 @@ checked synonym merges and card attributes; without them it is code only.
 `inventory` writes `<run>.inventory.jsonl` and `<run>_seo_inventory.xlsx`: every
 link, image, video and embed, the head tags, structured data with Google's required
 fields checked, and the SEO/GEO issues of each page, read from the stored HTML.
+
+`structure` writes `<run>.structured.jsonl`, one Markdown file per page in
+`<run>_pages/` and `<run>_page_types.xlsx`: each page as an ordered tree (sections,
+tabs, accordions, cards, tables, media) with its page type and the site profile.
 """
 
 from __future__ import annotations
@@ -45,11 +49,14 @@ from src.modules.content_processor.knowledge.inventory import inventory_records
 from src.modules.content_processor.knowledge.inventory_report import write_inventory
 from src.modules.content_processor.knowledge.models import Chunk, PageStamp, SiteStamp
 from src.modules.content_processor.knowledge.stamp import PayloadLoader, StampResult, stamp_records
+from src.modules.content_processor.knowledge.structured_page import structure_records
+from src.modules.content_processor.knowledge.structured_report import write_structured
 
 __all__ = [
     "cmd_catalog",
     "cmd_inventory",
     "cmd_stamp",
+    "cmd_structure",
     "register",
     "store_loader",
     "write_stamps",
@@ -195,6 +202,22 @@ def cmd_inventory(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_structure(args: argparse.Namespace) -> int:
+    """Build each page's tree, Markdown and page type; write them with the site profile."""
+    records_path = Path(args.records)
+    records = load_records(records_path)
+    if not records:
+        sys.stderr.write(f"{records_path}: no records\n")
+        return 2
+    root = Path(args.evidence_root) if args.evidence_root else get_settings().cp_evidence_root
+    result = structure_records(records, store_loader(LocalEvidenceStore(root, args.tenant)))
+    run_name = args.run_name or run_name_for(records_path)
+    out_dir = Path(args.out) if args.out else records_path.parent
+    files = write_structured(result.pages, result.summary, out_dir, run_name)
+    sys.stdout.write(json.dumps({**result.summary, "files": files}, indent=2) + "\n")
+    return 0
+
+
 def register(subparsers: Any) -> None:
     """Add the `stamp`, `catalog` and `inventory` subcommands to the CLI's subparsers."""
     parser = subparsers.add_parser("stamp", help="stamp pages and build context-preserving chunks")
@@ -232,3 +255,15 @@ def register(subparsers: Any) -> None:
     inv.add_argument("--out", default=None, help="output directory (default: next to records)")
     inv.add_argument("--run-name", default=None, help="prefix of the output files")
     inv.set_defaults(func=cmd_inventory)
+
+    st = subparsers.add_parser(
+        "structure", help="each page as an ordered tree and Markdown, with its page type"
+    )
+    st.add_argument("--records", required=True, help="UrlRecord JSONL file")
+    st.add_argument("--tenant", required=True, help="evidence tenant, e.g. rankuno-dev")
+    st.add_argument(
+        "--evidence-root", default=None, help="evidence store root (default: CP_EVIDENCE_ROOT)"
+    )
+    st.add_argument("--out", default=None, help="output directory (default: next to records)")
+    st.add_argument("--run-name", default=None, help="prefix of the output files")
+    st.set_defaults(func=cmd_structure)
