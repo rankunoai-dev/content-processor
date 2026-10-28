@@ -1,8 +1,10 @@
-"""`stamp` and `catalog` subcommands (RFC 0002, steps 1 and 2).
+"""`stamp`, `catalog` and `inventory` subcommands (RFC 0002 steps 1-2, RFC 0003 step A).
 
     python -m src.modules.content_processor.cli stamp --records out/jh.records.jsonl \
         --tenant rankuno-dev
     python -m src.modules.content_processor.cli catalog --stamps out/jh.stamps.jsonl
+    python -m src.modules.content_processor.cli inventory --records out/jh.records.jsonl \
+        --tenant rankuno-dev
 
 `stamp` writes `<run>.stamps.jsonl`, `<run>.chunks.jsonl` and `<run>.site.json`
 next to the records (or into `--out`). Page HTML is read back from the evidence
@@ -12,6 +14,10 @@ store by its payload hash; nothing is fetched and no model is called.
 `<run>_offering_catalog.xlsx`. With `--embed-endpoint`/`--llm-endpoint` (local or
 private-network only, for example Ollama at `http://localhost:11434/v1`) it adds
 checked synonym merges and card attributes; without them it is code only.
+
+`inventory` writes `<run>.inventory.jsonl` and `<run>_seo_inventory.xlsx`: every
+link, image, video and embed, the head tags, structured data with Google's required
+fields checked, and the SEO/GEO issues of each page, read from the stored HTML.
 """
 
 from __future__ import annotations
@@ -35,10 +41,19 @@ from src.modules.content_processor.knowledge.assist import (
 )
 from src.modules.content_processor.knowledge.catalog import build_catalog
 from src.modules.content_processor.knowledge.catalog_report import write_catalog
+from src.modules.content_processor.knowledge.inventory import inventory_records
+from src.modules.content_processor.knowledge.inventory_report import write_inventory
 from src.modules.content_processor.knowledge.models import Chunk, PageStamp, SiteStamp
 from src.modules.content_processor.knowledge.stamp import PayloadLoader, StampResult, stamp_records
 
-__all__ = ["cmd_catalog", "cmd_stamp", "register", "store_loader", "write_stamps"]
+__all__ = [
+    "cmd_catalog",
+    "cmd_inventory",
+    "cmd_stamp",
+    "register",
+    "store_loader",
+    "write_stamps",
+]
 
 
 def store_loader(store: LocalEvidenceStore) -> PayloadLoader:
@@ -164,8 +179,24 @@ def cmd_catalog(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_inventory(args: argparse.Namespace) -> int:
+    """Inventory a run's pages for SEO and GEO and write the JSON lines and workbook."""
+    records_path = Path(args.records)
+    records = load_records(records_path)
+    if not records:
+        sys.stderr.write(f"{records_path}: no records\n")
+        return 2
+    root = Path(args.evidence_root) if args.evidence_root else get_settings().cp_evidence_root
+    result = inventory_records(records, store_loader(LocalEvidenceStore(root, args.tenant)))
+    run_name = args.run_name or run_name_for(records_path)
+    out_dir = Path(args.out) if args.out else records_path.parent
+    files = write_inventory(result.pages, out_dir, run_name)
+    sys.stdout.write(json.dumps({**result.summary, "files": files}, indent=2) + "\n")
+    return 0
+
+
 def register(subparsers: Any) -> None:
-    """Add the `stamp` and `catalog` subcommands to the CLI's subparsers."""
+    """Add the `stamp`, `catalog` and `inventory` subcommands to the CLI's subparsers."""
     parser = subparsers.add_parser("stamp", help="stamp pages and build context-preserving chunks")
     parser.add_argument("--records", required=True, help="UrlRecord JSONL file")
     parser.add_argument("--tenant", required=True, help="evidence tenant, e.g. rankuno-dev")
@@ -189,3 +220,15 @@ def register(subparsers: Any) -> None:
     cat.add_argument("--llm-endpoint", default=None, help="local chat URL (optional)")
     cat.add_argument("--llm-model", default=None, help="instruct model, e.g. qwen2.5:14b")
     cat.set_defaults(func=cmd_catalog)
+
+    inv = subparsers.add_parser(
+        "inventory", help="list every link, image, embed, tag and SEO/GEO issue of each page"
+    )
+    inv.add_argument("--records", required=True, help="UrlRecord JSONL file")
+    inv.add_argument("--tenant", required=True, help="evidence tenant, e.g. rankuno-dev")
+    inv.add_argument(
+        "--evidence-root", default=None, help="evidence store root (default: CP_EVIDENCE_ROOT)"
+    )
+    inv.add_argument("--out", default=None, help="output directory (default: next to records)")
+    inv.add_argument("--run-name", default=None, help="prefix of the output files")
+    inv.set_defaults(func=cmd_inventory)
