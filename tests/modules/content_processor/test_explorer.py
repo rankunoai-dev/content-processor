@@ -526,3 +526,157 @@ async def test_site_utilities_are_not_explored_and_are_not_gaps(renderer, server
     assert "Part of the distribution may be a return of capital." in _texts(ex)
     assert "I'm a financial professional" not in _texts(ex)
     assert ex.discovery_closed
+
+
+# -- B-14 product variants and listing filters (opt-in) --------------------------------
+
+SHOP = InteractionPolicy(
+    allowed=[
+        "scroll",
+        "expand_disclosure",
+        "select_tab",
+        "hover_info",
+        "open_informational_dialog",
+        "paginate_get",
+        "select_variant",
+        "apply_facet",
+    ]
+)
+
+
+async def _explore_watched(
+    renderer: BrowserRenderer, url: str, policy: InteractionPolicy, counters: str
+) -> tuple[ExplorationResult, list[str], Any]:
+    """Explore and record every request the page sent, plus page-side click counters."""
+    explorer = StateExplorer(policy, settle_max_s=1.5)
+    holder: dict[str, Any] = {}
+    sent: list[str] = []
+
+    async def hook(page: Any) -> None:
+        page.on("request", lambda r: sent.append(f"{r.method} {r.url}"))
+        holder["r"] = await explorer.explore(page)
+        holder["counters"] = await page.evaluate(counters)
+        holder["url"] = page.url
+
+    result = await renderer.render(url, on_page=hook)
+    assert result.rendered, result.transport_error
+    return holder["r"], sent, holder
+
+
+def _states_by_label(ex: ExplorationResult) -> dict[str, str]:
+    return {s.label: s.inner_text for s in ex.states}
+
+
+async def test_each_variant_option_is_its_own_state_and_cart_is_never_clicked(renderer, server_url):
+    ex, sent, page = await _explore_watched(
+        renderer,
+        f"{server_url}/pages/product_variants",
+        SHOP,
+        "() => [window.__cartClicks, window.__submits]",
+    )
+    status = {c.label: (c.status, c.reason) for c in ex.controls if c.kind == "variant"}
+    assert status["Colour: Red"] == ("initially_open", "variant_initially_selected")
+    assert status["Colour: Blue"] == ("visited", None)
+    assert status["Colour: Green"] == ("visited", None)
+    assert status["Colour: Black (sold out)"] == ("excluded", "option_unavailable")
+    assert status["Size: M"] == ("initially_open", "variant_initially_selected")
+    assert status["Size: S"] == ("visited", None)
+    assert status["Size: L"] == ("visited", None)
+    assert status["Size: XL"] == ("excluded", "option_unavailable")
+    assert status["Add to wishlist"] == ("excluded", "commerce_action_never_clicked")
+    # Placeholder, quantity and the header's currency picker are not variants.
+    assert not any("Choose" in label or "Quantity" in label for label in status)
+    assert not any(label.startswith("Currency") for label in status)
+
+    states = _states_by_label(ex)
+    assert "Price: $125.00" in states["Colour: Blue"]
+    assert "Only 2 left: Blue, size M" in states["Colour: Blue"]
+    assert "Out of stock: Green, size M" in states["Colour: Green"]
+    # One dimension at a time: colour was put back to red before sizes were tried.
+    assert "SKU: TJ-RED-S" in states["Size: S"]
+    assert "SKU: TJ-RED-L" in states["Size: L"]
+    assert all(s.kind == "variant" for s in ex.states if s.label.startswith(("Colour", "Size")))
+    dims = {d["name"]: d for d in ex.variant_dimensions}
+    assert dims["Colour"]["kind"] == "select" and dims["Colour"]["states"] == 2
+    assert dims["Size"]["kind"] == "click" and dims["Size"]["restored"] is True
+
+    # Safety: nothing was added to a cart, no form was submitted, nothing was POSTed.
+    assert page["counters"] == [0, 0]
+    assert not [r for r in sent if not r.startswith("GET ")], sent
+    assert ex.unsafe_requests == []
+    assert page["url"] == f"{server_url}/pages/product_variants"
+    assert ex.discovery_closed
+
+
+async def test_variant_state_cap_leaves_the_rest_as_gaps(renderer, server_url):
+    policy = SHOP.model_copy(update={"max_variant_states": 2})
+    _, ex = await _explore(renderer, f"{server_url}/pages/product_variants", policy)
+    capped = [c for c in ex.controls if c.reason == "variant_state_cap:2"]
+    assert [c.label for c in capped] == ["Size: S", "Size: L"]
+    assert all(c.status == "unvisited" for c in capped)
+    assert len([s for s in ex.states if s.kind == "variant"]) == 2
+    assert not ex.discovery_closed
+
+
+async def test_facet_links_are_followups_and_in_page_filters_are_applied_one_at_a_time(
+    renderer, server_url
+):
+    ex, sent, page = await _explore_watched(
+        renderer, f"{server_url}/pages/listing_facets", SHOP, "() => window.__formClicks"
+    )
+    status = {c.label: (c.status, c.reason) for c in ex.controls if c.kind == "facet"}
+    assert status["Brand: Acme"] == ("excluded", "separate_url_followup")
+    assert status["Brand: Northwind"] == ("excluded", "separate_url_followup")
+    assert status["Colour: Red"] == ("visited", None)
+    assert status["Colour: Blue"] == ("visited", None)
+    assert status["Price: Under $20"] == ("visited", None)
+    assert status["Filter: Apply filters"] == ("excluded", "facet_form_control_never_clicked")
+    assert status["Filter: Clear all"] == ("excluded", "facet_form_control_never_clicked")
+    assert ex.followup_urls == [
+        f"{server_url}/pages/static_ok?brand=acme",
+        f"{server_url}/pages/static_ok?brand=northwind",
+    ]
+    facets = {f"{f['group']}: {f['label']}": f for f in ex.facets}
+    assert facets["Brand: Acme"]["count"] == 4
+    assert facets["Brand: Acme"]["url"] == f"{server_url}/pages/static_ok?brand=acme"
+    assert facets["Colour: Red"]["count"] == 2 and facets["Colour: Red"]["mode"] == "in_page"
+    assert facets["Colour: Red"]["state_index"] is not None
+
+    states = _states_by_label(ex)
+    assert "Crimson Cashmere Scarf" not in _texts_of_base(ex)
+    assert "Crimson Cashmere Scarf: $90" in states["Colour: Red"]
+    assert "Ocean Silk Scarf" not in states["Colour: Red"]  # reset before the next one
+    assert "Ocean Silk Scarf: $15" in states["Colour: Blue"]
+    assert "Crimson Cashmere Scarf" not in states["Colour: Blue"]
+    assert "Showing 2 of 2 scarves" in states["Price: Under $20"]
+    # Read-only: no form button clicked, nothing POSTed, never navigated away.
+    assert page["counters"] == 0
+    assert not [r for r in sent if not r.startswith("GET ")], sent
+    assert ex.unsafe_requests == []
+    assert page["url"] == f"{server_url}/pages/listing_facets"
+    assert not any("reset_unverified" in (c.reason or "") for c in ex.controls)
+    assert ex.discovery_closed
+
+
+def _texts_of_base(ex: ExplorationResult) -> str:
+    """Text of states that are not filters (the listing as first shown)."""
+    return "\n".join(s.inner_text for s in ex.states if s.kind != "facet")
+
+
+async def test_facet_cap_and_budget(renderer, server_url):
+    policy = SHOP.model_copy(update={"max_facet_states": 1})
+    _, ex = await _explore(renderer, f"{server_url}/pages/listing_facets", policy)
+    status = {c.label: (c.status, c.reason) for c in ex.controls if c.kind == "facet"}
+    assert status["Colour: Red"] == ("visited", None)
+    assert status["Colour: Blue"] == ("unvisited", "facet_state_cap:1")
+    assert status["Price: Under $20"] == ("unvisited", "facet_state_cap:1")
+
+
+async def test_shop_actions_are_opt_in(renderer, server_url):
+    """Under the default policy product and listing pages are explored as before."""
+    for name in ("product_variants", "listing_facets"):
+        _, ex = await _explore(renderer, f"{server_url}/pages/{name}", InteractionPolicy())
+        assert not [c for c in ex.controls if c.kind in ("variant", "facet")]
+        assert ex.variant_dimensions == [] and ex.facets == []
+        assert ex.unsafe_requests == []
+        assert ex.discovery_closed

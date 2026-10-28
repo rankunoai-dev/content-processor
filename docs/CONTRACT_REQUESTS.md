@@ -110,3 +110,13 @@ Only Lane L0 edits `contracts.py`, `enums.py`, `workers/ports.py`, `ledger/schem
 - **Why:** verification proved only precision (extracted text is on the page), never coverage (page text was extracted); the Latest News headlines were wrongly hidden on every John Hancock news page and the pages still read "Fully captured".
 - **Status:** LANDED with the coverage check (2026-10-22).
 
+
+### CR-012: Opt-in product-option and listing-filter actions (B-14)
+- **Lane:** L2
+- **File(s):** contracts.py (`AllowedAction`, `InteractionPolicy`), explore/model.py (`ControlKind`, `ExplorationResult`)
+- **Change:**
+  1. `AllowedAction` gains `"select_variant"` and `"apply_facet"`. Not in `_default_actions()`: a scope opts in by listing them in `interaction_policy.allowed`, so existing scopes behave exactly as before (no discovery, no new gaps).
+  2. `InteractionPolicy.max_variant_states: int = 25` and `max_facet_states: int = 25` (0 to 200): options chosen / in-page filters applied per page. Every action also counts against `max_actions_per_url`.
+  3. `ControlKind` gains `"variant"` and `"facet"`; `ExplorationResult` gains `variant_dimensions` and `facets` (lists of dicts, default empty). The render worker adds them to the page facts only when non-empty.
+- **Why:** B-14 (case 43): price, stock and SKU text behind option pickers, and listing content behind filters, were never captured.
+- **Status:** LANDED with `feat/variant-facet-actions` (2026-10-28). One dimension at a time (no cross-product); filter links are follow-ups like `paginate_get` next-page links, never opened; cart/buy/wishlist/sign-in and form apply/clear buttons are never clicked; all under the GET-only, no-navigation guard.

@@ -74,6 +74,8 @@ AllowedAction = Literal[
     "open_informational_dialog",
     "keyboard_traverse",
     "paginate_get",
+    "select_variant",
+    "apply_facet",
 ]
 
 
@@ -120,6 +122,8 @@ def _default_actions() -> list[AllowedAction]:
 
     All of them run under the GET-only, no-navigation guard. `keyboard_traverse`
     costs up to 4 x `max_actions_per_url` key presses per page and stays opt-in.
+    `select_variant` and `apply_facet` (product options, listing filters; CR-012)
+    are opt-in too: a scope lists them in `interaction_policy.allowed`.
     """
     return [
         "scroll",
@@ -137,6 +141,18 @@ class InteractionPolicy(StrictModel):
     allowed: list[AllowedAction] = Field(default_factory=_default_actions)
     max_actions_per_url: int = Field(default=50, ge=0, le=500)
     max_scroll_passes: int = Field(default=20, ge=0, le=200)
+    max_variant_states: int = Field(
+        default=25,
+        ge=0,
+        le=200,
+        description="select_variant: options chosen per page, one dimension at a time",
+    )
+    max_facet_states: int = Field(
+        default=25,
+        ge=0,
+        le=200,
+        description="apply_facet: in-page filters applied per page, one at a time",
+    )
     side_effect_rule: Literal["get_only_no_navigation"] = "get_only_no_navigation"
 
 

@@ -535,6 +535,11 @@ class RenderWorker:
                     ],
                 }
             )
+            # Product options and listing filters (B-14), only on scopes that opt in.
+            if exploration.variant_dimensions:
+                facts["variant_dimensions"] = exploration.variant_dimensions
+            if exploration.facets:
+                facts["facets"] = exploration.facets
         return kept, facts
 
     def _discovery_verdict(

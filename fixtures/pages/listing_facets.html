@@ -1,0 +1,66 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Scarves</title></head><body>
+<main>
+<h1>Scarves</h1>
+<p id="summary">Showing 4 of 6 scarves</p>
+<aside class="facets" aria-label="Filters">
+  <form method="post" action="/filters">
+    <details open><summary>Brand</summary>
+      <ul>
+        <li><a href="/pages/static_ok?brand=acme">Acme <span class="count">(4)</span></a></li>
+        <li><a href="/pages/static_ok?brand=northwind">Northwind (2)</a></li>
+      </ul>
+    </details>
+    <fieldset><legend>Colour</legend>
+      <input type="checkbox" id="f-red" value="red"><label for="f-red">Red (2)</label>
+      <input type="checkbox" id="f-blue" value="blue"><label for="f-blue">Blue (1)</label>
+    </fieldset>
+    <div class="facet-group" data-facet-name="Price">
+      <h3>Price</h3>
+      <button type="button" class="facet-chip" aria-pressed="false" data-max="20">Under $20</button>
+    </div>
+    <button type="submit" id="apply">Apply filters</button>
+    <button type="button" id="clear">Clear all</button>
+  </form>
+</aside>
+<ul id="grid"></ul>
+</main>
+<script>
+window.__formClicks = 0;
+var items = [
+  { n: 'Acme Wool Scarf', c: 'grey', p: 25 },
+  { n: 'Acme Linen Scarf', c: 'beige', p: 30 },
+  { n: 'Northwind Knit Scarf', c: 'red', p: 18 },
+  { n: 'Acme Travel Scarf', c: 'black', p: 22 },
+  { n: 'Crimson Cashmere Scarf', c: 'red', p: 90 },
+  { n: 'Ocean Silk Scarf', c: 'blue', p: 15 }
+];
+var colours = {}, max = null;
+function render() {
+  var picked = Object.keys(colours).filter(function (k) { return colours[k]; });
+  var hits = items.filter(function (i) {
+    return (!picked.length || picked.indexOf(i.c) >= 0) && (max === null || i.p < max);
+  });
+  var shown = hits.slice(0, 4);
+  document.getElementById('grid').innerHTML = shown.map(function (i) {
+    return '<li>' + i.n + ': $' + i.p + '</li>';
+  }).join('');
+  document.getElementById('summary').textContent = 'Showing ' + shown.length + ' of ' + hits.length + ' scarves';
+  var q = new URLSearchParams();
+  picked.forEach(function (c) { q.append('colour', c); });
+  if (max !== null) { q.set('max', String(max)); }
+  history.replaceState(null, '', location.pathname + (q.toString() ? '?' + q.toString() : ''));
+}
+document.querySelectorAll('fieldset input[type=checkbox]').forEach(function (box) {
+  box.addEventListener('change', function () { colours[box.value] = box.checked; render(); });
+});
+document.querySelector('.facet-chip').addEventListener('click', function (e) {
+  var on = e.currentTarget.getAttribute('aria-pressed') !== 'true';
+  e.currentTarget.setAttribute('aria-pressed', on ? 'true' : 'false');
+  max = on ? 20 : null; render();
+});
+document.getElementById('apply').addEventListener('click', function () { window.__formClicks += 1; });
+document.getElementById('clear').addEventListener('click', function () {
+  window.__formClicks += 1; fetch('/filters/clear', { method: 'POST' }).catch(function () {});
+});
+render();
+</script></body></html>

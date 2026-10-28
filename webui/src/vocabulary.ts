@@ -314,6 +314,8 @@ const CONTROL_KINDS: Record<string, { one: string; many: string }> = {
   pagination: { one: 'next-page link', many: 'next-page links' },
   frame: { one: 'embedded frame', many: 'embedded frames' },
   shadow_root: { one: 'embedded component', many: 'embedded components' },
+  variant: { one: 'product option', many: 'product options' },
+  facet: { one: 'listing filter', many: 'listing filters' },
 };
 
 const ACTIONS: Record<string, string> = {
@@ -324,6 +326,8 @@ const ACTIONS: Record<string, string> = {
   open_informational_dialog: 'opening pop-up windows',
   keyboard_traverse: 'keyboard navigation',
   paginate_get: 'following next-page links',
+  select_variant: 'choosing product options',
+  apply_facet: 'applying listing filters',
 };
 
 const CLICK_CAUSES: Record<string, string> = {

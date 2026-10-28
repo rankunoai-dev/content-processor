@@ -1,6 +1,6 @@
 # Content Processor: A Plain-Language Guide
 
-Last updated: 27 October 2026 · Code version: main after pages that meet a bot check being handed to the real browser, page stamping (step 1) and the offering catalog (step 2) of the knowledge base, URL history (only new or changed pages are scraped again), the report's Last checked / Site last updated / Action columns, and cookie/chat widgets read at screenshot time · Maintained by every session that adds a significant feature (see "Keeping this guide current" at the end)
+Last updated: 28 October 2026 · Code version: main after product options and listing filters in the browser exploration (opt-in), pages that meet a bot check being handed to the real browser, page stamping (step 1) and the offering catalog (step 2) of the knowledge base, URL history (only new or changed pages are scraped again), the report's Last checked / Site last updated / Action columns, and cookie/chat widgets read at screenshot time · Maintained by every session that adds a significant feature (see "Keeping this guide current" at the end)
 
 ## 1. What this is, in one paragraph
 
@@ -110,6 +110,13 @@ Many modern pages only show their content after the browser runs them, and much 
 - it never submits forms, logs in, buys, signs up or follows links away from the page;
 - cookie banners are answered with "reject non-essential", never "accept";
 - background tracking and "bot sensor" messages are blocked.
+
+Shop pages hide content behind choices. Two extra explorations can be switched on for a job; they are off unless the job asks for them, so other jobs behave exactly as before:
+
+- **Product options** ("select_variant"): on a product page, each option of a colour, size or similar picker (a drop-down list, buttons or swatches) is chosen on its own and the page is captured again, because the price, stock, product code and pictures often change. Each capture is labelled with the choice, for example "Colour: Blue". Options are tried one picker at a time and the picker is put back before the next, so the engine never tries every combination; at most 25 options per page by default. Options the shop shows as unavailable are not chosen. "Add to cart", "Buy now", wishlist and similar buttons are never pressed.
+- **Listing filters** ("apply_facet"): on a category or listing page, the filter groups are read (for example Brand, Colour, Price), with each option's name, the number of products shown next to it and, if it is a link, its address. Filters that are links lead to other pages, so they are listed as addresses for the job's rules to decide on, never opened from this page. Filters that change the list in place (tick boxes, toggle buttons) are applied one at a time, captured, and taken off again; at most 25 per page by default. "Apply", "Clear all" and other form buttons are never pressed.
+
+Choices beyond the limit are reported as gaps, so the page shows as "partly captured" rather than complete. To switch them on, add "select_variant" and/or "apply_facet" to the job's list of allowed interactions; the limits can be changed in the same place.
 
 The engine then compares what the browser shows with what the raw HTML contained, so content that appears only after loading, or disappears, is noticed.
 
@@ -228,7 +235,7 @@ On the live John Hancock run (303 addresses), without AI, in a few seconds: 5 fa
 - Paid access through Bright Data's remote browser is not built; pages fetched through paid access are read from their page code, not opened in a browser through the paid connection.
 - Durable database: the PostgreSQL storage exists but has never been tested against a real database.
 - Starting runs from the web: the analyst web app reviews finished runs, but runs are still started from the command line, and there is no live progress feed or deployment package yet.
-- Some content types: text drawn on canvas or in CSS, product variant selectors, audio and video, archives and email files, and old-style .doc and .xls files.
+- Some content types: text drawn on canvas or in CSS, combinations of product options (each option is captured on its own, never every combination), audio and video, archives and email files, and old-style .doc and .xls files.
 - Semantic similarity: finding pages that say the same thing in different words (planned with a vector database).
 - The rest of the knowledge base: labelling every page and section by its content (not only by its address), search across sections, and competitor comparison and gap reports are designed but not built yet (steps 1 and 2, stamping and the offering catalog, are done). The AI steps of the catalog have been tested against a simulated server only, until the company's Ollama server address is available.
 - Hidden page text: some text present in the page code (for example frequently-asked-question answers) is not yet revealed and captured by the browser exploration; the engine flags these pages for review rather than counting them complete.
@@ -259,6 +266,7 @@ On the live John Hancock run (303 addresses), without AI, in a few seconds: 5 fa
 
 | Date | Significant change |
 |---|---|
+| 2026-10-28 | Browser exploration can now, when a job asks for it, choose each product option (colour, size and similar) and capture the page for each, and read a listing page's filters, applying in-page filters one at a time. Both are off by default; cart, buy, form and sign-in buttons are never pressed. |
 | 2026-10-27 | A page whose download meets a bot check is now tried in the real browser before being reported blocked; if the browser gets through, the page is captured normally. |
 | 2026-10-27 | Knowledge base step 2: a "catalog" command builds each website's offering catalog from its menus, structured data and folders, places every page under an offering or section, and fills evidence-backed cards; optional local AI adds checked features and suggestions. John Hancock (303 addresses): 5 families, 15 more offerings, 271 of 272 pages placed, at $0. Menu links that are script buttons are no longer read as page addresses. |
 | 2026-10-27 | URL history: any list of addresses is checked against every earlier run; unchanged pages keep their earlier content and are not scraped again, only new or changed ones are. A pre-run check lists which addresses were scraped before and when. The project report shows Last checked, Site last updated and Action for every page. Cookie banners and chat bubbles on the screenshot no longer cause false "needs a check" verdicts. |

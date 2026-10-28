@@ -128,3 +128,14 @@ def test_default_interactions_are_every_read_only_action_but_keyboard_traversal(
         "paginate_get",
     ]
     assert "keyboard_traverse" not in allowed
+
+
+def test_variant_and_facet_actions_are_opt_in_with_caps():
+    """CR-012: product options and listing filters run only when a scope lists them."""
+    policy = InteractionPolicy()
+    assert "select_variant" not in policy.allowed and "apply_facet" not in policy.allowed
+    assert (policy.max_variant_states, policy.max_facet_states) == (25, 25)
+    opted = InteractionPolicy(allowed=["select_variant", "apply_facet"], max_variant_states=5)
+    assert opted.allowed == ["select_variant", "apply_facet"] and opted.max_variant_states == 5
+    with pytest.raises(ValidationError):
+        InteractionPolicy(max_facet_states=201)
