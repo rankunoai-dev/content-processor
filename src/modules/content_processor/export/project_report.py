@@ -95,7 +95,17 @@ _CONTROL_WORDS = {
 }
 A_IN_B = "% of A in B"
 B_IN_A = "% of B in A"
-MATCH_COLUMNS = ["URL (A)", "Matching URL (B)", A_IN_B, B_IN_A, "Shared passages", "Shared text"]
+MATCH_COLUMNS = [
+    "Pair",
+    "URL (A)",
+    "Matching URL (B)",
+    A_IN_B,
+    B_IN_A,
+    "Shared words",
+    "Shared passages",
+    "Shared text",
+]
+LINE_COLUMNS = ["Pair", "URL (A)", "Matching URL (B)", "Passage", "Line", "Text"]
 PASSAGE_BREAK = "\n\n[…]\n\n"
 """Between two shared passages that are not next to each other on page A."""
 
@@ -213,6 +223,14 @@ _NOTES: list[tuple[str, str]] = [
         f"one. A pair is listed when either direction reaches {DEFAULT_MIN_MATCH_PCT:g}%.",
     ),
     (
+        "Matching content: Pair",
+        "Number of the pair; the same number in 'Shared text by line' shows its text line by line.",
+    ),
+    (
+        "Matching content: Shared words",
+        "How many words the two pages share (all shared passages together).",
+    ),
+    (
         "Matching content: Shared passages",
         "How many separate passages of page A also appear on page B.",
     ),
@@ -222,7 +240,14 @@ _NOTES: list[tuple[str, str]] = [
         "captured; '[…]' separates passages that are not next to each other on page A. A "
         "very long text continues in 'Shared text_part_2' and the next columns (an Excel "
         "cell holds at most 32,767 characters); 'Shared text_split' says when that "
-        "happened.",
+        "happened. Nothing is shortened. Excel shows only about 27 lines of a cell on screen; "
+        "click the cell, or use the 'Shared text by line' sheet, to read all of it.",
+    ),
+    (
+        "Shared text by line",
+        "Every line of every shared passage, one row each, with its pair number, passage "
+        "number and line number: the whole shared text of every pair, readable without "
+        "opening cells. Menus, headers and footers are not compared, so they are not here.",
     ),
 ]
 
@@ -440,15 +465,18 @@ def match_rows(
         pairs[first].append((first_in_second, second_in_first, second))
         in_a_pair.update((first, second))
     rows: list[dict[str, Cell]] = []
+    number = 0
     for i in sorted(range(len(docs)), key=lambda i: docs[i].url):
         found = sorted(pairs.get(i, []), key=lambda m: (-max(m[0], m[1]), docs[m[2]].url))
         if not found and i not in in_a_pair:
             rows.append(
                 {
+                    "Pair": None,
                     "URL (A)": docs[i].url,
                     "Matching URL (B)": NO_MATCH,
                     A_IN_B: None,
                     B_IN_A: None,
+                    "Shared words": None,
                     "Shared passages": None,
                     "Shared text": "",
                 }
@@ -456,16 +484,46 @@ def match_rows(
             continue
         for first_in_second, second_in_first, j in found:
             passages = _shared_spans(docs[i], docs[j], limit=None, max_chars=None)
+            number += 1
             rows.append(
                 {
+                    "Pair": number,
                     "URL (A)": docs[i].url,
                     "Matching URL (B)": docs[j].url,
                     A_IN_B: round(first_in_second, 1),
                     B_IN_A: round(second_in_first, 1),
+                    "Shared words": sum(len(p.split()) for p in passages),
                     "Shared passages": len(passages),
                     "Shared text": PASSAGE_BREAK.join(passages),
                 }
             )
+    return rows
+
+
+def shared_line_rows(matches: Sequence[dict[str, Cell]]) -> list[dict[str, Cell]]:
+    """Sheet "Shared text by line": every line of every shared passage, one row each.
+
+    Excel shows at most about 27 wrapped lines of one cell (a row is at most 409
+    points tall), so a long shared text is complete in its cell but cannot all be
+    seen there. Here each line has its own row, so the whole match is readable.
+    """
+    rows: list[dict[str, Cell]] = []
+    for match in matches:
+        text = match.get("Shared text")
+        if match.get("Pair") is None or not isinstance(text, str) or not text:
+            continue
+        for p, passage in enumerate(text.split(PASSAGE_BREAK), start=1):
+            for n, line in enumerate(passage.split("\n"), start=1):
+                rows.append(
+                    {
+                        "Pair": match["Pair"],
+                        "URL (A)": match["URL (A)"],
+                        "Matching URL (B)": match["Matching URL (B)"],
+                        "Passage": p,
+                        "Line": n,
+                        "Text": line,
+                    }
+                )
     return rows
 
 
@@ -478,6 +536,7 @@ def project_report_tables(
     content_columns = [c for c in page_columns if c == "Content" or c.startswith("Content_part_")]
     notes: list[dict[str, Cell]] = [{"Column": n, "Meaning": m} for n, m in _NOTES]
     matches = match_rows(records, min_match_pct=min_match_pct)
+    lines = shared_line_rows(matches)
     match_columns = expand_split_column(matches, MATCH_COLUMNS, "Shared text")
     shared_columns = [
         c for c in match_columns if c == "Shared text" or c.startswith("Shared text_part_")
@@ -505,6 +564,13 @@ def project_report_tables(
                 "Matching URL (B)": 60,
                 **dict.fromkeys(shared_columns, 100),
             },
+        ),
+        Table(
+            name="Shared text by line",
+            columns=LINE_COLUMNS,
+            rows=lines,
+            wrap_columns=frozenset({"Text"}),
+            widths={"URL (A)": 40, "Matching URL (B)": 40, "Text": 120},
         ),
         Table(name="How to read", columns=["Column", "Meaning"], rows=notes),
     ]
