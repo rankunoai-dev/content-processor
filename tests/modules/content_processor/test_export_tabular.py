@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import json
+import re
 import zipfile
 from pathlib import Path
 
@@ -11,6 +12,7 @@ import pytest
 
 from src.modules.content_processor.export.tabular import (
     XLSX_CELL_LIMIT,
+    XLSX_MAX_ROWS,
     Table,
     expand_split_column,
     split_cell,
@@ -146,3 +148,21 @@ def test_jsonl_is_verbatim(tmp_path: Path):
     assert write_jsonl(path, [{"a": "=1\x01é"}, {"b": 1}]) == 2
     lines = path.read_text(encoding="utf-8").splitlines()
     assert json.loads(lines[0]) == {"a": "=1\x01é"}
+
+
+def test_a_table_longer_than_a_sheet_continues_on_numbered_sheets(tmp_path: Path) -> None:
+    assert XLSX_MAX_ROWS == 1_048_576
+    rows = [{"n": i} for i in range(1, 8)]
+    path = tmp_path / "long.xlsx"
+    write_xlsx(path, [Table("Lines", ["n"], rows), Table("After", ["x"])], max_rows=4)
+    with zipfile.ZipFile(path) as z:
+        workbook = z.read("xl/workbook.xml").decode()
+        sheets = [z.read(f"xl/worksheets/sheet{i}.xml").decode() for i in (1, 2, 3, 4)]
+    names = ['name="Lines"', 'name="Lines (2)"', 'name="Lines (3)"', 'name="After"']
+    assert all(n in workbook for n in names)
+    # each part has the header and at most 3 rows; together they hold all 7, in order
+    counts = [s.count("<row ") for s in sheets[:3]]
+    assert counts == [4, 4, 2]
+    assert all(">n<" in s for s in sheets[:3])
+    found = [int(v) for s in sheets[:3] for v in re.findall(r"<v>(\d+)</v>", s)]
+    assert found == list(range(1, 8))

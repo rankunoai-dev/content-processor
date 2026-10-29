@@ -28,12 +28,13 @@ import json
 import math
 import zipfile
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from xml.sax.saxutils import escape
 
 __all__ = [
     "XLSX_CELL_LIMIT",
+    "XLSX_MAX_ROWS",
     "Cell",
     "Table",
     "expand_split_column",
@@ -46,6 +47,8 @@ __all__ = [
 ]
 
 XLSX_CELL_LIMIT = 32_767
+XLSX_MAX_ROWS = 1_048_576
+"""Rows in one Excel sheet, header included; longer tables continue on "Name (2)"."""
 """Maximum characters (UTF-16 code units) in one spreadsheet cell."""
 
 Cell = str | int | float | bool | None
@@ -296,8 +299,22 @@ _STYLES = (
 )
 
 
-def write_xlsx(path: Path, tables: Sequence[Table]) -> int:
+def _sheet_parts(table: Table, max_rows: int) -> list[Table]:
+    """The table as one or more sheets of at most `max_rows` rows, header included."""
+    per_sheet = max(1, max_rows - 1)
+    if len(table.rows) <= per_sheet:
+        return [table]
+    return [
+        replace(table, rows=table.rows[start : start + per_sheet])
+        for start in range(0, len(table.rows), per_sheet)
+    ]
+
+
+def write_xlsx(path: Path, tables: Sequence[Table], *, max_rows: int = XLSX_MAX_ROWS) -> int:
     """Write tables as sheets of one workbook. Returns characters replaced for XML.
+
+    A table with more rows than one Excel sheet holds continues on further sheets
+    named "Name (2)", "Name (3)", each with the header row: nothing is dropped.
 
     Raises:
         ValueError: A text cell is longer than `XLSX_CELL_LIMIT`; split it with
@@ -310,10 +327,11 @@ def write_xlsx(path: Path, tables: Sequence[Table]) -> int:
     sheets: list[tuple[str, str]] = []
     replaced = 0
     for table in tables:
-        sheet = _Sheet()
-        body = sheet.xml(table)
-        replaced += sheet.replaced
-        sheets.append((_sheet_name(table.name, taken), body))
+        for part in _sheet_parts(table, max_rows):
+            sheet = _Sheet()
+            body = sheet.xml(part)
+            replaced += sheet.replaced
+            sheets.append((_sheet_name(part.name, taken), body))
     overrides = "".join(
         f'<Override PartName="/xl/worksheets/sheet{i}.xml" '
         'ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'

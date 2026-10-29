@@ -247,7 +247,9 @@ _NOTES: list[tuple[str, str]] = [
         "Shared text by line",
         "Every line of every shared passage, one row each, with its pair number, passage "
         "number and line number: the whole shared text of every pair, readable without "
-        "opening cells. Menus, headers and footers are not compared, so they are not here.",
+        "opening cells. Menus, headers and footers are not compared, so they are not here. "
+        "When there are more lines than one Excel sheet holds (about a million), they "
+        "continue on 'Shared text by line (2)' and the next sheets.",
     ),
 ]
 

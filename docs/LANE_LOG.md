@@ -679,3 +679,11 @@ git worktree add ../content-processor-lane4 -b lane/L4-verify
 - **Gate:** branch: ruff, mypy strict (132 files), full suite passed, coverage 94.02%. After merging into main with the variants work: `scripts/verify.ps1 -Fix` ALL GATES PASSED, 1,062 passed, 11 skipped, coverage 93.73% (a first run under heavy machine load timed out 20 browser tests; all 20 passed when rerun, then the whole gate passed).
 - **Follow-up (same day, user: "the full text, no stripping"):** `Pair` and `Shared words` columns; new sheet "Shared text by line" (`shared_line_rows`): every line of every shared passage on its own row with pair, passage and line numbers, because Excel displays at most ~27 wrapped lines of a cell (409 pt row height) even though the cell holds all of it.
 - **Measured:** `exports/jh100`: the America's 250th pair (the same release at two addresses, one with double hyphens) now shows 5,630 characters / 866 words in one passage (was 300 characters); the longest shared text in the run is 7,898 characters.
+
+## [2026-10-29] Workbooks: tables longer than one Excel sheet continue on numbered sheets
+
+- **Branch / worktree:** `fix/xlsx-row-limit` at `../content-processor-rowlimit`, from main `ad0c761`.
+- **Problem:** regenerating the `jh_full` project report gave 30,269 matching pairs and 1,192,880 rows in "Shared text by line", more than Excel's 1,048,576 rows per sheet; `write_xlsx` had no row limit, so Excel would not have loaded the rest.
+- **Change:** `export/tabular.write_xlsx(..., max_rows=XLSX_MAX_ROWS)` splits any table into consecutive sheets "Name", "Name (2)", ... of at most 1,048,576 rows, each with the header row (applies to every workbook). How-to-read note and guide updated.
+- **Gate:** `scripts/verify.ps1` ALL GATES PASSED, 1,063 passed, 11 skipped, coverage 93.74% (a run during heavy machine load timed out 26 browser tests; rerun when quiet: all passed).
+- **Measured:** `exports/jh_full/reports_2026-10-29/jh_full_project_report.xlsx`: Pages 318, Matching content 30,276 rows, Shared text by line 1,048,575 + 144,305 lines (all 1,192,880).
