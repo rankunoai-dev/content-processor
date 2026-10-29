@@ -659,3 +659,11 @@ git worktree add ../content-processor-lane4 -b lane/L4-verify
 - **Measured, $0:** `exports/jh_full` (evidence now in the main checkout): 303 structured in ~67 s (7 not captured, 8 not HTML); 7,455 paragraphs, 551 sections, 756 cards in 252 groups, 255 accordion items (33 FAQ blocks), 244 tables, 760 images, 53 media, 129 CTAs; 7,940 of 8,925 text nodes (89%) cited; breadcrumbs on 302 pages; page types article 268, faq 33, document 8, other 2 (median confidence 0.86); profile publisher.
 - **Gate:** ruff format and check clean, mypy strict clean (132 files), coverage 94.02% (structured_page 89%, page_types 97%). One failure in the full run, `test_explorer.py::test_tooltip_and_hover_menu_are_revealed` (browser timing under load; explorer code, tests and fixtures untouched on this branch), passed 3 of 3 when rerun alone.
 - **Not built:** page-type modules (typed Product/Service records, completeness gaps), template sampling, entity history; e-commerce detection is tested on fixtures only (no shop site captured yet).
+
+## [2026-10-29] Project report: full shared text in "Matching content"
+
+- **Branch / worktree:** `fix/match-full-text` at `../content-processor-matchtext`, from main `1cbc12c`.
+- **Problem (user report):** a pair at 100% / 100% showed only "Example of the shared text": at most two passages, each cut at 300 characters with "…", so the cell looked like a fraction of the match.
+- **Change:** `analysis/overlap._shared_spans(limit=None, max_chars=None)` returns every passage uncut (defaults unchanged, so R2b keeps its short excerpts). The sheet's columns are now `Shared passages` (count) and `Shared text` (all passages in A's order, separated by `[…]`), split for Excel's 32,767-character cell limit into `Shared text_part_N` with `_parts`/`_split` like the Pages content; wrapped, width 100. How-to-read notes updated.
+- **Gate:** ruff format and check clean, mypy strict clean (132 files), full suite passed (no failures), coverage 94.02%.
+- **Measured:** `exports/jh100`: the America's 250th pair (the same release at two addresses, one with double hyphens) now shows 5,630 characters / 866 words in one passage (was 300 characters); the longest shared text in the run is 7,898 characters.

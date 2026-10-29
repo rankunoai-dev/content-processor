@@ -95,7 +95,9 @@ _CONTROL_WORDS = {
 }
 A_IN_B = "% of A in B"
 B_IN_A = "% of B in A"
-MATCH_COLUMNS = ["URL (A)", "Matching URL (B)", A_IN_B, B_IN_A, "Example of the shared text"]
+MATCH_COLUMNS = ["URL (A)", "Matching URL (B)", A_IN_B, B_IN_A, "Shared passages", "Shared text"]
+PASSAGE_BREAK = "\n\n[…]\n\n"
+"""Between two shared passages that are not next to each other on page A."""
 
 _STATUS = {
     UrlBadge.VERIFIED_WITHIN_SCOPE: "Fully captured",
@@ -210,7 +212,18 @@ _NOTES: list[tuple[str, str]] = [
         "short page can be 100% inside a long one while the long one is 20% inside the short "
         f"one. A pair is listed when either direction reaches {DEFAULT_MIN_MATCH_PCT:g}%.",
     ),
-    ("Matching content: Example", "Up to two passages the two pages share, quoted as captured."),
+    (
+        "Matching content: Shared passages",
+        "How many separate passages of page A also appear on page B.",
+    ),
+    (
+        "Matching content: Shared text",
+        "Every passage the two pages share, in full and in page A's order, quoted as "
+        "captured; '[…]' separates passages that are not next to each other on page A. A "
+        "very long text continues in 'Shared text_part_2' and the next columns (an Excel "
+        "cell holds at most 32,767 characters); 'Shared text_split' says when that "
+        "happened.",
+    ),
 ]
 
 
@@ -436,20 +449,21 @@ def match_rows(
                     "Matching URL (B)": NO_MATCH,
                     A_IN_B: None,
                     B_IN_A: None,
-                    "Example of the shared text": "",
+                    "Shared passages": None,
+                    "Shared text": "",
                 }
             )
             continue
         for first_in_second, second_in_first, j in found:
+            passages = _shared_spans(docs[i], docs[j], limit=None, max_chars=None)
             rows.append(
                 {
                     "URL (A)": docs[i].url,
                     "Matching URL (B)": docs[j].url,
                     A_IN_B: round(first_in_second, 1),
                     B_IN_A: round(second_in_first, 1),
-                    "Example of the shared text": " … ".join(
-                        _shared_spans(docs[i], docs[j], limit=2)
-                    ),
+                    "Shared passages": len(passages),
+                    "Shared text": PASSAGE_BREAK.join(passages),
                 }
             )
     return rows
@@ -463,6 +477,11 @@ def project_report_tables(
     page_columns = expand_split_column(pages, PAGES_COLUMNS, "Content")
     content_columns = [c for c in page_columns if c == "Content" or c.startswith("Content_part_")]
     notes: list[dict[str, Cell]] = [{"Column": n, "Meaning": m} for n, m in _NOTES]
+    matches = match_rows(records, min_match_pct=min_match_pct)
+    match_columns = expand_split_column(matches, MATCH_COLUMNS, "Shared text")
+    shared_columns = [
+        c for c in match_columns if c == "Shared text" or c.startswith("Shared text_part_")
+    ]
     return [
         Table(
             name="Pages",
@@ -478,8 +497,14 @@ def project_report_tables(
         ),
         Table(
             name="Matching content",
-            columns=MATCH_COLUMNS,
-            rows=match_rows(records, min_match_pct=min_match_pct),
+            columns=match_columns,
+            rows=matches,
+            wrap_columns=frozenset(shared_columns),
+            widths={
+                "URL (A)": 60,
+                "Matching URL (B)": 60,
+                **dict.fromkeys(shared_columns, 100),
+            },
         ),
         Table(name="How to read", columns=["Column", "Meaning"], rows=notes),
     ]

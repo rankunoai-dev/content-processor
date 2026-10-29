@@ -9,6 +9,7 @@ from src.modules.content_processor.enums import EntityStatus, GapType, UrlBadge
 from src.modules.content_processor.export.bundle import write_run_reports
 from src.modules.content_processor.export.project_report import (
     NO_MATCH,
+    PASSAGE_BREAK,
     match_rows,
     page_rows,
     project_report_tables,
@@ -164,7 +165,10 @@ def test_each_pair_is_listed_once_with_both_directions():
     row = next(r for r in rows if r["Matching URL (B)"] == "https://x.example/short")
     assert 24.0 <= row["% of A in B"] <= 26.0  # long in short
     assert row["% of B in A"] == 100.0  # short in long
-    assert row["Example of the shared text"]
+    # every shared passage, in full: the short page is entirely inside the long one
+    assert row["Shared passages"] == 1
+    assert row["Shared text"] == short_text
+    assert "…" not in str(row["Shared text"])
     # a page in no pair still gets one row; a page that is in a pair gets none of its own
     assert ("https://x.example/other", NO_MATCH) in pairs
     assert not any(u == "https://x.example/short" for u, _ in pairs)
@@ -220,3 +224,24 @@ def test_workbook_is_written_with_three_sheets(tmp_path: Path):
         workbook = z.read("xl/workbook.xml").decode()
     for sheet in ("Pages", "Matching content", "How to read"):
         assert f'name="{sheet}"' in workbook
+
+
+def test_shared_text_is_every_passage_in_full_and_split_for_excel():
+    first, gap_a, second, gap_b = words(5, 400), words(6, 60), words(7, 80), words(8, 60)
+    a = record("https://x.example/a", [first, gap_a, second])
+    b = record("https://x.example/b", [first, gap_b, second])
+    (row,) = [r for r in match_rows([a, b]) if r["Matching URL (B)"] == "https://x.example/b"]
+    text = str(row["Shared text"])
+    assert row["Shared passages"] == 2
+    assert text == first + PASSAGE_BREAK + second, "both passages, whole, in page order"
+    assert len(first) > 300 and "…" not in text.replace(PASSAGE_BREAK, "")
+    # a shared text longer than one Excel cell continues in extra columns
+    huge = words(9, 7000)
+    big = [record(f"https://x.example/{n}", [huge]) for n in ("c", "d")]
+    tables = {t.name: t for t in project_report_tables(big)}
+    matching = tables["Matching content"]
+    assert "Shared text_part_2" in matching.columns and "Shared text_split" in matching.columns
+    (pair,) = [r for r in matching.rows if r["Matching URL (B)"] == "https://x.example/d"]
+    assert pair["Shared text_split"] is True
+    assert str(pair["Shared text"]) + str(pair["Shared text_part_2"]) == huge
+    assert "Shared text" in matching.wrap_columns
