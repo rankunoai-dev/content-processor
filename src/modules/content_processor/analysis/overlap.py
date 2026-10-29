@@ -426,12 +426,21 @@ def _groups(
     return [[by_url[u] for u in g] for g in real]
 
 
-def _shared_spans(a: OverlapDoc, b: OverlapDoc, limit: int = 3) -> list[str]:
-    """Up to `limit` verbatim quotes from A covering runs of shingles B also has."""
+def _shared_spans(
+    a: OverlapDoc,
+    b: OverlapDoc,
+    limit: int | None = 3,
+    max_chars: int | None = _QUOTE_LIMIT,
+) -> list[str]:
+    """Verbatim quotes from A covering runs of shingles B also has, in A's order.
+
+    `limit` caps how many passages (None: all of them) and `max_chars` how long each
+    may be before it is cut with "…" (None: never cut).
+    """
     quotes: list[str] = []
     i = 0
     seq = a.shingle_seq
-    while i < len(seq) and len(quotes) < limit:
+    while i < len(seq) and (limit is None or len(quotes) < limit):
         if seq[i] not in b.shingles:
             i += 1
             continue
@@ -440,7 +449,8 @@ def _shared_spans(a: OverlapDoc, b: OverlapDoc, limit: int = 3) -> list[str]:
             j += 1
         start, end = a.shingle_starts[i][0], a.shingle_starts[j][1]
         quote = a.text[start:end]
-        quotes.append(quote if len(quote) <= _QUOTE_LIMIT else quote[:_QUOTE_LIMIT] + "…")
+        cut = max_chars is not None and len(quote) > max_chars
+        quotes.append(quote[:max_chars] + "…" if cut else quote)
         i = j + 1
     return quotes
 
