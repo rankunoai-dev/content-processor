@@ -1,6 +1,6 @@
 # Content Processor: A Plain-Language Guide
 
-Last updated: 28 October 2026 · Code version: main after pages that meet a bot check being handed to the real browser, page stamping (step 1) and the offering catalog (step 2) of the knowledge base, the URL history across runs (one memory, only new or changed pages scraped again), the SEO and GEO inventory, and page outlines with page types · Maintained by every session that adds a significant feature (see "Keeping this guide current" at the end)
+Last updated: 28 October 2026 · Code version: main after product options and listing filters in browser exploration (opt-in), page outlines with page types, the SEO and GEO inventory, the unified URL history across runs, page stamping and offering catalog · Maintained by every session that adds a significant feature (see "Keeping this guide current" at the end)
 
 ## 1. What this is, in one paragraph
 
@@ -112,6 +112,13 @@ Many modern pages only show their content after the browser runs them, and much 
 - it never submits forms, logs in, buys, signs up or follows links away from the page;
 - cookie banners are answered with "reject non-essential", never "accept";
 - background tracking and "bot sensor" messages are blocked.
+
+Shop pages hide content behind choices. Two extra explorations can be switched on for a job; they are off unless the job asks for them, so other jobs behave exactly as before:
+
+- **Product options** ("select_variant"): on a product page, each option of a colour, size or similar picker (a drop-down list, buttons or swatches) is chosen on its own and the page is captured again, because the price, stock, product code and pictures often change. Each capture is labelled with the choice, for example "Colour: Blue". Options are tried one picker at a time and the picker is put back before the next, so the engine never tries every combination; at most 25 options per page by default. Options the shop shows as unavailable are not chosen. "Add to cart", "Buy now", wishlist and similar buttons are never pressed.
+- **Listing filters** ("apply_facet"): on a category or listing page, the filter groups are read (for example Brand, Colour, Price), with each option's name, the number of products shown next to it and, if it is a link, its address. Filters that are links lead to other pages, so they are listed as addresses for the job's rules to decide on, never opened from this page. Filters that change the list in place (tick boxes, toggle buttons) are applied one at a time, captured, and taken off again; at most 25 per page by default. "Apply", "Clear all" and other form buttons are never pressed.
+
+Choices beyond the limit are reported as gaps, so the page shows as "partly captured" rather than complete. To switch them on, add "select_variant" and/or "apply_facet" to the job's list of allowed interactions; the limits can be changed in the same place.
 
 The engine then compares what the browser shows with what the raw HTML contained, so content that appears only after loading, or disappears, is noticed.
 
@@ -256,7 +263,7 @@ On the John Hancock run (303 pages, about a minute, $0): 7,455 paragraphs, 551 s
 - Paid access through Bright Data's remote browser is not built; pages fetched through paid access are read from their page code, not opened in a browser through the paid connection.
 - Durable database: the PostgreSQL storage exists but has never been tested against a real database.
 - Starting runs from the web: the analyst web app reviews finished runs, but runs are still started from the command line, and there is no live progress feed or deployment package yet.
-- Some content types: text drawn on canvas or in CSS, product variant selectors, audio and video, archives and email files, and old-style .doc and .xls files.
+- Some content types: text drawn on canvas or in CSS, combinations of product options (each option is captured on its own, never every combination), audio and video, archives and email files, and old-style .doc and .xls files.
 - Semantic similarity: finding pages that say the same thing in different words (planned with a vector database).
 - The rest of the knowledge base: labelling every page and section by its content (not only by its address), search across sections, and competitor comparison and gap reports are designed but not built yet (steps 1 and 2, stamping and the offering catalog, are done). The AI steps of the catalog have been tested against a simulated server only, until the company's Ollama server address is available.
 - Hidden page text: some text present in the page code (for example frequently-asked-question answers) is not yet revealed and captured by the browser exploration; the engine flags these pages for review rather than counting them complete.
@@ -294,6 +301,7 @@ On the John Hancock run (303 pages, about a minute, $0): 7,455 paragraphs, 551 s
 | Date | Significant change |
 |---|---|
 | 2026-10-28 | Page outlines and page types: a "structure" command rewrites every page as an outline in reading order (sections, tabs, accordions, questions and answers, cards, tables, images, videos, forms), one Markdown file per page, with text behind clicks marked, and labels each page as product, category, service, article and so on, and the site as e-commerce, B2B services, publisher or mixed. John Hancock: 303 pages, about a minute, $0. |
+| 2026-10-28 | Browser exploration can now, when a job asks for it, choose each product option (colour, size and similar) and capture the page for each, and read a listing page's filters, applying in-page filters one at a time. Both are off by default; cart, buy, form and sign-in buttons are never pressed. |
 | 2026-10-27 | A page whose download meets a bot check is now tried in the real browser before being reported blocked; if the browser gets through, the page is captured normally. |
 | 2026-10-28 | SEO and GEO inventory: an "inventory" command lists every link, image, video and embedded frame of each page, its title, description, canonical and search-engine instructions, and its structured data checked against Google's required fields; each item says whether it needs scripts or a click to appear, and each page gets graded issues. John Hancock: 281 pages, about a minute, $0. |
 | 2026-10-27 | URL history across runs: any list of addresses is checked against every earlier run; pages that did not change (the server says so, or the file or its visible text is identical) keep their earlier content and are not scraped again, changed and new pages are scraped in full, and content older than 30 days is read again. Before a run, a list of addresses can be checked (scraped before? when?). The project report gains "Last scraped", "Site last modified" and "Scrape action" columns. |

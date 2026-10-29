@@ -1,4 +1,4 @@
-"""Exploration records (B-1; kinds for B-4 to B-12).
+"""Exploration records (B-1; kinds for B-4 to B-12 and B-14).
 
 Every discovered control ends in exactly one terminal outcome, so the control
 count is an honest denominator: visited, initially open/selected, excluded by
@@ -38,6 +38,8 @@ ControlKind = Literal[
     "pagination",
     "frame",
     "shadow_root",
+    "variant",
+    "facet",
 ]
 ControlStatus = Literal["pending", "visited", "initially_open", "excluded", "unvisited"]
 
@@ -96,6 +98,14 @@ class ExplorationResult(StrictModel):
     composition: dict[str, Any] = Field(
         default_factory=dict,
         description="Shadow roots and frames read into the captured states (B-11, B-12)",
+    )
+    variant_dimensions: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="Product option pickers (select_variant): name, kind, options, states",
+    )
+    facets: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="Listing filter options (apply_facet): group, label, count, url, outcome",
     )
     unexplored_action_kinds: list[str] = Field(
         default_factory=list,

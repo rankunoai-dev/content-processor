@@ -1,0 +1,61 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Trail Jacket</title></head><body>
+<header><label for="currency">Currency</label>
+<select id="currency" name="currency"><option>USD</option><option>EUR</option></select></header>
+<main>
+<h1>Trail Jacket</h1>
+<div class="product" data-product-id="1001">
+<p id="price">Price: $120.00</p>
+<p id="stock">In stock: Red, size M</p>
+<p id="sku">SKU: TJ-RED-M</p>
+<form action="/cart/add" method="post" id="product-form">
+  <label for="colour">Colour</label>
+  <select id="colour" name="option-colour">
+    <option value="">Choose a colour</option>
+    <option value="red" selected>Red</option>
+    <option value="blue">Blue</option>
+    <option value="green">Green</option>
+    <option value="black" disabled>Black (sold out)</option>
+  </select>
+  <label for="qty">Quantity</label>
+  <select id="qty" name="quantity"><option>1</option><option>2</option><option>3</option></select>
+  <div class="swatches" data-option-name="Size">
+    <button type="button" class="swatch" data-value="S" aria-pressed="false">S</button>
+    <button type="button" class="swatch" data-value="M" aria-pressed="true">M</button>
+    <button type="button" class="swatch" data-value="L" aria-pressed="false">L</button>
+    <button type="button" class="swatch" data-value="XL" aria-pressed="false" disabled>XL</button>
+  </div>
+  <button type="submit" id="add">Add to cart</button>
+  <button type="button" id="wish" aria-pressed="false">Add to wishlist</button>
+</form>
+</div>
+</main>
+<script>
+window.__cartClicks = 0;
+window.__submits = 0;
+var prices = { red: 120, blue: 125, green: 118 };
+var sizeExtra = { S: -5, M: 0, L: 5 };
+var stock = { red: 'In stock', blue: 'Only 2 left', green: 'Out of stock' };
+var colour = 'red', size = 'M';
+function render() {
+  var name = colour.charAt(0).toUpperCase() + colour.slice(1);
+  document.getElementById('price').textContent = 'Price: $' + (prices[colour] + sizeExtra[size]).toFixed(2);
+  document.getElementById('stock').textContent = stock[colour] + ': ' + name + ', size ' + size;
+  document.getElementById('sku').textContent = 'SKU: TJ-' + colour.toUpperCase() + '-' + size;
+}
+document.getElementById('colour').addEventListener('change', function (e) {
+  colour = e.target.value || 'red'; render();
+});
+document.querySelectorAll('.swatch').forEach(function (b) {
+  b.addEventListener('click', function () {
+    document.querySelectorAll('.swatch').forEach(function (x) { x.setAttribute('aria-pressed', 'false'); });
+    b.setAttribute('aria-pressed', 'true'); size = b.getAttribute('data-value'); render();
+  });
+});
+document.getElementById('add').addEventListener('click', function () {
+  window.__cartClicks += 1; fetch('/cart/add', { method: 'POST' }).catch(function () {});
+});
+document.getElementById('wish').addEventListener('click', function () {
+  window.__cartClicks += 1; fetch('/wishlist', { method: 'POST' }).catch(function () {});
+});
+document.getElementById('product-form').addEventListener('submit', function () { window.__submits += 1; });
+</script></body></html>

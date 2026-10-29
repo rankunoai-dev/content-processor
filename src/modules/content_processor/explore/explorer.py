@@ -16,7 +16,9 @@ Order on each page:
 5. controls: disclosures, accordions, tabs (B-2, B-3), dialogs (B-6), hover
    triggers (B-5), and the iterative ones, carousels (B-4) and
    pagination/load-more (B-7), which are clicked until they are exhausted;
-6. keyboard traversal of the focus order (B-5).
+6. product options and listing filters (B-14), only when the scope opts in
+   to `select_variant` / `apply_facet`: one option at a time, put back after;
+7. keyboard traversal of the focus order (B-5).
 """
 
 from __future__ import annotations
@@ -26,6 +28,7 @@ import contextlib
 import hashlib
 import re
 import time
+from collections.abc import Awaitable, Callable
 from typing import Any, get_args
 from urllib.parse import urlsplit
 
@@ -35,6 +38,11 @@ from playwright.async_api import Request, Route
 from src.core.logger import get_logger
 from src.integrations.browser_client import ANALYTICS_HOSTS, ANNOTATE_JS, SETTLE_PROBE_JS
 from src.modules.content_processor.contracts import AllowedAction, InteractionPolicy
+from src.modules.content_processor.explore.commerce import (
+    UNCHECK_JS,
+    facet_discover_js,
+    variant_discover_js,
+)
 from src.modules.content_processor.explore.compose import (
     ClosedRoot,
     capture_frames,
@@ -77,6 +85,8 @@ _ACTION_FOR_KIND: dict[str, str] = {
     "dialog": "open_informational_dialog",
     "load_more": "paginate_get",
     "pagination": "paginate_get",
+    "variant": "select_variant",
+    "facet": "apply_facet",
 }
 _ITERATIVE = frozenset({"carousel", "load_more", "pagination"})
 _SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
@@ -254,6 +264,15 @@ BLUR_JS = "() => { const a = document.activeElement; if (a && a.blur) { a.blur()
 # Every document query in these scripts also covers open shadow roots.
 DISCOVER_JS = deep(DISCOVER_JS)
 REVEAL_UNTIL_FOUND_JS = deep(REVEAL_UNTIL_FOUND_JS)
+
+# B-14: never look for product options or filters inside widgets, utilities, header, footer.
+_SHOP_AWAY = (
+    THIRD_PARTY_CHROME + "," + SITE_UTILITIES + ",header,footer,[role=banner],[role=contentinfo]"
+)
+VARIANT_DISCOVER_JS = variant_discover_js(_SHOP_AWAY)
+FACET_DISCOVER_JS = facet_discover_js(_SHOP_AWAY)
+MAX_FACET_LINKS = 200
+"""Filter links recorded as follow-ups per page; the rest are listed, not followed."""
 
 
 class StateExplorer:
@@ -510,6 +529,11 @@ class StateExplorer:
             if not fresh:
                 _note(target, "no_new_visible_state")
 
+        if "select_variant" in self._allowed:
+            await self._variants(page, add, new_state, seen_states, result, unsafe, deadline)
+        if "apply_facet" in self._allowed:
+            await self._facets(page, add, new_state, seen_states, result, unsafe, deadline)
+
         if "keyboard_traverse" in self._allowed and result.stop_reason is None:
             add(await self._keyboard(page, result, seen_states, new_state, deadline))
 
@@ -639,6 +663,287 @@ class StateExplorer:
                 }
             )
         self._composition["frames"] = report
+
+    # -- B-14 product options and listing filters ---------------------------------------
+
+    def _out_of_budget(self, result: ExplorationResult, deadline: float) -> str | None:
+        if result.actions_used >= self._budget:
+            return "action_budget_exhausted"
+        if time.perf_counter() >= deadline:
+            return "time_budget_exhausted"
+        return None
+
+    async def _guarded(
+        self,
+        page: Any,
+        rec: ControlRecord,
+        unsafe: list[str],
+        action: Callable[[], Awaitable[Any]],
+        result: ExplorationResult | None,
+    ) -> bool:
+        """Run one action under the side-effect guard; False (with a reason) if refused.
+
+        `result` is charged one action; resets pass None and are not charged.
+        """
+        before = len(unsafe)
+        self._acting = True
+        try:
+            try:
+                await action()
+            except PlaywrightError as exc:
+                if result is not None:
+                    result.actions_used += 1
+                    rec.status, rec.reason = "unvisited", f"click_failed:{_click_cause(exc)}"
+                else:
+                    _note(rec, f"reset_failed:{_click_cause(exc)}")
+                return False
+            if result is not None:
+                result.actions_used += 1
+            await self._settle(page)
+        finally:
+            self._acting = False
+        if len(unsafe) > before:
+            if result is not None:
+                rec.status = "unvisited"
+                rec.reason = f"unsafe_side_effect:{unsafe[before][:80]}"
+            else:
+                _note(rec, f"unsafe_side_effect_on_reset:{unsafe[before][:60]}")
+            return False
+        return True
+
+    async def _capture_option(
+        self,
+        page: Any,
+        rec: ControlRecord,
+        seen_states: set[str],
+        new_state: Callable[..., ExploredState],
+        base: str,
+    ) -> None:
+        text, dom = await self._capture(page)
+        key = _digest(text)
+        rec.status = "visited"
+        if key in seen_states:
+            rec.reason = "no_new_visible_state"
+            return
+        seen_states.add(key)
+        rec.state_index = new_state(rec.control_id, rec.kind, rec.label, text, dom, base).index
+
+    async def _variants(
+        self,
+        page: Any,
+        add: Callable[[ControlRecord], None],
+        new_state: Callable[..., ExploredState],
+        seen_states: set[str],
+        result: ExplorationResult,
+        unsafe: list[str],
+        deadline: float,
+    ) -> None:
+        """Choose each product option on its own, one dimension at a time (select_variant).
+
+        Never combined: a dimension is put back to its original choice before the
+        next one. Unavailable options are not chosen; cart, buy and form-submit
+        buttons are never clicked.
+        """
+        found = dict(await page.evaluate(VARIANT_DISCOVER_JS))
+        for item in found.get("refused", []):
+            add(
+                ControlRecord(
+                    control_id=f"variant:{item['id']}",
+                    kind="variant",
+                    label=str(item.get("label") or "")[:80],
+                    status="excluded",
+                    reason=str(item["reason"]),
+                )
+            )
+        cap = self._policy.max_variant_states
+        chosen = 0
+        for dim in found.get("dims", []):
+            dim_id, name, mode = str(dim["id"]), str(dim["name"]), str(dim["mode"])
+            summary: dict[str, Any] = {
+                "name": name,
+                "kind": mode,
+                "options": len(dim["options"]),
+                "states": 0,
+            }
+            result.variant_dimensions.append(summary)
+            original = next((o for o in dim["options"] if o.get("selected")), None)
+            before = _digest(str(await page.evaluate(_BODY_TEXT)))
+            last: ControlRecord | None = None
+            for opt in dim["options"]:
+                rec = ControlRecord(
+                    control_id=f"variant:{dim_id}:{opt['key']}",
+                    kind="variant",
+                    label=f"{name}: {opt['label']}"[:80],
+                )
+                add(rec)
+                href = str(opt.get("href") or "")
+                stop = self._out_of_budget(result, deadline)
+                if href:
+                    rec.status, rec.reason = "excluded", "separate_url_followup"
+                    self._followups.append(href)
+                elif opt.get("submit"):
+                    rec.status, rec.reason = "unvisited", "submit_control"
+                elif opt.get("disabled"):
+                    rec.status, rec.reason = "excluded", "option_unavailable"
+                elif opt.get("selected"):
+                    rec.status, rec.reason = "initially_open", "variant_initially_selected"
+                elif not (dim.get("visible") and opt.get("visible")):
+                    rec.status, rec.reason = "unvisited", "never_visible"
+                elif stop is not None:
+                    result.stop_reason = result.stop_reason or stop
+                    rec.status, rec.reason = "unvisited", stop
+                elif chosen >= cap:
+                    rec.status, rec.reason = "unvisited", f"variant_state_cap:{cap}"
+                else:
+                    chosen += 1
+                    last = rec
+                    base = str(await page.evaluate(_BODY_TEXT))
+                    action = self._variant_action(page, dim_id, mode, opt)
+                    if await self._guarded(page, rec, unsafe, action, result):
+                        await self._capture_option(page, rec, seen_states, new_state, base)
+                        if rec.state_index is not None:
+                            summary["states"] += 1
+            if last is None:
+                continue
+            if original is None:
+                summary["restored"] = False
+                _note(last, "not_restored:no_original_choice")
+                continue
+            undo = self._variant_action(page, dim_id, mode, original)
+            await self._guarded(page, last, unsafe, undo, None)
+            summary["restored"] = _digest(str(await page.evaluate(_BODY_TEXT))) == before
+            if not summary["restored"]:
+                _note(last, "restore_unverified")
+
+    def _variant_action(
+        self, page: Any, dim_id: str, mode: str, opt: dict[str, Any]
+    ) -> Callable[[], Awaitable[Any]]:
+        if mode == "select":
+            locator = page.locator(f'[data-cp-shop="{dim_id}"]').first
+            index = int(opt["index"])
+
+            async def choose() -> Any:
+                return await locator.select_option(index=index, timeout=self._click_timeout_ms)
+
+            return choose
+        target = page.locator(f'[data-cp-shop="{opt["key"]}"]').first
+
+        async def click() -> Any:
+            return await target.click(timeout=self._click_timeout_ms)
+
+        return click
+
+    async def _facets(  # noqa: C901 - one decision per option kind, kept together
+        self,
+        page: Any,
+        add: Callable[[ControlRecord], None],
+        new_state: Callable[..., ExploredState],
+        seen_states: set[str],
+        result: ExplorationResult,
+        unsafe: list[str],
+        deadline: float,
+    ) -> None:
+        """Read filter groups; apply in-page filters one at a time and reset (apply_facet).
+
+        Filter links are separate URLs: they become follow-ups like next-page links
+        and are never opened here. "Apply", "Clear" and other form buttons are
+        never clicked.
+        """
+        found = dict(await page.evaluate(FACET_DISCOVER_JS))
+        options: list[dict[str, Any]] = list(found.get("options", []))
+        initially_checked = {
+            str(o["name"]): str(o["id"])
+            for o in options
+            if o.get("type") == "radio" and o.get("checked") and o.get("name")
+        }
+        cap = self._policy.max_facet_states
+        applied = links = 0
+        for opt in options:
+            rec = ControlRecord(
+                control_id=f"facet:{opt['id']}",
+                kind="facet",
+                label=f"{opt['group']}: {opt['label']}"[:80],
+            )
+            add(rec)
+            mode = str(opt["mode"])
+            stop = self._out_of_budget(result, deadline)
+            if mode == "link":
+                if links >= MAX_FACET_LINKS:
+                    rec.status, rec.reason = "excluded", f"facet_link_cap:{MAX_FACET_LINKS}"
+                else:
+                    links += 1
+                    rec.status, rec.reason = "excluded", "separate_url_followup"
+                    self._followups.append(str(opt["url"]))
+            elif mode == "commerce":
+                rec.status, rec.reason = "excluded", "commerce_action_never_clicked"
+            elif mode == "form_control":
+                rec.status, rec.reason = "excluded", "facet_form_control_never_clicked"
+            elif mode == "submit":
+                rec.status, rec.reason = "unvisited", "submit_control"
+            elif opt.get("disabled"):
+                rec.status, rec.reason = "excluded", "control_disabled"
+            elif opt.get("checked"):
+                rec.status, rec.reason = "initially_open", "facet_initially_applied"
+            elif not opt.get("visible"):
+                rec.status, rec.reason = "unvisited", "never_visible"
+            elif stop is not None:
+                result.stop_reason = result.stop_reason or stop
+                rec.status, rec.reason = "unvisited", stop
+            elif applied >= cap:
+                rec.status, rec.reason = "unvisited", f"facet_state_cap:{cap}"
+            else:
+                applied += 1
+                base = str(await page.evaluate(_BODY_TEXT))
+                target = page.locator(f'[data-cp-shop="{opt["id"]}"]').first
+
+                async def click(t: Any = target) -> Any:
+                    return await t.click(timeout=self._click_timeout_ms)
+
+                if await self._guarded(page, rec, unsafe, click, result):
+                    await self._capture_option(page, rec, seen_states, new_state, base)
+                await self._reset_facet(page, rec, unsafe, opt, initially_checked, click)
+                if _digest(str(await page.evaluate(_BODY_TEXT))) != _digest(base):
+                    _note(rec, "reset_unverified")
+            result.facets.append(
+                {
+                    "group": opt["group"],
+                    "label": opt["label"],
+                    "count": opt.get("count"),
+                    "url": opt.get("url") or None,
+                    "mode": mode,
+                    "status": rec.status,
+                    "reason": rec.reason,
+                    "state_index": rec.state_index,
+                }
+            )
+
+    async def _reset_facet(
+        self,
+        page: Any,
+        rec: ControlRecord,
+        unsafe: list[str],
+        opt: dict[str, Any],
+        initially_checked: dict[str, str],
+        click: Callable[[], Awaitable[Any]],
+    ) -> None:
+        """Take an applied filter off again: click it again, or restore its radio group."""
+        if opt.get("type") != "radio":
+            await self._guarded(page, rec, unsafe, click, None)
+            return
+        original = initially_checked.get(str(opt.get("name") or ""))
+        if original is not None:
+            target = page.locator(f'[data-cp-shop="{original}"]').first
+
+            async def back() -> Any:
+                return await target.click(timeout=self._click_timeout_ms)
+
+            await self._guarded(page, rec, unsafe, back, None)
+            return
+
+        async def uncheck() -> Any:
+            return await page.evaluate(UNCHECK_JS, str(opt["id"]))
+
+        await self._guarded(page, rec, unsafe, uncheck, None)
 
     # -- B-5 keyboard ----------------------------------------------------------------
 
