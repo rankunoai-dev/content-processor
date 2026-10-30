@@ -437,6 +437,7 @@ def _finish(
     out: str | None,
     reports_dir: str | None = None,
     history: UrlHistory | None = None,
+    write_bundle: bool = True,
 ) -> dict[str, Any]:
     """Assemble UrlRecords, write outputs and the Stage 4 bundle, return the report.
 
@@ -470,7 +471,7 @@ def _finish(
             **vars(added),
         }
     bundle_dir: Path | None = Path(reports_dir) if reports_dir else None
-    if bundle_dir is None and out:
+    if bundle_dir is None and out and write_bundle:
         bundle_dir = Path(out).parent / f"{Path(out).stem}_reports"
     if bundle_dir is not None:
         run_name = Path(out).stem if out else None
@@ -583,6 +584,7 @@ async def _dryrun_with(
             out=args.out,
             reports_dir=args.reports_dir,
             history=history,
+            write_bundle=not getattr(args, "no_reports", False),
         )
     )
     return 0
@@ -778,6 +780,11 @@ def _add_drive_options(p: argparse.ArgumentParser) -> None:
         help="seconds to wait for held tasks (default covers the render retry schedule)",
     )
     p.add_argument("--reports-dir", default=None, help="write the Stage 4 bundle here")
+    p.add_argument(
+        "--no-reports",
+        action="store_true",
+        help="write records and content only, not the Stage 4 bundle (batches of a larger run)",
+    )
     p.add_argument(
         "--baseline", default=None, help="previous run's .records.jsonl: reuse unchanged pages"
     )

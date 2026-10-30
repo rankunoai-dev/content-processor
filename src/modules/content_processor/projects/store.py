@@ -32,7 +32,7 @@ from src.modules.content_processor.projects.security import (
 )
 from src.modules.content_processor.projects.urls import ImportResult, merge_urls
 
-__all__ = ["ProjectNotFoundError", "ProjectStore", "slug"]
+__all__ = ["ProjectNotFoundError", "ProjectStore", "long_path", "slug"]
 
 _ID = re.compile(r"^[a-z0-9][a-z0-9-]{0,80}$")
 
@@ -45,7 +45,27 @@ def slug(text: str, *, limit: int = 40) -> str:
     """Lowercase ASCII words joined by dashes ('Flynn's Print Q4' -> 'flynn-s-print-q4')."""
     ascii_text = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode()
     words = re.sub(r"[^a-z0-9]+", "-", ascii_text.lower()).strip("-")
-    return (words[:limit].rstrip("-")) or "project"
+    if len(words) > limit:
+        cut = words[:limit]
+        # break at a word boundary when one is in reach ("print-security", not "print-securit")
+        words = cut.rsplit("-", 1)[0] if "-" in cut[limit // 2 :] else cut
+    return words.rstrip("-") or "project"
+
+
+_EXTENDED = "\\\\?\\"  # the four characters \\?\
+
+
+def long_path(path: Path) -> Path:
+    r"""On Windows, the extended form (`\\?\C:\...`) that lifts the 260-character limit.
+
+    A run's files sit several folders deep (project, run, batch outputs, reports), so
+    under a long user folder the classic limit is reached; elsewhere the path is
+    returned unchanged.
+    """
+    if os.name != "nt":
+        return path
+    text = str(path.resolve())
+    return path if text.startswith(_EXTENDED) else Path(_EXTENDED + text)
 
 
 def _now() -> datetime:
@@ -64,7 +84,7 @@ class ProjectStore:
 
     def __init__(self, root: Path) -> None:
         """Bind to `<root>/projects` (created on first write)."""
-        self.root = Path(root)
+        self.root = long_path(Path(root))
         self._projects = self.root / "projects"
         self._lock = threading.RLock()
 
@@ -107,7 +127,8 @@ class ProjectStore:
         if len(password) < MIN_PASSWORD_LENGTH:
             raise ValueError(f"The password must have at least {MIN_PASSWORD_LENGTH} characters.")
         with self._lock:
-            project_id = f"{slug(name)}-{secrets.token_hex(3)}"
+            # Short ids keep every file of a run well inside Windows' 260-character path limit.
+            project_id = f"{slug(name, limit=24)}-{secrets.token_hex(3)}"
             now = _now()
             record = ProjectRecord(
                 project_id=project_id,

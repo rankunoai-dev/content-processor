@@ -123,14 +123,23 @@ mark {
 
 .page-heading {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-end;
   justify-content: space-between;
   gap: 16px;
   margin-bottom: 20px;
 }
 
+/* The title takes the room it needs and the extra controls wrap below it on narrow
+   screens, instead of squeezing the title to one letter per line. */
 .page-heading-text {
+  flex: 1 1 280px;
   min-width: 0;
+}
+
+.page-heading-extra {
+  flex: 0 1 auto;
+  max-width: 100%;
 }
 
 .page-title.ant-typography {

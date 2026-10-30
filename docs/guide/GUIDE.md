@@ -1,6 +1,6 @@
 # Content Processor: A Plain-Language Guide
 
-Last updated: 29 October 2026 · Code version: main after the full shared text in the project report's matching sheet, product options and listing filters in browser exploration (opt-in), page outlines with page types, the SEO and GEO inventory, the unified URL history across runs, page stamping and offering catalog · Maintained by every session that adds a significant feature (see "Keeping this guide current" at the end)
+Last updated: 30 October 2026 · Code version: main after the Content Scraper app (Module 1: projects, URL import, scraping from the browser, report downloads) · Maintained by every session that adds a significant feature (see "Keeping this guide current" at the end)
 
 ## 1. What this is, in one paragraph
 
@@ -168,6 +168,19 @@ At the end of a run the engine writes a bundle of files. Every file name starts 
 | R4 contradictions (Excel, CSV) | Pairs of statements across the site that may contradict each other (for example two different prices for the same plan), with both quotes and a reviewer column. Pairs whose context differs (different years, countries or products) are listed separately, not as contradictions. |
 | URL Content Explorer (web page) | An offline page to browse every address, its verdict, its gaps and its content. |
 
+### The Content Scraper app (Module 1): projects
+
+The engine is becoming one app with several modules. Module 1, the Content Scraper, lets anyone run a scrape from the browser, without the command line:
+
+1. **Create a project**: a project name, your name, the client's name and a password (at least 8 characters). The password is stored only in scrambled form and cannot be read back.
+2. **Add the web addresses**: paste them (one per line) or import a file from your computer (.txt, .csv or Excel .xlsx; addresses are found in any column). Every address is checked: duplicates, addresses already in the list and unusable lines (for example ftp:// or text that is not an address) are counted and shown with the reason, never dropped silently.
+3. **Start scraping**: one button. The addresses are worked in batches of 25, each in its own process so one crashed browser cannot stop the app; pages that did not finish are tried again, up to three times. The progress (pages done, batch, results so far) updates by itself, and a scrape can be cancelled. Pages captured before and unchanged since are reused (see the URL history), so a repeat scrape is quicker. Free access only.
+4. **Download the reports**: every scrape keeps its own reports. Each file is listed with what it is ("Start here: every page with its content…"), and all of them can be downloaded at once as a zip.
+
+**Who can do what:** anyone using the app can open a project and download its reports. Changing a project (adding or removing addresses, starting or cancelling a scrape, deleting it) needs the project password: entering it unlocks the project in that browser tab for 8 hours. Deleting asks for the password again. Wrong passwords are slowed down after five tries. The app still runs on your own computer only.
+
+If the app is closed during a scrape, the scrape continues where it stopped the next time the app starts; finished batches are not repeated.
+
 ### The analyst web app
 
 Besides the files, there is a web app for reviewing runs in a browser on your own computer. It never changes a run's results; the one thing you can save in it is your own decisions. It shows all runs; an overview of each run with charts of verdicts, the most common reasons pages were not verified and what to do about them; a searchable, filterable table of pages; a detail view per page (its content, issues, facts and technical details); duplicate content; possible contradictions; the pages that need your review; downloads of every report; and a dark mode.
@@ -300,6 +313,7 @@ On the John Hancock run (303 pages, about a minute, $0): 7,455 paragraphs, 551 s
 
 | Date | Significant change |
 |---|---|
+| 2026-10-30 | Content Scraper app (Module 1): password-protected projects, addresses pasted or imported from a file, scraping started and followed in the browser, every report downloadable (one by one or as a zip). |
 | 2026-10-29 | Project report, "Matching content": the shared text of each pair of pages is now shown in full (every shared passage, with the number of passages), instead of a short example cut after 300 characters, with the number of shared words and a "Shared text by line" sheet that shows every shared line on its own row. |
 | 2026-10-28 | Page outlines and page types: a "structure" command rewrites every page as an outline in reading order (sections, tabs, accordions, questions and answers, cards, tables, images, videos, forms), one Markdown file per page, with text behind clicks marked, and labels each page as product, category, service, article and so on, and the site as e-commerce, B2B services, publisher or mixed. John Hancock: 303 pages, about a minute, $0. |
 | 2026-10-28 | Browser exploration can now, when a job asks for it, choose each product option (colour, size and similar) and capture the page for each, and read a listing page's filters, applying in-page filters one at a time. Both are off by default; cart, buy, form and sign-in buttons are never pressed. |

@@ -388,3 +388,21 @@ def test_a_run_left_running_resumes_after_a_restart(tmp_path: Path):
     assert second.wait_idle(20)
     assert store.run(project.project_id, state.run_id).status == "finished"
     assert batches.calls == [["https://example.com/2"]]
+
+
+def test_a_run_whose_batches_all_crash_says_so_plainly(tmp_path: Path):
+    store = ProjectStore(tmp_path)
+    project = store.create(name="Crash", owner_name="G", client_name="C", password=PASSWORD)
+    store.add_urls(project.project_id, ["https://example.com/1"])
+
+    def crashing(scope: Path, out: Path, cancel: threading.Event) -> int:
+        out.with_suffix(".log").write_text("Traceback: boom", encoding="utf-8")
+        return 1
+
+    runner = ScrapeRunner(store, command=crashing, report=_fake_report, attempts=2)
+    runner.start()
+    state = runner.submit(project.project_id, started_by="G")
+    assert runner.wait_idle(20)
+    final = store.run(project.project_id, state.run_id)
+    assert final.status == "failed" and not final.reports_ready
+    assert "No page could be scraped" in final.message and "b1_a2.log" in final.message

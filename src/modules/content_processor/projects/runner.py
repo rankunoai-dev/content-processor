@@ -102,6 +102,7 @@ def subprocess_command(scope: Path, out: Path, cancel: threading.Event) -> int:
                 "--group-assets",
                 "--max-wait",
                 str(MAX_WAIT_S),
+                "--no-reports",
             ],
             cwd=REPO_ROOT,
             stdout=sink,
@@ -183,7 +184,7 @@ class ScrapeRunner:
         if any(r.status in RUN_ACTIVE for r in self._store.runs(project_id)):
             raise ValueError("A run of this project is already queued or running.")
         now = datetime.now(UTC)
-        run_id = f"{slug(project.name, limit=30)}_{now:%Y%m%d-%H%M%S}"
+        run_id = f"{slug(project.name, limit=20)}_{now:%Y%m%d-%H%M%S}"
         batches = (len(urls) + self._batch_size - 1) // self._batch_size
         state = RunState(
             run_id=run_id,
@@ -316,6 +317,15 @@ class ScrapeRunner:
             state = self._progress(state, folder, batches, done_through=number)
 
         merged = self._merge(folder, run_id, batches)
+        if not merged.read_text(encoding="utf-8").strip():
+            logs = sorted(p.name for p in folder.glob("b*_a*.log"))
+            self._finish(
+                state.model_copy(update={"current_batch": None}),
+                "failed",
+                "No page could be scraped: every batch stopped on an error"
+                + (f" (details in {logs[-1]} in the run's folder)." if logs else "."),
+            )
+            return
         state = state.model_copy(update={"message": "Writing the reports."})
         self._store.save_run(state)
         code = self._report(merged, folder / "reports")

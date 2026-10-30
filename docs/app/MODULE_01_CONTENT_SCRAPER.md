@@ -45,3 +45,7 @@ The content processor becomes one app with several modules. **Module 1 is the Co
 ## 5. Build log
 
 - 2026-10-30: requirements captured; build of projects, URL inventory and import, password-protected writes, background scraping and report downloads started on `feat/app-module1-projects`.
+- 2026-10-30: first build done (branch `feat/app-module1-projects`).
+  - **Screens:** Projects (cards, "New project" form with the password typed twice); a project screen with View only / Unlock, and tabs for Web addresses (paste, import from the device, searchable list, remove), Scraping (start, live progress, cancel, earlier scrapes with the reason a scrape failed), Reports (each file described in plain words, project report first, download all as zip) and Project (details, delete with password).
+  - **Server:** `projects/` (store, passwords and tokens, URL import, runner) and `webapi/projects_api.py`; the app's write guard covers project changes. Data in `app_data/` (git-ignored); Windows extended paths so deep run folders never hit the 260-character limit.
+  - **Checked live:** a project with the two Flynn's URLs scraped from the app in about 2 minutes, both pages captured, 15 report files and the zip downloadable.

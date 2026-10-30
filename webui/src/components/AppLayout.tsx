@@ -5,6 +5,7 @@ import {
   DownloadOutlined,
   ExclamationCircleOutlined,
   FileSearchOutlined,
+  FolderOpenOutlined,
   MoonOutlined,
   SettingOutlined,
   SunOutlined,
@@ -16,7 +17,7 @@ import { Suspense, useEffect, useMemo, useState } from 'react';
 import { Link, Outlet, useLocation, useMatch, useNavigate } from 'react-router-dom';
 import { useOverview, useRuns } from '../api/queries';
 import { usePreferences } from '../state/preferences';
-import { APP, RUNS } from '../vocabulary';
+import { APP, PROJECTS, RUNS } from '../vocabulary';
 import { ErrorBoundary } from './ErrorBoundary';
 import { RouteFallback } from './RouteFallback';
 
@@ -124,6 +125,7 @@ export function AppLayout() {
   }, [runId, prefs]);
 
   const selected = useMemo(() => {
+    if (location.pathname.startsWith('/projects')) return 'projects';
     if (!runId) return 'runs';
     const section = location.pathname.split('/')[3];
     return section ?? 'overview';
@@ -131,6 +133,11 @@ export function AppLayout() {
 
   const base = runId ? `/runs/${encodeURIComponent(runId)}` : '';
   const items = [
+    {
+      key: 'projects',
+      icon: <FolderOpenOutlined />,
+      label: <Link to="/projects">{PROJECTS.nav}</Link>,
+    },
     { key: 'runs', icon: <AppstoreOutlined />, label: <Link to="/">{APP.nav.runs}</Link> },
     ...(runId
       ? [

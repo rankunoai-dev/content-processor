@@ -1274,3 +1274,121 @@ export function formatDuration(seconds: number | null | undefined): string {
   if (minutes < 60) return `${minutes} min`;
   return `${Math.floor(minutes / 60)} h ${minutes % 60} min`;
 }
+
+/** App module 1: the Content Scraper (projects, URL list, scraping, reports). */
+export const PROJECTS = {
+  nav: 'Projects',
+  module: 'Content Scraper',
+  title: 'Projects',
+  subtitle:
+    'Each project holds a list of web addresses to scrape and the reports of every scrape. Anyone can look; only the person with the project password can change it.',
+  newProject: 'New project',
+  empty: 'No projects yet. Create one to start scraping.',
+  open: 'Open',
+  owner: 'Owner',
+  client: 'Client',
+  created: 'Created',
+  urls: (n: number) => `${n.toLocaleString()} ${n === 1 ? 'address' : 'addresses'}`,
+  noRunYet: 'Not scraped yet',
+  form: {
+    title: 'Create a project',
+    name: 'Project name',
+    namePlaceholder: 'For example: Flynn’s print security blog',
+    owner: 'Your name',
+    client: 'Client name',
+    password: 'Project password',
+    passwordHelp: 'At least 8 characters. Only people who know it can change this project.',
+    confirm: 'Repeat the password',
+    mismatch: 'The two passwords are not the same.',
+    create: 'Create project',
+    required: 'Please fill this in.',
+    tooShort: 'Use at least 8 characters.',
+  },
+  lock: {
+    locked: 'View only',
+    unlocked: 'You can make changes',
+    unlock: 'Unlock to make changes',
+    lockAgain: 'Lock',
+    title: 'Unlock this project',
+    text: 'Enter the project password. Changes stay allowed in this browser tab for 8 hours.',
+    password: 'Password',
+    submit: 'Unlock',
+    needed: 'Unlock the project to change it.',
+  },
+  tabs: { urls: 'Web addresses', scrape: 'Scraping', reports: 'Reports', settings: 'Project' },
+  addTitle: 'Add web addresses',
+  pasteLabel: 'Paste addresses, one per line',
+  pastePlaceholder: 'https://www.example.com/page-one\nhttps://www.example.com/page-two',
+  addButton: 'Add to the list',
+  importButton: 'Import from your device',
+  importHelp: 'A .txt, .csv or .xlsx file. Web addresses are found in any column.',
+  importResult: (r: { added: number; already_present: number; duplicates_in_input: number; rejected: number }) =>
+    `${r.added.toLocaleString()} added · ${r.already_present.toLocaleString()} already in the list · ${r.duplicates_in_input.toLocaleString()} repeated · ${r.rejected.toLocaleString()} not usable`,
+  rejectedTitle: 'Not added',
+  listTitle: (n: number) => `The list (${n.toLocaleString()})`,
+  search: 'Search the list',
+  remove: 'Remove',
+  removeSelected: (n: number) => `Remove ${n.toLocaleString()} selected`,
+  removeAll: 'Remove all',
+  removeAllConfirm: 'Remove every address from this project? The reports of earlier scrapes are kept.',
+  added: 'Added',
+  start: 'Start scraping',
+  startHelp: (n: number) =>
+    `Scrapes all ${n.toLocaleString()} addresses in batches of 25. Pages scraped before and unchanged since are reused, so a repeat scrape is quicker. Free access only.`,
+  noUrls: 'Add web addresses first.',
+  cancel: 'Cancel',
+  cancelConfirm: 'Stop this scrape? Batches already finished are kept.',
+  progress: (done: number, total: number) => `${done.toLocaleString()} of ${total.toLocaleString()} pages done`,
+  batches: (done: number, total: number) => `Batch ${Math.min(done + 1, total)} of ${total}`,
+  history: 'Earlier scrapes',
+  status: {
+    queued: 'Waiting',
+    running: 'Scraping',
+    finished: 'Finished',
+    failed: 'Failed',
+    cancelled: 'Cancelled',
+    interrupted: 'Interrupted',
+  } as Record<string, string>,
+  startedBy: 'Started by',
+  started: 'Started',
+  finished: 'Finished',
+  pages: 'Pages',
+  results: 'Results',
+  reportsFor: 'Reports of',
+  downloadAll: 'Download all (zip)',
+  noReports: 'No reports yet: they appear here when a scrape finishes.',
+  file: 'File',
+  size: 'Size',
+  download: 'Download',
+  deleteTitle: 'Delete this project',
+  deleteText:
+    'Deletes the project, its address list and the reports of every scrape. This cannot be undone. Enter the password to confirm.',
+  deleteButton: 'Delete project',
+  deleted: 'Project deleted',
+  saved: 'Saved',
+  backToProjects: 'All projects',
+  about: 'What it is',
+  /** What each report file is, matched on the end of its name; the first match wins. */
+  reportKinds: [
+    ['_project_report.xlsx', 'Start here: every page with its content, how completely it was captured, and which pages share text'],
+    ['_r1_url_content.xlsx', 'The full content of every page, one row per page (Excel)'],
+    ['_r1_url_content.csv', 'The full content of every page (CSV)'],
+    ['_review_queue.xlsx', 'Pages that need a person to check them, most serious first (Excel)'],
+    ['_review_queue.csv', 'Pages that need a person to check them (CSV)'],
+    ['_r2_overlap.xlsx', 'Duplicate and near-duplicate content across pages (Excel)'],
+    ['_r2a_overlap_groups.csv', 'Groups of pages that share text (CSV)'],
+    ['_r2b_overlap_pairs.csv', 'Pairs of pages that share text (CSV)'],
+    ['_r4_contradictions.xlsx', 'Statements that may contradict each other across pages (Excel)'],
+    ['_r4_contradictions.csv', 'Possible contradictions (CSV)'],
+    ['_explorer.html', 'Browse every page and its content offline, in a web browser'],
+    ['.jsonl', 'The same data for other tools (JSON lines)'],
+    ['_manifest.json', 'Technical summary of the run'],
+  ] as [string, string][],
+};
+
+export function reportKind(name: string): { rank: number; text: string } {
+  const index = PROJECTS.reportKinds.findIndex(([end]) => name.endsWith(end));
+  const kind = PROJECTS.reportKinds[index];
+  return kind ? { rank: index, text: kind[1] } : { rank: 99, text: '' };
+}
+
