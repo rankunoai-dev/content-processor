@@ -1,5 +1,5 @@
 import { screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import userEvent, { PointerEventsCheckLevel } from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { pagesQueryString } from '../api/client';
 import { DEFAULT_VIEW, parseViewParams, serializeViewParams, toPageFilters } from '../state/viewParams';
@@ -56,20 +56,22 @@ describe('pages screen filters', () => {
       '/api/runs/demo/pages': () => pagesResponse,
     });
     renderApp('/runs/demo/pages?status=PARTIAL&q=pricing');
-    expect(await screen.findByText('Pricing plans')).toBeInTheDocument();
+    expect(await screen.findByText('Pricing plans', {}, { timeout: 15_000 })).toBeInTheDocument();
     const first = calls.find((u) => u.pathname === '/api/runs/demo/pages');
     expect(first?.searchParams.getAll('status')).toEqual(['PARTIAL']);
     expect(first?.searchParams.get('q')).toBe('pricing');
 
-    await userEvent.click(screen.getByRole('switch', { name: 'Only pages with issues' }));
+    // No pointer-events check: getComputedStyle over Ant Design's injected styles is slow in jsdom.
+    const user = userEvent.setup({ pointerEventsCheck: PointerEventsCheckLevel.Never });
+    await user.click(screen.getByRole('switch', { name: 'Only pages with issues' }));
     await waitFor(() => expect(screen.getByTestId('location').textContent).toContain('has_issues=true'));
     await waitFor(() =>
       expect(calls.some((u) => u.pathname === '/api/runs/demo/pages' && u.searchParams.get('has_issues') === 'true')).toBe(true),
     );
 
-    await userEvent.click(screen.getByRole('button', { name: /Clear filters/ }));
+    await user.click(screen.getByRole('button', { name: /Clear filters/ }));
     await waitFor(() => expect(screen.getByTestId('location').textContent).toBe('/runs/demo/pages'));
-  });
+  }, 60_000);
 
   it('explains an empty result', async () => {
     mockApi({

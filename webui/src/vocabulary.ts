@@ -1410,6 +1410,14 @@ export const PROJECTS = {
     notReady: 'Scrape the websites first: they become searchable when a scrape finishes.',
     skipped: (site: string, reason: string) => `${site} was not searched: ${reason}`,
     from: 'From',
+    scopeLabel: 'Which websites',
+    everyCompetitor: 'Client and all its competitors, from every project',
+    thisProject: "Only this project's websites",
+    everyCompetitorHelp:
+      "Every project that names the client's website, or lists it as a competitor, adds its websites here. Each website is searched once, in its most recent scrape.",
+    considered: (names: string[]) => `Websites considered: ${names.join(', ')}`,
+    otherProject: (name: string) => `from project ${name}`,
+    noClientDomain: "Add the client's website address to search its competitors across projects.",
   },
   about: 'What it is',
   /** What each report file is, matched on the end of its name; the first match wins. */

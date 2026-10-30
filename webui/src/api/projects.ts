@@ -96,6 +96,7 @@ export interface ReportFile {
 export interface SearchHit {
   rank: number;
   score: number;
+  website: string;
   project_id: string;
   project_name: string;
   site_id: string;
@@ -110,6 +111,7 @@ export interface SearchHit {
 
 export interface SearchResult {
   query: string;
+  scope: string[];
   hits: SearchHit[];
   searched: string[];
   skipped: { space: string; site: string; reason: string }[];
@@ -269,9 +271,11 @@ export const projectsApi = {
     `${runPath(id, site, run)}/downloads/${enc(file)}`,
   zipUrl: (id: string, site: string, run: string) => `${runPath(id, site, run)}/downloads.zip`,
 
-  search: (q: string, spaces: string[], perSite: number | null, signal?: AbortSignal) => {
+  /** Search the given spaces, or (with `website`) that website and its competitors from every project. */
+  search: (q: string, spaces: string[], perSite: number | null, website: string | null, signal?: AbortSignal) => {
     const params = new URLSearchParams({ q, top_k: '12' });
-    for (const s of spaces) params.append('space', s);
+    if (website) params.set('website', website);
+    else for (const s of spaces) params.append('space', s);
     if (perSite !== null) params.set('per_site', String(perSite));
     return get<SearchResult>(`/api/knowledge/search?${params.toString()}`, signal);
   },
@@ -286,8 +290,8 @@ export const projectKeys = {
     ['projects', id, 'urls', site, q, offset, limit] as const,
   runs: (id: string) => ['projects', id, 'runs'] as const,
   reports: (id: string, site: string, run: string) => ['projects', id, 'reports', site, run] as const,
-  search: (q: string, spaces: string[], perSite: number | null) =>
-    ['knowledge', 'search', q, spaces, perSite] as const,
+  search: (q: string, spaces: string[], perSite: number | null, website: string | null) =>
+    ['knowledge', 'search', q, spaces, perSite, website] as const,
 };
 
 const POLL_MS = 3000;
@@ -337,11 +341,16 @@ export function useRunReports(id: string, site: string, run: string | null) {
   });
 }
 
-export function useKnowledgeSearch(q: string, spaces: string[], perSite: number | null) {
+export function useKnowledgeSearch(
+  q: string,
+  spaces: string[],
+  perSite: number | null,
+  website: string | null,
+) {
   return useQuery({
-    queryKey: projectKeys.search(q, spaces, perSite),
-    queryFn: ({ signal }) => projectsApi.search(q, spaces, perSite, signal),
-    enabled: q.trim().length >= 2 && spaces.length > 0,
+    queryKey: projectKeys.search(q, spaces, perSite, website),
+    queryFn: ({ signal }) => projectsApi.search(q, spaces, perSite, website, signal),
+    enabled: q.trim().length >= 2 && (website !== null || spaces.length > 0),
   });
 }
 

@@ -1,6 +1,6 @@
 # Content Processor: A Plain-Language Guide
 
-Last updated: 30 October 2026 · Code version: main after the searchable knowledge base (vector store, section labels, search and checked answers) · Maintained by every session that adds a significant feature (see "Keeping this guide current" at the end)
+Last updated: 31 October 2026 · Code version: main after projects with client and competitor websites (each stored on its own) and the search across all websites, including competitors from every project · Maintained by every session that adds a significant feature (see "Keeping this guide current" at the end)
 
 ## 1. What this is, in one paragraph
 
@@ -177,6 +177,10 @@ The engine is becoming one app with several modules. Module 1, the Content Scrap
 3. **Start scraping**: one button. The addresses are worked in batches of 25, each in its own process so one crashed browser cannot stop the app; pages that did not finish are tried again, up to three times. The progress (pages done, batch, results so far) updates by itself, and a scrape can be cancelled. Pages captured before and unchanged since are reused (see the URL history), so a repeat scrape is quicker. Free access only.
 4. **Download the reports**: every scrape keeps its own reports. Each file is listed with what it is ("Start here: every page with its content…"), and all of them can be downloaded at once as a zip.
 
+**Several websites per project.** A project holds the client's website and any number of competitor websites (name and address each), entered when the project is created or added later. Each website is kept completely apart: its own address list, scrapes, reports and searchable knowledge. Addresses of several websites can be added in one list: each goes to the website of its domain, and addresses of a website that is not in the project are listed so it can be added as a competitor. "Scrape all websites" scrapes each website on its own.
+
+**Searching across websites.** After a scrape, each website's pages are prepared for search in their own store. The "Search all websites" tab finds the passages that answer a question and says which website (and which project's scrape) each came from; the best passage of each website can be shown side by side. By default it covers the client's website and **every website it competes with in any project**: websites are recognised as the same across projects by their domain, each is searched once in its most recent scrape, and a project that lists the client as someone else's competitor counts too.
+
 **Who can do what:** anyone using the app can open a project and download its reports. Changing a project (adding or removing addresses, starting or cancelling a scrape, deleting it) needs the project password: entering it unlocks the project in that browser tab for 8 hours. Deleting asks for the password again. Wrong passwords are slowed down after five tries. The app still runs on your own computer only.
 
 If the app is closed during a scrape, the scrape continues where it stopped the next time the app starts; finished batches are not repeated.
@@ -329,6 +333,7 @@ On the John Hancock run (272 pages, 1,308 sections), filling the knowledge base 
 
 | Date | Significant change |
 |---|---|
+| 2026-10-31 | Projects hold the client's website and competitor websites, each stored on its own (addresses, scrapes, reports, searchable knowledge). One list can fill several websites at once. Search across websites, by default the client and every competitor known in any project, each website searched once in its most recent scrape. |
 | 2026-10-30 | Searchable knowledge base: "index" stores every page section with its meaning (local bge-m3 model, or a word-matching stand-in until Ollama runs), its exact text and its evidence, in Postgres with pgvector or a local file, re-using unchanged sections; sections are labelled by role and product only when two independent signals agree; "search" combines meaning and exact words; "ask" answers with statements each checked against a word-for-word quote and linked to the page; "kb-check" says what is ready. John Hancock: 1,308 sections in about 10 seconds, $0. |
 | 2026-10-30 | Content Scraper app (Module 1): password-protected projects, addresses pasted or imported from a file, scraping started and followed in the browser, every report downloadable (one by one or as a zip). |
 | 2026-10-29 | Project report, "Matching content": the shared text of each pair of pages is now shown in full (every shared passage, with the number of passages), instead of a short example cut after 300 characters, with the number of shared words and a "Shared text by line" sheet that shows every shared line on its own row. |

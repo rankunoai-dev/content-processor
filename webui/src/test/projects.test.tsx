@@ -190,4 +190,41 @@ describe('projects (Content Scraper)', () => {
     expect(add?.headers['X-Project-Token']).toBe('tok-2');
     expect(add?.body).toEqual({ text: 'https://www.flynns.com/blog/b\nftp://x' });
   }, INTERACTION_TIMEOUT_MS);
+  it('searches the client and its competitors from every project by default', async () => {
+    const asked: URL[] = [];
+    fakeServer({
+      ...readRoutes,
+      'GET /api/knowledge/search': () => [
+        200,
+        {
+          query: 'secure print',
+          scope: ["Flynn's", 'HP', 'Xerox'],
+          hits: [
+            { rank: 1, score: 0.03, website: 'hp.com', project_id: 'hp-refresh-1', project_name: 'HP refresh',
+              site_id: 'hp', site_name: 'HP', role: 'client', url: 'https://www.hp.com/p', headings: ['Security'],
+              text: 'HP secure print release for offices.', chunk_id: 'c1', evidence_ids: [] },
+          ],
+          searched: ['a', 'b'],
+          skipped: [{ space: 'canon.com', site: 'Canon', reason: 'not scraped yet in any project' }],
+        },
+      ],
+    });
+    const realFetch = globalThis.fetch;
+    vi.stubGlobal('fetch', (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input), 'http://127.0.0.1');
+      if (url.pathname === '/api/knowledge/search') asked.push(url);
+      return realFetch(input, init);
+    });
+    const user = userEvent.setup({ pointerEventsCheck: PointerEventsCheckLevel.Never });
+    renderApp(`/projects/${project.project_id}?tab=search`);
+    const box = await screen.findByPlaceholderText('For example: secure print release', {}, FIRST_PAINT);
+    await fill(user, box, 'secure print');
+    await user.keyboard('{Enter}');
+    expect(await screen.findByText('HP secure print release for offices.', {}, FIRST_PAINT)).toBeInTheDocument();
+    expect(asked[0]?.searchParams.get('website')).toBe('flynns.com');
+    expect(asked[0]?.searchParams.getAll('space')).toEqual([]);
+    expect(screen.getByText("Websites considered: Flynn's, HP, Xerox")).toBeInTheDocument();
+    expect(screen.getByText('from project HP refresh')).toBeInTheDocument();
+    expect(screen.getByText('Canon was not searched: not scraped yet in any project')).toBeInTheDocument();
+  }, INTERACTION_TIMEOUT_MS);
 });

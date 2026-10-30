@@ -58,6 +58,7 @@ from src.modules.content_processor.projects.urls import (
     candidates_from_file,
     candidates_from_text,
 )
+from src.modules.content_processor.projects.websites import WebsiteGraph
 
 __all__ = ["PROJECT_TOKEN_HEADER", "KnowledgeAccess", "register_project_routes"]
 
@@ -220,11 +221,24 @@ class SpaceOut(StrictModel):
     note: str
 
 
+class WebsiteOut(StrictModel):
+    """A unique website across all projects, and the websites it competes with."""
+
+    key: str
+    name: str
+    domains: list[str]
+    projects: list[str]
+    competitors: list[str]
+    searchable: bool
+    freshest_project: str | None
+
+
 class HitOut(StrictModel):
-    """A passage the bot found, with the project and website it came from."""
+    """A passage the bot found, with the website and project it came from."""
 
     rank: int
     score: float
+    website: str
     project_id: str
     project_name: str
     site_id: str
@@ -241,6 +255,7 @@ class SearchOut(StrictModel):
     """The fused results and which spaces were searched or skipped (with why)."""
 
     query: str
+    scope: list[str] = Field(default_factory=list, description="websites considered")
     hits: list[HitOut]
     searched: list[str]
     skipped: list[dict[str, str]]
@@ -606,21 +621,77 @@ def register_project_routes(
             listed.append(SpaceOut(**space.__dict__, ready=ready, note=note))
         return listed
 
+    def graph() -> WebsiteGraph:
+        return WebsiteGraph.build(store, runner.namespace)
+
+    @app.get("/api/knowledge/websites")
+    def list_websites() -> list[WebsiteOut]:
+        g = graph()
+        listed = []
+        for w in g.websites():
+            fresh = w.freshest()
+            listed.append(
+                WebsiteOut(
+                    key=w.key,
+                    name=w.name,
+                    domains=sorted(w.domains),
+                    projects=sorted({c.project_name for c in w.copies}),
+                    competitors=[c.name for k in sorted(w.competitors) if (c := g.get(k))],
+                    searchable=fresh is not None,
+                    freshest_project=fresh.project_name if fresh else None,
+                )
+            )
+        return listed
+
     @app.get("/api/knowledge/search")
     def search(
         q: Annotated[str, Query(min_length=2, max_length=500)],
         space: Annotated[list[str] | None, Query()] = None,
         project: Annotated[list[str] | None, Query(alias="project")] = None,
+        website: Annotated[str | None, Query(max_length=500)] = None,
         top_k: Annotated[int, Query(ge=1, le=50)] = 8,
         per_site: Annotated[int | None, Query(ge=1, le=20)] = None,
     ) -> SearchOut:
+        """Search a scope of knowledge spaces.
+
+        With `website`, the scope is that website and every website it competes with
+        in any project, each searched once in its freshest copy, whatever project
+        asked. Otherwise the scope is the given spaces and/or projects.
+        """
         if knowledge is None:
             raise HTTPException(status_code=503, detail="The knowledge store is not set up.")
-        scope = spaces(space)
-        if project:
-            scope = [s for s in scope if s.project_id in project]
-        if not scope:
-            raise HTTPException(status_code=404, detail="None of those websites exist.")
+        not_built: list[dict[str, str]] = []
+        considered: list[str] = []
+        site_of: dict[str, str] = {}
+        if website:
+            g = graph()
+            target = g.find(website)
+            if target is None:
+                raise HTTPException(
+                    status_code=404, detail=f"No project has a website at {website}."
+                )
+            scope = []
+            for w in g.competitive_scope(target):
+                considered.append(w.name)
+                fresh = w.freshest()
+                if fresh is None:
+                    not_built.append(
+                        {
+                            "space": w.key,
+                            "site": w.name,
+                            "reason": "not scraped yet in any project",
+                        }
+                    )
+                    continue
+                scope.append(fresh.space())
+                site_of[fresh.namespace] = w.key
+        else:
+            scope = spaces(space)
+            if project:
+                scope = [s for s in scope if s.project_id in project]
+            if not scope:
+                raise HTTPException(status_code=404, detail="None of those websites exist.")
+            considered = [s.site_name for s in scope]
         result = federated_search(
             scope,
             q,
@@ -631,10 +702,12 @@ def register_project_routes(
         )
         return SearchOut(
             query=q,
+            scope=considered,
             hits=[
                 HitOut(
                     rank=h.rank,
                     score=round(h.score, 6),
+                    website=site_of.get(h.space.namespace, h.space.site_name),
                     project_id=h.space.project_id,
                     project_name=h.space.project_name,
                     site_id=h.space.site_id,
@@ -649,9 +722,8 @@ def register_project_routes(
                 for h in result.hits
             ],
             searched=[s.namespace for s in result.searched],
-            skipped=[
-                {"space": s.namespace, "site": s.site_name, "reason": r} for s, r in result.skipped
-            ],
+            skipped=not_built
+            + [{"space": s.namespace, "site": s.site_name, "reason": r} for s, r in result.skipped],
         )
 
 

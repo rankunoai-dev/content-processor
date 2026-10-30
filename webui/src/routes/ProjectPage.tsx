@@ -773,9 +773,13 @@ function SitePanel({
 function SearchTab({ project }: { project: Project }) {
   const [draft, setDraft] = useState('');
   const [query, setQuery] = useState('');
+  const clientSite = project.sites.find((s) => s.role === 'client');
+  const clientDomain = clientSite?.domains[0] ?? null;
+  const [everyCompetitor, setEveryCompetitor] = useState(clientDomain !== null);
   const [chosen, setChosen] = useState<string[]>(() => project.sites.map((s) => s.namespace));
   const [sideBySide, setSideBySide] = useState(false);
-  const search = useKnowledgeSearch(query, chosen, sideBySide ? 2 : null);
+  const website = everyCompetitor ? clientDomain : null;
+  const search = useKnowledgeSearch(query, chosen, sideBySide ? 2 : null, website);
   const names = Object.fromEntries(project.sites.map((s) => [s.site_id, s]));
   return (
     <Space direction="vertical" size={16} style={{ width: '100%' }}>
@@ -791,13 +795,31 @@ function SearchTab({ project }: { project: Project }) {
             allowClear
           />
           <Space wrap>
-            <Typography.Text strong>{PROJECTS.ask.websites}</Typography.Text>
-            <Checkbox.Group
-              value={chosen}
-              onChange={(v) => setChosen(v.map(String))}
-              options={project.sites.map((s) => ({ value: s.namespace, label: s.name }))}
+            <Typography.Text strong>{PROJECTS.ask.scopeLabel}</Typography.Text>
+            <Segmented
+              value={everyCompetitor ? 'all' : 'project'}
+              onChange={(v) => setEveryCompetitor(v === 'all')}
+              options={[
+                { value: 'all', label: PROJECTS.ask.everyCompetitor, disabled: clientDomain === null },
+                { value: 'project', label: PROJECTS.ask.thisProject },
+              ]}
             />
           </Space>
+          {everyCompetitor ? (
+            <Typography.Text type="secondary">{PROJECTS.ask.everyCompetitorHelp}</Typography.Text>
+          ) : (
+            <Space wrap>
+              <Typography.Text strong>{PROJECTS.ask.websites}</Typography.Text>
+              <Checkbox.Group
+                value={chosen}
+                onChange={(v) => setChosen(v.map(String))}
+                options={project.sites.map((s) => ({ value: s.namespace, label: s.name }))}
+              />
+            </Space>
+          )}
+          {clientDomain === null ? (
+            <Typography.Text type="secondary">{PROJECTS.ask.noClientDomain}</Typography.Text>
+          ) : null}
           <Space>
             <Switch checked={sideBySide} onChange={setSideBySide} aria-label={PROJECTS.ask.sideBySide} />
             <Typography.Text>{PROJECTS.ask.sideBySide}</Typography.Text>
@@ -808,6 +830,9 @@ function SearchTab({ project }: { project: Project }) {
         <QueryState query={search} rows={4}>
           {(data) => (
             <Space direction="vertical" style={{ width: '100%' }}>
+              {data.scope.length > 0 ? (
+                <Typography.Text type="secondary">{PROJECTS.ask.considered(data.scope)}</Typography.Text>
+              ) : null}
               {data.skipped.map((s) => (
                 <Alert key={s.space} type="info" showIcon message={PROJECTS.ask.skipped(s.site, s.reason)} />
               ))}
@@ -820,11 +845,16 @@ function SearchTab({ project }: { project: Project }) {
                 <List
                   dataSource={data.hits}
                   renderItem={(h) => (
-                    <List.Item key={`${h.site_id}-${h.chunk_id}`}>
+                    <List.Item key={`${h.project_id}-${h.site_id}-${h.chunk_id}`}>
                       <Space direction="vertical" size={4} style={{ width: '100%' }}>
                         <Space wrap size={6}>
-                          {names[h.site_id] ? <RoleTag site={names[h.site_id] as Site} /> : null}
+                          {h.project_id === project.project_id && names[h.site_id] ? (
+                            <RoleTag site={names[h.site_id] as Site} />
+                          ) : null}
                           <Typography.Text strong>{h.site_name}</Typography.Text>
+                          {h.project_id !== project.project_id ? (
+                            <Tag bordered={false}>{PROJECTS.ask.otherProject(h.project_name)}</Tag>
+                          ) : null}
                           {h.headings.length > 0 ? (
                             <Typography.Text type="secondary">{h.headings.join(' › ')}</Typography.Text>
                           ) : null}

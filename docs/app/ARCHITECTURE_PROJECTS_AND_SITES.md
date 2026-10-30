@@ -69,10 +69,21 @@ question + scope ──► for each knowledge space in scope:
 - **Model consistency**: each space remembers the embedding model it was built with and is searched with that same model, so vectors are never compared across models. Results from different spaces are combined by rank, not by raw score, so spaces built with different models can still be searched together. A space whose model is not available right now (for example the local model server is off) is skipped and named in the result.
 - **Permissions**: reading is open as for reports (decision of 2026-10-30, open question 1). When viewing becomes password-protected, the scope check is where it is enforced.
 
+## 6a. A question about a website covers its competitors from every project (decided 2026-10-31)
+
+> When any query comes, the engine takes the context of all the unique websites, checks which websites the client's website competes with, and takes all of them into consideration, regardless of the project.
+
+- **Unique websites**: a website is the same website in every project. Two project websites are one when they share a domain, or one's domain is a subdomain of the other's (`usa.canon.com` and `canon.com`). Its name is the one used where it is the client.
+- **Competitor relations from every project**: in each project the client's website and each competitor website compete with each other, in both directions. The relations of all projects are combined.
+- **The competitive scope of a website**: the website itself and every website related to it as a competitor in any project. A project that lists the client as someone else's competitor counts too (HP's project naming Flynn's brings HP into Flynn's scope).
+- **Each website once, freshest copy**: a website scraped in several projects is searched once, in the knowledge space built most recently; a website not yet scraped in any project is named as not searched.
+- **Answers say where they come from**: each passage carries the website, the project whose scrape it came from, the page and the evidence.
+- In the app this is the default of "Search all websites" ("Client and all its competitors, from every project"); "Only this project's websites" is still available. API: `GET /api/knowledge/search?q=…&website=<domain>`, and `GET /api/knowledge/websites` lists the unique websites, the projects they appear in, their competitors and which copy is freshest.
+
 ## 7. Existing projects
 
 A project created before this change (one URL list, runs at project level) is converted the first time it is opened: one **client** website is created from the client name, with the domains of its URLs, and the URL list and runs move under it. Nothing is deleted.
 
 ## 8. Not in this step
 
-The chat panel in the app (the bot's screen), cross-project permissions beyond "read is open", automatic discovery of competitors, and competitor alignment to an industry taxonomy (RFC 0002 stage F).
+The chat panel in the app (answers written by a model; the search that feeds it is built), competitors of competitors (only direct relations count), cross-project permissions beyond "read is open", automatic discovery of competitors, and competitor alignment to an industry taxonomy (RFC 0002 stage F).

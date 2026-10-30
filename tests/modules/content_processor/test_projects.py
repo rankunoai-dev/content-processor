@@ -662,3 +662,153 @@ def test_the_bot_searches_several_websites_and_says_where_each_passage_came_from
     assert skipped[runner.namespace(other_id, "xerox")].startswith("not indexed yet")
     assert {h["project_id"] for h in across["hits"]} == {project_id}
     assert bot.get("/api/knowledge/search", params={"q": "x y", "space": "nope"}).status_code == 404
+
+
+# -- unique websites across projects, and the competitive scope ----------------------
+
+
+def _knowledge_built(store: ProjectStore, project_id: str, site_id: str, when: str) -> None:
+    """Record a finished run whose knowledge space was built at `when`."""
+    from datetime import datetime
+
+    from src.modules.content_processor.projects.models import RunState
+
+    at = datetime.fromisoformat(when)
+    store.save_run(
+        RunState(
+            run_id=f"{site_id}_{at:%Y%m%d-%H%M%S}",
+            project_id=project_id,
+            site_id=site_id,
+            status="finished",
+            created_at=at,
+            finished_at=at,
+            started_by="G",
+            url_count=1,
+            batch_size=25,
+            batches_total=1,
+            reports_ready=True,
+            knowledge_status="ready",
+        )
+    )
+
+
+def _two_projects(store: ProjectStore) -> tuple[str, str]:
+    first = store.create(
+        name="Print security",
+        owner_name="G",
+        client_name="Flynn's",
+        password=PASSWORD,
+        client_site=SiteSpec("Flynn's", "flynns.com"),
+        competitors=[SiteSpec("Xerox", "xerox.com"), SiteSpec("Canon", "canon.com")],
+    ).project_id
+    second = store.create(
+        name="HP refresh",
+        owner_name="G",
+        client_name="HP",
+        password=PASSWORD,
+        client_site=SiteSpec("HP", "hp.com"),
+        competitors=[
+            SiteSpec("Flynns NYC", "https://www.flynns.com"),
+            SiteSpec("Xerox US", "https://www.xerox.com"),
+            SiteSpec("Canon USA", "usa.canon.com"),
+            SiteSpec("Brother", "brother.com"),
+        ],
+    ).project_id
+    return first, second
+
+
+def test_websites_are_unique_across_projects_and_competitors_are_collected(tmp_path: Path):
+    from src.modules.content_processor.projects.websites import WebsiteGraph
+
+    store = ProjectStore(tmp_path)
+    first, second = _two_projects(store)
+    _knowledge_built(store, first, "xerox", "2026-10-01T10:00:00+00:00")
+    _knowledge_built(store, second, "xerox-us", "2026-10-20T10:00:00+00:00")
+    graph = WebsiteGraph.build(store, lambda p, s: f"t.{p}.{s}")
+
+    assert sorted(w.key for w in graph.websites()) == [
+        "brother.com",
+        "canon.com",
+        "flynns.com",
+        "hp.com",
+        "xerox.com",
+    ], "Flynn's, Xerox and Canon (usa.canon.com) are each one website across both projects"
+    xerox = graph.find("https://www.xerox.com/en-us/printers")
+    assert xerox is not None and len(xerox.copies) == 2
+    fresh = xerox.freshest()
+    assert fresh is not None and fresh.project_id == second, "the copy indexed last is used"
+    canon = graph.find("canon.com")
+    assert canon is not None and canon.domains == {"canon.com", "usa.canon.com"}
+
+    flynns = graph.find("flynns.com")
+    assert flynns is not None
+    scope = [w.key for w in graph.competitive_scope(flynns)]
+    assert scope[0] == "flynns.com"
+    assert sorted(scope[1:]) == ["canon.com", "hp.com", "xerox.com"], (
+        "competitors from its own project plus HP, which lists Flynn's as a competitor"
+    )
+    hp = graph.find("hp.com")
+    assert hp is not None
+    assert sorted(w.key for w in graph.competitive_scope(hp))[0] == "brother.com"
+    assert graph.find("nowhere.example") is None and graph.find("not a site") is None
+
+
+def test_a_question_about_a_website_covers_its_competitors_in_every_project(
+    app_env, tmp_path: Path
+):
+    from src.modules.content_processor.knowledge.embedders import HashingEmbedder
+    from src.modules.content_processor.knowledge.vector_store import SqliteVectorStore
+    from src.modules.content_processor.webapi.projects_api import KnowledgeAccess
+
+    _client, store, runner, _, _ = app_env
+    first, second = _two_projects(store)
+    root = tmp_path / "knowledge"
+    spaces = {
+        (first, "flynn-s"): {"https://www.flynns.com/a": "Flynn's secure print release for banks."},
+        (first, "xerox"): {
+            "https://www.xerox.com/old": "Old Xerox page about secure print release."
+        },
+        (second, "xerox-us"): {
+            "https://www.xerox.com/new": "New Xerox page about secure print release."
+        },
+        (second, "hp"): {"https://www.hp.com/p": "HP secure print release for offices."},
+    }
+    for (pid, sid), passages in spaces.items():
+        _space_store(root, runner.namespace(pid, sid), passages)
+    _knowledge_built(store, first, "flynn-s", "2026-10-02T10:00:00+00:00")
+    _knowledge_built(store, first, "xerox", "2026-10-01T10:00:00+00:00")
+    _knowledge_built(store, second, "xerox-us", "2026-10-20T10:00:00+00:00")
+    _knowledge_built(store, second, "hp", "2026-10-21T10:00:00+00:00")
+    access = KnowledgeAccess(
+        open_store=lambda space: SqliteVectorStore(root / space.namespace / "vectors.sqlite"),
+        embedder_for=lambda model: HashingEmbedder(),
+    )
+    exports = tmp_path / "exports3"
+    exports.mkdir()
+    bot = TestClient(
+        create_app(
+            exports,
+            projects=(store, runner, TokenSigner.from_file(tmp_path / "s3.key")),
+            knowledge=access,
+        ),
+        base_url="http://127.0.0.1",
+    )
+    result = bot.get(
+        "/api/knowledge/search",
+        params={"q": "secure print release", "website": "https://www.flynns.com", "per_site": 1},
+    ).json()
+    assert result["scope"][0] == "Flynn's"
+    assert sorted(result["scope"][1:]) == ["Canon USA", "HP", "Xerox US"]
+    found = {h["website"]: h for h in result["hits"]}
+    assert set(found) == {"flynns.com", "xerox.com", "hp.com"}
+    assert found["xerox.com"]["url"] == "https://www.xerox.com/new", "freshest copy of Xerox"
+    assert found["hp.com"]["project_name"] == "HP refresh", "regardless of the project asked"
+    assert {s["site"]: s["reason"] for s in result["skipped"]} == {
+        "Canon USA": "not scraped yet in any project"
+    }
+    websites = {w["key"]: w for w in bot.get("/api/knowledge/websites").json()}
+    assert websites["xerox.com"]["projects"] == ["HP refresh", "Print security"]
+    assert websites["xerox.com"]["freshest_project"] == "HP refresh"
+    assert websites["canon.com"]["searchable"] is False
+    unknown = bot.get("/api/knowledge/search", params={"q": "print", "website": "nowhere.example"})
+    assert unknown.status_code == 404

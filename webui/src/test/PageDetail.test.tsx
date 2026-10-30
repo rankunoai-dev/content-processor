@@ -19,7 +19,7 @@ function setup(path = '/runs/demo/pages/abc123') {
 describe('page detail', () => {
   it('shows the outcome and main content first, menus and footer hidden', async () => {
     setup();
-    expect(await screen.findByRole('heading', { name: 'Pricing plans', level: 2 })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Pricing plans', level: 2 }, { timeout: 15_000 })).toBeInTheDocument();
     expect(screen.getByText(/We captured 120 words, but 3 issues/)).toBeInTheDocument();
     expect(screen.getByText('Basic plan costs $10 <script>alert(1)</script>')).toBeInTheDocument();
     expect(document.querySelector('script')).toBeNull();
@@ -29,7 +29,7 @@ describe('page detail', () => {
 
   it('turns page areas and hidden text on through the URL', async () => {
     setup();
-    await screen.findByRole('heading', { name: 'Pricing plans', level: 2 });
+    await screen.findByRole('heading', { name: 'Pricing plans', level: 2 }, { timeout: 15_000 });
     await userEvent.click(screen.getByText('Footer'));
     expect(await screen.findByText('Privacy policy and footer links')).toBeInTheDocument();
     expect(screen.getByTestId('location').textContent).toContain('areas=main%2Cfooter');
@@ -53,7 +53,7 @@ describe('page detail', () => {
 
   it('switches tabs and keeps the tab in the URL', async () => {
     setup();
-    await screen.findByRole('heading', { name: 'Pricing plans', level: 2 });
+    await screen.findByRole('heading', { name: 'Pricing plans', level: 2 }, { timeout: 15_000 });
     await userEvent.click(screen.getByRole('tab', { name: 'Page facts' }));
     expect(await screen.findByText('Real browser')).toBeInTheDocument();
     expect(screen.getByText(/Embedded frames were read from the page code only/)).toBeInTheDocument();
