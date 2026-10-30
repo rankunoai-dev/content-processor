@@ -1,5 +1,12 @@
-import { FolderOpenOutlined, PlusOutlined, RightOutlined, UserOutlined } from '@ant-design/icons';
-import { Alert, Badge, Button, Card, Col, Empty, Form, Input, Modal, Row, Space, Typography } from 'antd';
+import {
+  FolderOpenOutlined,
+  GlobalOutlined,
+  MinusCircleOutlined,
+  PlusOutlined,
+  RightOutlined,
+  UserOutlined,
+} from '@ant-design/icons';
+import { Alert, Badge, Button, Card, Col, Divider, Empty, Form, Input, Modal, Row, Space, Tag, Typography } from 'antd';
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
@@ -16,6 +23,8 @@ interface CreateForm {
   client_name: string;
   password: string;
   confirm: string;
+  client_website?: string;
+  competitors?: { name?: string; website?: string }[];
 }
 
 function CreateProject({ open, onClose }: { open: boolean; onClose: () => void }) {
@@ -35,6 +44,10 @@ function CreateProject({ open, onClose }: { open: boolean; onClose: () => void }
         owner_name: values.owner_name.trim(),
         client_name: values.client_name.trim(),
         password: values.password,
+        client_website: values.client_website?.trim() || null,
+        competitors: (values.competitors ?? [])
+          .filter((c) => c.name?.trim())
+          .map((c) => ({ name: (c.name ?? '').trim(), website: c.website?.trim() || null })),
       });
       remember(created.project.project_id, created.token, created.expires_at);
       await client.invalidateQueries({ queryKey: projectKeys.all() });
@@ -57,6 +70,7 @@ function CreateProject({ open, onClose }: { open: boolean; onClose: () => void }
       okText={PROJECTS.form.create}
       confirmLoading={busy}
       destroyOnClose
+      width={640}
     >
       <Form form={form} layout="vertical" onFinish={submit} requiredMark={false}>
         <Form.Item
@@ -80,6 +94,50 @@ function CreateProject({ open, onClose }: { open: boolean; onClose: () => void }
         >
           <Input maxLength={120} autoComplete="organization" />
         </Form.Item>
+        <Form.Item name="client_website" label={PROJECTS.sites.clientWebsite}>
+          <Input maxLength={500} placeholder={PROJECTS.sites.clientWebsitePlaceholder} />
+        </Form.Item>
+        <Divider orientation="left" orientationMargin={0} plain>
+          {PROJECTS.sites.competitors}
+        </Divider>
+        <Typography.Paragraph type="secondary">{PROJECTS.sites.competitorsHelp}</Typography.Paragraph>
+        <Form.List name="competitors">
+          {(fields, { add, remove }) => (
+            <>
+              {fields.map((field, index) => (
+                <Space key={field.key} align="baseline" wrap style={{ display: 'flex' }}>
+                  <Form.Item
+                    name={[field.name, 'name']}
+                    rules={[{ required: true, whitespace: true, message: PROJECTS.form.required }]}
+                  >
+                    <Input
+                      aria-label={`${PROJECTS.sites.competitorName} ${index + 1}`}
+                      placeholder={PROJECTS.sites.competitorName}
+                      maxLength={120}
+                    />
+                  </Form.Item>
+                  <Form.Item name={[field.name, 'website']}>
+                    <Input
+                      aria-label={`${PROJECTS.sites.competitorWebsite} ${index + 1}`}
+                      placeholder={PROJECTS.sites.competitorWebsite}
+                      maxLength={500}
+                    />
+                  </Form.Item>
+                  <Button
+                    type="text"
+                    icon={<MinusCircleOutlined />}
+                    aria-label={`${PROJECTS.sites.remove} ${index + 1}`}
+                    onClick={() => remove(field.name)}
+                  />
+                </Space>
+              ))}
+              <Button type="dashed" icon={<PlusOutlined />} onClick={() => add({})} block>
+                {PROJECTS.sites.addCompetitor}
+              </Button>
+            </>
+          )}
+        </Form.List>
+        <Divider />
         <Form.Item
           name="password"
           label={PROJECTS.form.password}
@@ -144,8 +202,17 @@ function ProjectCard({ project }: { project: Project }) {
             <UserOutlined /> {PROJECTS.owner}: {project.owner_name}
           </span>
         </Space>
+        <Space size={[4, 4]} wrap>
+          <GlobalOutlined />
+          {project.sites.map((s) => (
+            <Tag key={s.site_id} color={s.role === 'client' ? 'blue' : 'default'} bordered={false}>
+              {s.name}
+            </Tag>
+          ))}
+        </Space>
         <Typography.Text type="secondary">
-          {PROJECTS.urls(project.url_count)} · {PROJECTS.created} {formatDate(project.created_at)}
+          {PROJECTS.sites.count(project.sites.length)} · {PROJECTS.urls(project.url_count)} ·{' '}
+          {PROJECTS.created} {formatDate(project.created_at)}
         </Typography.Text>
         {run ? (
           <>

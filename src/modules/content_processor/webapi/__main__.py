@@ -18,6 +18,7 @@ from src.modules.content_processor.projects.runner import ScrapeRunner
 from src.modules.content_processor.projects.security import TokenSigner
 from src.modules.content_processor.projects.store import ProjectStore
 from src.modules.content_processor.webapi.app import create_app
+from src.modules.content_processor.webapi.projects_api import KnowledgeAccess
 
 __all__ = ["main", "parse_args"]
 
@@ -48,6 +49,39 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+def _knowledge_access() -> KnowledgeAccess:
+    """Open each website's knowledge space as indexing did: Postgres or the SQLite file."""
+    from src.modules.content_processor.knowledge.embedders import (
+        HASHING_DIMS,
+        Embedder,
+        HashingEmbedder,
+        open_embedder,
+    )
+    from src.modules.content_processor.knowledge.federated import Space
+    from src.modules.content_processor.knowledge.vector_store import VectorStore, open_store
+
+    settings = get_settings()
+    db_url = settings.cp_database_url.get_secret_value() if settings.cp_database_url else None
+
+    def open_space(space: Space) -> VectorStore:
+        store, _note = open_store(
+            "auto",
+            tenant=space.namespace,
+            sqlite_root=settings.cp_knowledge_root,
+            db_url=db_url,
+            dims=HASHING_DIMS,
+        )
+        return store
+
+    def embedder_for(model: str) -> Embedder:
+        if model.startswith("hashing-"):
+            return HashingEmbedder()
+        embedder, _note = open_embedder("ollama", settings.cp_model_endpoint, model)
+        return embedder
+
+    return KnowledgeAccess(open_store=open_space, embedder_for=embedder_for)
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Start the server; returns a process exit code."""
     args = parse_args(argv)
@@ -66,7 +100,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         runner = ScrapeRunner(store)
         runner.start()
         projects = (store, runner, TokenSigner.from_file(data / "secret.key"))
-    app = create_app(exports, static_dir=static, projects=projects)
+    app = create_app(exports, static_dir=static, projects=projects, knowledge=_knowledge_access())
     sys.stdout.write(f"Serving {exports} at http://{HOST}:{args.port}/\n")
     uvicorn.run(app, host=HOST, port=args.port, log_level="warning")
     return 0

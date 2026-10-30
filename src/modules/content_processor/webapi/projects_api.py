@@ -1,4 +1,10 @@
-"""Routes for App module 1 (Content Scraper): projects, URL inventory, runs and reports.
+"""Routes for App module 1 (Content Scraper): projects, their websites, URLs, runs, reports.
+
+A project holds the client's website and any number of competitor websites; each
+website has its own URL list, runs, reports and knowledge space
+(docs/app/ARCHITECTURE_PROJECTS_AND_SITES.md). The knowledge routes let the bot
+search any set of websites, of one project or several, and say where each
+passage came from.
 
 Reading is open to anyone using the app. Every change needs the project's unlock
 token in the `X-Project-Token` header; the token comes from creating the project
@@ -13,6 +19,8 @@ from __future__ import annotations
 import base64
 import binascii
 import zipfile
+from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any
@@ -22,27 +30,64 @@ from fastapi.responses import FileResponse
 from pydantic import Field
 
 from src.core.schemas import StrictModel
-from src.modules.content_processor.projects.models import ProjectRecord, ProjectUrl, RunState
+from src.modules.content_processor.knowledge.embedders import Embedder
+from src.modules.content_processor.knowledge.federated import Space, federated_search
+from src.modules.content_processor.knowledge.vector_store import VectorStore
+from src.modules.content_processor.projects.models import (
+    RUN_ACTIVE,
+    ProjectRecord,
+    ProjectUrl,
+    RunState,
+    SiteRecord,
+)
 from src.modules.content_processor.projects.runner import ScrapeRunner
 from src.modules.content_processor.projects.security import (
     MIN_PASSWORD_LENGTH,
     AttemptLimiter,
     TokenSigner,
 )
-from src.modules.content_processor.projects.store import ProjectNotFoundError, ProjectStore
+from src.modules.content_processor.projects.store import (
+    ProjectNotFoundError,
+    ProjectStore,
+    SiteSpec,
+)
 from src.modules.content_processor.projects.urls import (
     IMPORT_MAX_BYTES,
+    ImportResult,
     UnreadableFileError,
     candidates_from_file,
     candidates_from_text,
 )
 
-__all__ = ["PROJECT_TOKEN_HEADER", "register_project_routes"]
+__all__ = ["PROJECT_TOKEN_HEADER", "KnowledgeAccess", "register_project_routes"]
 
 PROJECT_TOKEN_HEADER = "X-Project-Token"  # noqa: S105 - a header name, not a secret
 
 # The unlock token header; at module level so FastAPI can resolve the annotation.
 TokenHeader = Annotated[str | None, Header(alias=PROJECT_TOKEN_HEADER)]
+
+
+@dataclass
+class KnowledgeAccess:
+    """How the bot opens a website's knowledge space and the embedder for its model."""
+
+    open_store: Callable[[Space], VectorStore]
+    embedder_for: Callable[[str], Embedder]
+
+
+# -- shapes -----------------------------------------------------------------------
+
+
+class SiteOut(StrictModel):
+    """A website of a project, with its counts and latest scrape."""
+
+    site_id: str
+    name: str
+    role: str
+    domains: list[str]
+    url_count: int
+    last_run: RunState | None = None
+    namespace: str
 
 
 class ProjectOut(StrictModel):
@@ -55,16 +100,26 @@ class ProjectOut(StrictModel):
     created_at: datetime
     updated_at: datetime
     url_count: int
+    sites: list[SiteOut]
     last_run: RunState | None = None
 
 
+class SiteIn(StrictModel):
+    """A website as entered: its name and, usually, its address."""
+
+    name: str = Field(min_length=1, max_length=120)
+    website: str | None = Field(default=None, max_length=500)
+
+
 class ProjectCreate(StrictModel):
-    """The form that creates a project."""
+    """The form that creates a project with its client and competitor websites."""
 
     name: str = Field(min_length=1, max_length=120)
     owner_name: str = Field(min_length=1, max_length=120)
     client_name: str = Field(min_length=1, max_length=120)
     password: str = Field(min_length=MIN_PASSWORD_LENGTH, max_length=200)
+    client_website: str | None = Field(default=None, max_length=500)
+    competitors: list[SiteIn] = Field(default_factory=list, max_length=50)
 
 
 class Unlock(StrictModel):
@@ -95,7 +150,7 @@ class FileIn(StrictModel):
 
 
 class UrlsRemove(StrictModel):
-    """URLs to take out of the project; `all` empties the list."""
+    """URLs to take out of a website; `all` empties its list."""
 
     urls: list[str] = Field(default_factory=list, max_length=100_000)
     all: bool = False
@@ -109,8 +164,10 @@ class ProjectUpdate(StrictModel):
 
 
 class ImportOut(StrictModel):
-    """What a paste or an import did."""
+    """What a paste or an import did to one website's list."""
 
+    site_id: str
+    site_name: str
     added: int
     already_present: int
     duplicates_in_input: int
@@ -118,6 +175,14 @@ class ImportOut(StrictModel):
     rejected_examples: list[dict[str, str]]
     over_limit: int
     url_count: int
+
+
+class RoutedOut(StrictModel):
+    """A project-level paste or import, sorted to the websites by domain."""
+
+    sites: list[ImportOut]
+    unknown_domains: dict[str, int]
+    rejected: list[dict[str, str]]
 
 
 class RemovedOut(StrictModel):
@@ -128,7 +193,7 @@ class RemovedOut(StrictModel):
 
 
 class UrlsPage(StrictModel):
-    """One page of the URL inventory."""
+    """One page of a website's URL inventory."""
 
     total: int
     items: list[ProjectUrl]
@@ -142,6 +207,48 @@ class ReportFile(StrictModel):
     modified_at: datetime
 
 
+class SpaceOut(StrictModel):
+    """One website's knowledge space, as the bot sees it."""
+
+    namespace: str
+    project_id: str
+    project_name: str
+    site_id: str
+    site_name: str
+    role: str
+    ready: bool
+    note: str
+
+
+class HitOut(StrictModel):
+    """A passage the bot found, with the project and website it came from."""
+
+    rank: int
+    score: float
+    project_id: str
+    project_name: str
+    site_id: str
+    site_name: str
+    role: str
+    url: str
+    headings: list[str]
+    text: str
+    chunk_id: str
+    evidence_ids: list[str]
+
+
+class SearchOut(StrictModel):
+    """The fused results and which spaces were searched or skipped (with why)."""
+
+    query: str
+    hits: list[HitOut]
+    searched: list[str]
+    skipped: list[dict[str, str]]
+
+
+# -- routes -----------------------------------------------------------------------
+
+
 def register_project_routes(
     app: FastAPI,
     *,
@@ -149,8 +256,9 @@ def register_project_routes(
     runner: ScrapeRunner,
     signer: TokenSigner,
     limiter: AttemptLimiter | None = None,
+    knowledge: KnowledgeAccess | None = None,
 ) -> None:
-    """Add the project routes to the app (before its catch-all routes)."""
+    """Add the project and knowledge routes to the app (before its catch-all routes)."""
     attempts = limiter or AttemptLimiter()
 
     def project(project_id: str) -> ProjectRecord:
@@ -159,7 +267,29 @@ def register_project_routes(
         except ProjectNotFoundError:
             raise HTTPException(status_code=404, detail="There is no such project.") from None
 
+    def site(project_id: str, site_id: str) -> SiteRecord:
+        project(project_id)
+        try:
+            return store.site(project_id, site_id)
+        except ProjectNotFoundError:
+            raise HTTPException(
+                status_code=404, detail="This project has no such website."
+            ) from None
+
+    def site_out(record: ProjectRecord, s: SiteRecord) -> SiteOut:
+        runs = store.runs(record.project_id, s.site_id)
+        return SiteOut(
+            site_id=s.site_id,
+            name=s.name,
+            role=s.role,
+            domains=s.domains,
+            url_count=len(store.urls(record.project_id, s.site_id)),
+            last_run=runs[0] if runs else None,
+            namespace=runner.namespace(record.project_id, s.site_id),
+        )
+
     def out(record: ProjectRecord) -> ProjectOut:
+        sites = [site_out(record, s) for s in record.sites]
         runs = store.runs(record.project_id)
         return ProjectOut(
             project_id=record.project_id,
@@ -168,7 +298,8 @@ def register_project_routes(
             client_name=record.client_name,
             created_at=record.created_at,
             updated_at=record.updated_at,
-            url_count=len(store.urls(record.project_id)),
+            url_count=sum(s.url_count for s in sites),
+            sites=sites,
             last_run=runs[0] if runs else None,
         )
 
@@ -181,11 +312,55 @@ def register_project_routes(
             )
         return record
 
-    def run_state(project_id: str, run_id: str) -> RunState:
+    def run_state(project_id: str, site_id: str, run_id: str) -> RunState:
+        site(project_id, site_id)
         try:
-            return store.run(project_id, run_id)
+            return store.run(project_id, site_id, run_id)
         except ProjectNotFoundError:
-            raise HTTPException(status_code=404, detail="This project has no such run.") from None
+            raise HTTPException(status_code=404, detail="This website has no such run.") from None
+
+    def unlocked(record: ProjectRecord) -> Unlocked:
+        token, expires = signer.issue(record.project_id)
+        return Unlocked(
+            project=out(record), token=token, expires_at=datetime.fromtimestamp(expires, UTC)
+        )
+
+    def import_out(project_id: str, s: SiteRecord, result: ImportResult) -> ImportOut:
+        summary: dict[str, Any] = result.summary()
+        return ImportOut.model_validate(
+            summary
+            | {
+                "site_id": s.site_id,
+                "site_name": s.name,
+                "url_count": len(store.urls(project_id, s.site_id)),
+            }
+        )
+
+    def decode_file(body: FileIn) -> list[str]:
+        try:
+            data = base64.b64decode(body.content_base64, validate=True)
+        except (binascii.Error, ValueError):
+            raise HTTPException(status_code=422, detail="The file did not arrive intact.") from None
+        try:
+            candidates = candidates_from_file(body.file_name, data)
+        except UnreadableFileError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from None
+        if not candidates:
+            raise HTTPException(
+                status_code=422, detail="No web addresses (http:// or https://) were found in it."
+            )
+        return candidates
+
+    def routed(project_id: str, candidates: list[str]) -> RoutedOut:
+        result = store.add_urls_routed(project_id, candidates)
+        names = {s.site_id: s for s in store.sites(project_id)}
+        return RoutedOut(
+            sites=[import_out(project_id, names[sid], r) for sid, r in result.per_site.items()],
+            unknown_domains=result.unknown_domains,
+            rejected=[{"value": v, "reason": r} for v, r in result.rejected[:20]],
+        )
+
+    # -- projects -------------------------------------------------------------
 
     @app.get("/api/projects")
     def list_projects() -> list[ProjectOut]:
@@ -193,16 +368,18 @@ def register_project_routes(
 
     @app.post("/api/projects")
     def create_project(body: ProjectCreate) -> Unlocked:
-        record = store.create(
-            name=body.name,
-            owner_name=body.owner_name,
-            client_name=body.client_name,
-            password=body.password,
-        )
-        token, expires = signer.issue(record.project_id)
-        return Unlocked(
-            project=out(record), token=token, expires_at=datetime.fromtimestamp(expires, UTC)
-        )
+        try:
+            record = store.create(
+                name=body.name,
+                owner_name=body.owner_name,
+                client_name=body.client_name,
+                password=body.password,
+                client_site=SiteSpec(name=body.client_name, website=body.client_website),
+                competitors=[SiteSpec(name=c.name, website=c.website) for c in body.competitors],
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from None
+        return unlocked(record)
 
     @app.get("/api/projects/{project_id}")
     def get_project(project_id: str) -> ProjectOut:
@@ -221,10 +398,7 @@ def register_project_routes(
             attempts.failed(project_id)
             raise HTTPException(status_code=401, detail="That password is not right.")
         attempts.succeeded(project_id)
-        token, expires = signer.issue(project_id)
-        return Unlocked(
-            project=out(record), token=token, expires_at=datetime.fromtimestamp(expires, UTC)
-        )
+        return unlocked(record)
 
     @app.post("/api/projects/{project_id}/update")
     def update(project_id: str, body: ProjectUpdate, token: TokenHeader = None) -> ProjectOut:
@@ -236,121 +410,249 @@ def register_project_routes(
         require_token(project_id, token)
         if not store.check_password(project_id, body.password):
             raise HTTPException(status_code=401, detail="That password is not right.")
-        if any(r.status in ("queued", "running") for r in store.runs(project_id)):
-            raise HTTPException(status_code=409, detail="Cancel the running scrape first.")
+        if any(r.status in RUN_ACTIVE for r in store.runs(project_id)):
+            raise HTTPException(status_code=409, detail="Cancel the running scrapes first.")
         store.delete(project_id)
         return {"deleted": project_id}
 
+    # -- websites -------------------------------------------------------------
+
+    @app.post("/api/projects/{project_id}/sites")
+    def add_site(project_id: str, body: SiteIn, token: TokenHeader = None) -> SiteOut:
+        require_token(project_id, token)
+        try:
+            new = store.add_site(project_id, SiteSpec(name=body.name, website=body.website))
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from None
+        return site_out(store.get(project_id), new)
+
+    @app.post("/api/projects/{project_id}/sites/{site_id}/delete")
+    def remove_site(project_id: str, site_id: str, token: TokenHeader = None) -> dict[str, str]:
+        require_token(project_id, token)
+        site(project_id, site_id)
+        if any(r.status in RUN_ACTIVE for r in store.runs(project_id, site_id)):
+            raise HTTPException(status_code=409, detail="Cancel this website's scrape first.")
+        try:
+            store.remove_site(project_id, site_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from None
+        return {"deleted": site_id}
+
     # -- URLs -----------------------------------------------------------------
 
-    @app.get("/api/projects/{project_id}/urls")
+    @app.post("/api/projects/{project_id}/urls")
+    def add_urls_any_site(project_id: str, body: UrlsIn, token: TokenHeader = None) -> RoutedOut:
+        require_token(project_id, token)
+        return routed(project_id, candidates_from_text(body.text))
+
+    @app.post("/api/projects/{project_id}/urls/import")
+    def import_any_site(project_id: str, body: FileIn, token: TokenHeader = None) -> RoutedOut:
+        require_token(project_id, token)
+        return routed(project_id, decode_file(body))
+
+    @app.get("/api/projects/{project_id}/sites/{site_id}/urls")
     def urls(
         project_id: str,
+        site_id: str,
         q: Annotated[str, Query(max_length=200)] = "",
         offset: Annotated[int, Query(ge=0)] = 0,
         limit: Annotated[int, Query(ge=1, le=1000)] = 100,
     ) -> UrlsPage:
-        project(project_id)
-        items = store.urls(project_id)
+        site(project_id, site_id)
+        items = store.urls(project_id, site_id)
         if q:
             needle = q.lower()
             items = [u for u in items if needle in u.url.lower()]
         return UrlsPage(total=len(items), items=items[offset : offset + limit])
 
-    def import_out(project_id: str, summary: dict[str, Any]) -> ImportOut:
-        return ImportOut.model_validate(summary | {"url_count": len(store.urls(project_id))})
-
-    @app.post("/api/projects/{project_id}/urls")
-    def add_urls(project_id: str, body: UrlsIn, token: TokenHeader = None) -> ImportOut:
+    @app.post("/api/projects/{project_id}/sites/{site_id}/urls")
+    def add_urls(
+        project_id: str, site_id: str, body: UrlsIn, token: TokenHeader = None
+    ) -> ImportOut:
         require_token(project_id, token)
-        result = store.add_urls(project_id, candidates_from_text(body.text))
-        return import_out(project_id, result.summary())
+        s = site(project_id, site_id)
+        result = store.add_urls(project_id, site_id, candidates_from_text(body.text))
+        return import_out(project_id, store.site(project_id, s.site_id), result)
 
-    @app.post("/api/projects/{project_id}/urls/import")
-    def import_file(project_id: str, body: FileIn, token: TokenHeader = None) -> ImportOut:
+    @app.post("/api/projects/{project_id}/sites/{site_id}/urls/import")
+    def import_file(
+        project_id: str, site_id: str, body: FileIn, token: TokenHeader = None
+    ) -> ImportOut:
         require_token(project_id, token)
-        try:
-            data = base64.b64decode(body.content_base64, validate=True)
-        except (binascii.Error, ValueError):
-            raise HTTPException(status_code=422, detail="The file did not arrive intact.") from None
-        try:
-            candidates = candidates_from_file(body.file_name, data)
-        except UnreadableFileError as exc:
-            raise HTTPException(status_code=422, detail=str(exc)) from None
-        if not candidates:
-            raise HTTPException(
-                status_code=422, detail="No web addresses (http:// or https://) were found in it."
-            )
-        result = store.add_urls(project_id, candidates)
-        return import_out(project_id, result.summary())
+        site(project_id, site_id)
+        result = store.add_urls(project_id, site_id, decode_file(body))
+        return import_out(project_id, store.site(project_id, site_id), result)
 
-    @app.post("/api/projects/{project_id}/urls/remove")
-    def remove_urls(project_id: str, body: UrlsRemove, token: TokenHeader = None) -> RemovedOut:
+    @app.post("/api/projects/{project_id}/sites/{site_id}/urls/remove")
+    def remove_urls(
+        project_id: str, site_id: str, body: UrlsRemove, token: TokenHeader = None
+    ) -> RemovedOut:
         require_token(project_id, token)
-        removed = store.remove_urls(project_id, None if body.all else body.urls)
-        return RemovedOut(removed=removed, url_count=len(store.urls(project_id)))
+        site(project_id, site_id)
+        removed = store.remove_urls(project_id, site_id, None if body.all else body.urls)
+        return RemovedOut(removed=removed, url_count=len(store.urls(project_id, site_id)))
 
     # -- runs -----------------------------------------------------------------
 
     @app.get("/api/projects/{project_id}/runs")
-    def runs(project_id: str) -> list[RunState]:
+    def all_runs(project_id: str) -> list[RunState]:
         project(project_id)
         return store.runs(project_id)
 
     @app.post("/api/projects/{project_id}/runs")
-    def start_run(project_id: str, token: TokenHeader = None) -> RunState:
+    def start_all(project_id: str, token: TokenHeader = None) -> list[RunState]:
         record = require_token(project_id, token)
         try:
-            return runner.submit(project_id, started_by=record.owner_name)
+            return runner.submit_all(project_id, started_by=record.owner_name)
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from None
 
-    @app.get("/api/projects/{project_id}/runs/{run_id}")
-    def get_run(project_id: str, run_id: str) -> RunState:
-        project(project_id)
-        return run_state(project_id, run_id)
+    @app.get("/api/projects/{project_id}/sites/{site_id}/runs")
+    def runs(project_id: str, site_id: str) -> list[RunState]:
+        site(project_id, site_id)
+        return store.runs(project_id, site_id)
 
-    @app.post("/api/projects/{project_id}/runs/{run_id}/cancel")
-    def cancel_run(project_id: str, run_id: str, token: TokenHeader = None) -> RunState:
+    @app.post("/api/projects/{project_id}/sites/{site_id}/runs")
+    def start_run(project_id: str, site_id: str, token: TokenHeader = None) -> RunState:
+        record = require_token(project_id, token)
+        site(project_id, site_id)
+        try:
+            return runner.submit(project_id, site_id, started_by=record.owner_name)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from None
+
+    @app.get("/api/projects/{project_id}/sites/{site_id}/runs/{run_id}")
+    def get_run(project_id: str, site_id: str, run_id: str) -> RunState:
+        return run_state(project_id, site_id, run_id)
+
+    @app.post("/api/projects/{project_id}/sites/{site_id}/runs/{run_id}/cancel")
+    def cancel_run(
+        project_id: str, site_id: str, run_id: str, token: TokenHeader = None
+    ) -> RunState:
         require_token(project_id, token)
-        run_state(project_id, run_id)
-        return runner.cancel(project_id, run_id)
+        run_state(project_id, site_id, run_id)
+        return runner.cancel(project_id, site_id, run_id)
 
-    @app.get("/api/projects/{project_id}/runs/{run_id}/downloads")
-    def downloads(project_id: str, run_id: str) -> list[ReportFile]:
-        project(project_id)
-        run_state(project_id, run_id)
+    @app.get("/api/projects/{project_id}/sites/{site_id}/runs/{run_id}/downloads")
+    def downloads(project_id: str, site_id: str, run_id: str) -> list[ReportFile]:
+        run_state(project_id, site_id, run_id)
         return [
             ReportFile(
                 name=name,
                 size=path.stat().st_size,
                 modified_at=datetime.fromtimestamp(path.stat().st_mtime, UTC),
             )
-            for name, path in store.report_files(project_id, run_id).items()
+            for name, path in store.report_files(project_id, site_id, run_id).items()
         ]
 
-    @app.get("/api/projects/{project_id}/runs/{run_id}/downloads.zip")
-    def download_all(project_id: str, run_id: str) -> FileResponse:
-        project(project_id)
-        run_state(project_id, run_id)
-        files = store.report_files(project_id, run_id)
+    @app.get("/api/projects/{project_id}/sites/{site_id}/runs/{run_id}/downloads.zip")
+    def download_all(project_id: str, site_id: str, run_id: str) -> FileResponse:
+        run_state(project_id, site_id, run_id)
+        files = store.report_files(project_id, site_id, run_id)
         if not files:
             raise HTTPException(status_code=404, detail="This run has no reports yet.")
-        archive = store.run_dir(project_id, run_id) / f"{run_id}_reports.zip"
+        archive = store.run_dir(project_id, site_id, run_id) / f"{run_id}_reports.zip"
         newest = max(p.stat().st_mtime for p in files.values())
         if not archive.is_file() or archive.stat().st_mtime < newest:
             _zip(archive, files)
         return FileResponse(archive, filename=archive.name, content_disposition_type="attachment")
 
-    @app.get("/api/projects/{project_id}/runs/{run_id}/downloads/{file_name}")
-    def download(project_id: str, run_id: str, file_name: str) -> FileResponse:
-        project(project_id)
-        run_state(project_id, run_id)
+    @app.get("/api/projects/{project_id}/sites/{site_id}/runs/{run_id}/downloads/{file_name}")
+    def download(project_id: str, site_id: str, run_id: str, file_name: str) -> FileResponse:
+        run_state(project_id, site_id, run_id)
         # The name is looked up in the folder listing, never joined onto a path.
-        path = store.report_files(project_id, run_id).get(file_name)
+        path = store.report_files(project_id, site_id, run_id).get(file_name)
         if path is None:
             raise HTTPException(status_code=404, detail="That file is not in this run's reports.")
         return FileResponse(path, filename=file_name, content_disposition_type="attachment")
+
+    # -- knowledge (the bot) --------------------------------------------------
+
+    def spaces(selected: list[str] | None = None) -> list[Space]:
+        """Every website of every project as a knowledge space (or only the selected)."""
+        out_spaces: list[Space] = []
+        for p in store.projects():
+            for s in p.sites:
+                namespace = runner.namespace(p.project_id, s.site_id)
+                if selected is not None and namespace not in selected:
+                    continue
+                out_spaces.append(
+                    Space(
+                        namespace=namespace,
+                        project_id=p.project_id,
+                        project_name=p.name,
+                        site_id=s.site_id,
+                        site_name=s.name,
+                        role=s.role,
+                    )
+                )
+        return out_spaces
+
+    @app.get("/api/knowledge/spaces")
+    def list_spaces() -> list[SpaceOut]:
+        listed: list[SpaceOut] = []
+        for space in spaces():
+            ready, note = False, "not indexed yet: scrape this website first"
+            if knowledge is not None:
+                knowledge_store = knowledge.open_store(space)
+                try:
+                    counts = knowledge_store.counts()
+                    model = knowledge_store.meta().get("model")
+                finally:
+                    knowledge_store.close()
+                if model:
+                    ready = True
+                    note = f"{counts.get('chunk_vectors', 0)} passages, model {model}"
+            listed.append(SpaceOut(**space.__dict__, ready=ready, note=note))
+        return listed
+
+    @app.get("/api/knowledge/search")
+    def search(
+        q: Annotated[str, Query(min_length=2, max_length=500)],
+        space: Annotated[list[str] | None, Query()] = None,
+        project: Annotated[list[str] | None, Query(alias="project")] = None,
+        top_k: Annotated[int, Query(ge=1, le=50)] = 8,
+        per_site: Annotated[int | None, Query(ge=1, le=20)] = None,
+    ) -> SearchOut:
+        if knowledge is None:
+            raise HTTPException(status_code=503, detail="The knowledge store is not set up.")
+        scope = spaces(space)
+        if project:
+            scope = [s for s in scope if s.project_id in project]
+        if not scope:
+            raise HTTPException(status_code=404, detail="None of those websites exist.")
+        result = federated_search(
+            scope,
+            q,
+            open_store=knowledge.open_store,
+            embedder_for=knowledge.embedder_for,
+            top_k=top_k,
+            per_site=per_site,
+        )
+        return SearchOut(
+            query=q,
+            hits=[
+                HitOut(
+                    rank=h.rank,
+                    score=round(h.score, 6),
+                    project_id=h.space.project_id,
+                    project_name=h.space.project_name,
+                    site_id=h.space.site_id,
+                    site_name=h.space.site_name,
+                    role=h.space.role,
+                    url=h.hit.chunk.url,
+                    headings=h.hit.chunk.heading_path,
+                    text=h.hit.chunk.verbatim_text,
+                    chunk_id=h.hit.chunk.chunk_id,
+                    evidence_ids=h.hit.chunk.evidence_ids,
+                )
+                for h in result.hits
+            ],
+            searched=[s.namespace for s in result.searched],
+            skipped=[
+                {"space": s.namespace, "site": s.site_name, "reason": r} for s, r in result.skipped
+            ],
+        )
 
 
 def _zip(archive: Path, files: dict[str, Path]) -> None:

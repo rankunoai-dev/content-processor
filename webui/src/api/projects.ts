@@ -1,18 +1,22 @@
 /**
  * App module 1 (Content Scraper): project API calls, types and React Query hooks.
  *
- * Reading is open. Every change carries the project's unlock token (from creating
- * the project or from unlocking it with the password); tokens live in memory only.
+ * A project holds the client's website and its competitors' websites; each website
+ * has its own URL list, scrapes, reports and knowledge space. Reading is open.
+ * Every change carries the project's unlock token (from creating the project or
+ * from unlocking it with the password); tokens live in memory only.
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { create } from 'zustand';
 import { ApiError } from './client';
 
 export type RunStatus = 'queued' | 'running' | 'finished' | 'failed' | 'cancelled' | 'interrupted';
+export type KnowledgeStatus = '' | 'building' | 'ready' | 'failed' | 'skipped';
 
 export interface RunState {
   run_id: string;
   project_id: string;
+  site_id: string;
   status: RunStatus;
   created_at: string;
   started_at: string | null;
@@ -28,6 +32,18 @@ export interface RunState {
   results: Record<string, number>;
   message: string;
   reports_ready: boolean;
+  knowledge_status: KnowledgeStatus;
+  knowledge_message: string;
+}
+
+export interface Site {
+  site_id: string;
+  name: string;
+  role: 'client' | 'competitor';
+  domains: string[];
+  url_count: number;
+  last_run: RunState | null;
+  namespace: string;
 }
 
 export interface Project {
@@ -38,6 +54,7 @@ export interface Project {
   created_at: string;
   updated_at: string;
   url_count: number;
+  sites: Site[];
   last_run: RunState | null;
 }
 
@@ -48,6 +65,8 @@ export interface Unlocked {
 }
 
 export interface ImportResult {
+  site_id: string;
+  site_name: string;
   added: number;
   already_present: number;
   duplicates_in_input: number;
@@ -55,6 +74,12 @@ export interface ImportResult {
   rejected_examples: { value: string; reason: string }[];
   over_limit: number;
   url_count: number;
+}
+
+export interface RoutedImport {
+  sites: ImportResult[];
+  unknown_domains: Record<string, number>;
+  rejected: { value: string; reason: string }[];
 }
 
 export interface ProjectUrl {
@@ -66,6 +91,37 @@ export interface ReportFile {
   name: string;
   size: number;
   modified_at: string;
+}
+
+export interface SearchHit {
+  rank: number;
+  score: number;
+  project_id: string;
+  project_name: string;
+  site_id: string;
+  site_name: string;
+  role: string;
+  url: string;
+  headings: string[];
+  text: string;
+  chunk_id: string;
+  evidence_ids: string[];
+}
+
+export interface SearchResult {
+  query: string;
+  hits: SearchHit[];
+  searched: string[];
+  skipped: { space: string; site: string; reason: string }[];
+}
+
+export interface NewProject {
+  name: string;
+  owner_name: string;
+  client_name: string;
+  password: string;
+  client_website: string | null;
+  competitors: { name: string; website: string | null }[];
 }
 
 export const ACTIVE: ReadonlySet<RunStatus> = new Set(['queued', 'running']);
@@ -155,43 +211,70 @@ async function post<T>(path: string, body: unknown, token?: string | null): Prom
   return (await response.json()) as T;
 }
 
+const projectPath = (id: string) => `/api/projects/${enc(id)}`;
+const sitePath = (id: string, site: string) => `${projectPath(id)}/sites/${enc(site)}`;
+const runPath = (id: string, site: string, run: string) => `${sitePath(id, site)}/runs/${enc(run)}`;
+
 export const projectsApi = {
   list: (signal?: AbortSignal) => get<Project[]>('/api/projects', signal),
-  get: (id: string, signal?: AbortSignal) => get<Project>(`/api/projects/${enc(id)}`, signal),
-  urls: (id: string, q: string, offset: number, limit: number, signal?: AbortSignal) =>
-    get<{ total: number; items: ProjectUrl[] }>(
-      `/api/projects/${enc(id)}/urls?${new URLSearchParams({ q, offset: String(offset), limit: String(limit) }).toString()}`,
-      signal,
-    ),
-  runs: (id: string, signal?: AbortSignal) => get<RunState[]>(`/api/projects/${enc(id)}/runs`, signal),
-  reports: (id: string, run: string, signal?: AbortSignal) =>
-    get<ReportFile[]>(`/api/projects/${enc(id)}/runs/${enc(run)}/downloads`, signal),
-  reportUrl: (id: string, run: string, file: string) =>
-    `/api/projects/${enc(id)}/runs/${enc(run)}/downloads/${enc(file)}`,
-  zipUrl: (id: string, run: string) => `/api/projects/${enc(id)}/runs/${enc(run)}/downloads.zip`,
-  create: (body: { name: string; owner_name: string; client_name: string; password: string }) =>
-    post<Unlocked>('/api/projects', body),
-  unlock: (id: string, password: string) =>
-    post<Unlocked>(`/api/projects/${enc(id)}/unlock`, { password }),
-  addUrls: (id: string, text: string, token: string | null) =>
-    post<ImportResult>(`/api/projects/${enc(id)}/urls`, { text }, token),
-  importFile: (id: string, fileName: string, contentBase64: string, token: string | null) =>
-    post<ImportResult>(
-      `/api/projects/${enc(id)}/urls/import`,
+  get: (id: string, signal?: AbortSignal) => get<Project>(projectPath(id), signal),
+  create: (body: NewProject) => post<Unlocked>('/api/projects', body),
+  unlock: (id: string, password: string) => post<Unlocked>(`${projectPath(id)}/unlock`, { password }),
+  remove: (id: string, password: string, token: string | null) =>
+    post<{ deleted: string }>(`${projectPath(id)}/delete`, { password }, token),
+
+  addSite: (id: string, name: string, website: string | null, token: string | null) =>
+    post<Site>(`${projectPath(id)}/sites`, { name, website }, token),
+  removeSite: (id: string, site: string, token: string | null) =>
+    post<{ deleted: string }>(`${sitePath(id, site)}/delete`, {}, token),
+
+  /** One list for every website: each URL goes to the website of its domain. */
+  addUrlsAnySite: (id: string, text: string, token: string | null) =>
+    post<RoutedImport>(`${projectPath(id)}/urls`, { text }, token),
+  importAnySite: (id: string, fileName: string, contentBase64: string, token: string | null) =>
+    post<RoutedImport>(
+      `${projectPath(id)}/urls/import`,
       { file_name: fileName, content_base64: contentBase64 },
       token,
     ),
-  removeUrls: (id: string, urls: string[] | 'all', token: string | null) =>
+  urls: (id: string, site: string, q: string, offset: number, limit: number, signal?: AbortSignal) =>
+    get<{ total: number; items: ProjectUrl[] }>(
+      `${sitePath(id, site)}/urls?${new URLSearchParams({ q, offset: String(offset), limit: String(limit) }).toString()}`,
+      signal,
+    ),
+  addUrls: (id: string, site: string, text: string, token: string | null) =>
+    post<ImportResult>(`${sitePath(id, site)}/urls`, { text }, token),
+  importFile: (id: string, site: string, fileName: string, contentBase64: string, token: string | null) =>
+    post<ImportResult>(
+      `${sitePath(id, site)}/urls/import`,
+      { file_name: fileName, content_base64: contentBase64 },
+      token,
+    ),
+  removeUrls: (id: string, site: string, urls: string[] | 'all', token: string | null) =>
     post<{ removed: number; url_count: number }>(
-      `/api/projects/${enc(id)}/urls/remove`,
+      `${sitePath(id, site)}/urls/remove`,
       urls === 'all' ? { all: true } : { urls },
       token,
     ),
-  start: (id: string, token: string | null) => post<RunState>(`/api/projects/${enc(id)}/runs`, {}, token),
-  cancel: (id: string, run: string, token: string | null) =>
-    post<RunState>(`/api/projects/${enc(id)}/runs/${enc(run)}/cancel`, {}, token),
-  remove: (id: string, password: string, token: string | null) =>
-    post<{ deleted: string }>(`/api/projects/${enc(id)}/delete`, { password }, token),
+
+  runs: (id: string, signal?: AbortSignal) => get<RunState[]>(`${projectPath(id)}/runs`, signal),
+  startAll: (id: string, token: string | null) => post<RunState[]>(`${projectPath(id)}/runs`, {}, token),
+  start: (id: string, site: string, token: string | null) =>
+    post<RunState>(`${sitePath(id, site)}/runs`, {}, token),
+  cancel: (id: string, site: string, run: string, token: string | null) =>
+    post<RunState>(`${runPath(id, site, run)}/cancel`, {}, token),
+  reports: (id: string, site: string, run: string, signal?: AbortSignal) =>
+    get<ReportFile[]>(`${runPath(id, site, run)}/downloads`, signal),
+  reportUrl: (id: string, site: string, run: string, file: string) =>
+    `${runPath(id, site, run)}/downloads/${enc(file)}`,
+  zipUrl: (id: string, site: string, run: string) => `${runPath(id, site, run)}/downloads.zip`,
+
+  search: (q: string, spaces: string[], perSite: number | null, signal?: AbortSignal) => {
+    const params = new URLSearchParams({ q, top_k: '12' });
+    for (const s of spaces) params.append('space', s);
+    if (perSite !== null) params.set('per_site', String(perSite));
+    return get<SearchResult>(`/api/knowledge/search?${params.toString()}`, signal);
+  },
 };
 
 // -- hooks --------------------------------------------------------------------------
@@ -199,10 +282,12 @@ export const projectsApi = {
 export const projectKeys = {
   all: () => ['projects'] as const,
   one: (id: string) => ['projects', id] as const,
-  urls: (id: string, q: string, offset: number, limit: number) =>
-    ['projects', id, 'urls', q, offset, limit] as const,
+  urls: (id: string, site: string, q: string, offset: number, limit: number) =>
+    ['projects', id, 'urls', site, q, offset, limit] as const,
   runs: (id: string) => ['projects', id, 'runs'] as const,
-  reports: (id: string, run: string) => ['projects', id, 'runs', run, 'reports'] as const,
+  reports: (id: string, site: string, run: string) => ['projects', id, 'reports', site, run] as const,
+  search: (q: string, spaces: string[], perSite: number | null) =>
+    ['knowledge', 'search', q, spaces, perSite] as const,
 };
 
 const POLL_MS = 3000;
@@ -212,23 +297,30 @@ export function useProjects() {
     queryKey: projectKeys.all(),
     queryFn: ({ signal }) => projectsApi.list(signal),
     refetchInterval: (q) =>
-      q.state.data?.some((p) => p.last_run && ACTIVE.has(p.last_run.status)) ? POLL_MS : false,
+      q.state.data?.some((p) => p.sites.some((s) => s.last_run && ACTIVE.has(s.last_run.status)))
+        ? POLL_MS
+        : false,
   });
 }
 
 export function useProject(id: string) {
-  return useQuery({ queryKey: projectKeys.one(id), queryFn: ({ signal }) => projectsApi.get(id, signal) });
+  return useQuery({
+    queryKey: projectKeys.one(id),
+    queryFn: ({ signal }) => projectsApi.get(id, signal),
+    refetchInterval: (q) =>
+      q.state.data?.sites.some((s) => s.last_run && ACTIVE.has(s.last_run.status)) ? POLL_MS : false,
+  });
 }
 
-export function useProjectUrls(id: string, q: string, offset: number, limit: number) {
+export function useSiteUrls(id: string, site: string, q: string, offset: number, limit: number) {
   return useQuery({
-    queryKey: projectKeys.urls(id, q, offset, limit),
-    queryFn: ({ signal }) => projectsApi.urls(id, q, offset, limit, signal),
+    queryKey: projectKeys.urls(id, site, q, offset, limit),
+    queryFn: ({ signal }) => projectsApi.urls(id, site, q, offset, limit, signal),
     placeholderData: (previous) => previous,
   });
 }
 
-/** The project's runs; polled while one is queued or running. */
+/** Every run of the project (all websites); polled while one is queued or running. */
 export function useProjectRuns(id: string) {
   return useQuery({
     queryKey: projectKeys.runs(id),
@@ -237,11 +329,19 @@ export function useProjectRuns(id: string) {
   });
 }
 
-export function useRunReports(id: string, run: string | null) {
+export function useRunReports(id: string, site: string, run: string | null) {
   return useQuery({
-    queryKey: projectKeys.reports(id, run ?? ''),
-    queryFn: ({ signal }) => projectsApi.reports(id, run ?? '', signal),
+    queryKey: projectKeys.reports(id, site, run ?? ''),
+    queryFn: ({ signal }) => projectsApi.reports(id, site, run ?? '', signal),
     enabled: run !== null,
+  });
+}
+
+export function useKnowledgeSearch(q: string, spaces: string[], perSite: number | null) {
+  return useQuery({
+    queryKey: projectKeys.search(q, spaces, perSite),
+    queryFn: ({ signal }) => projectsApi.search(q, spaces, perSite, signal),
+    enabled: q.trim().length >= 2 && spaces.length > 0,
   });
 }
 

@@ -50,7 +50,10 @@ from src.modules.content_processor.webapi.models import (
     ReviewResponse,
     RunsResponse,
 )
-from src.modules.content_processor.webapi.projects_api import register_project_routes
+from src.modules.content_processor.webapi.projects_api import (
+    KnowledgeAccess,
+    register_project_routes,
+)
 from src.modules.content_processor.webapi.store import (
     PageQuery,
     RunData,
@@ -64,7 +67,8 @@ __all__ = ["DEFAULT_ALLOWED_HOSTS", "WRITE_HEADER", "WRITE_HEADER_VALUE", "creat
 WRITE_HEADER = "X-Requested-With"
 WRITE_HEADER_VALUE = "content-processor"
 _DECISIONS_PATH = re.compile(r"^/api/runs/[^/]+/decisions$")
-_PROJECT_WRITE_PATH = re.compile(r"^/api/projects(/[^/]+(/[a-z]+(/[^/]+)?(/cancel)?)?)?$")
+# Every project change lives under /api/projects; each route also checks the unlock token.
+_PROJECT_WRITE_PATH = re.compile(r"^/api/projects(/[A-Za-z0-9_.-]+)*$")
 
 DEFAULT_ALLOWED_HOSTS: tuple[str, ...] = ("127.0.0.1", "localhost")
 _CSP = (
@@ -94,6 +98,7 @@ def create_app(
     static_dir: Path | None = None,
     allowed_hosts: Sequence[str] = DEFAULT_ALLOWED_HOSTS,
     projects: tuple[ProjectStore, ScrapeRunner, TokenSigner] | None = None,
+    knowledge: KnowledgeAccess | None = None,
 ) -> FastAPI:
     """Build the app for one exports folder (and, optionally, the built web app).
 
@@ -267,7 +272,9 @@ def create_app(
 
     if projects is not None:
         project_store, runner, signer = projects
-        register_project_routes(app, store=project_store, runner=runner, signer=signer)
+        register_project_routes(
+            app, store=project_store, runner=runner, signer=signer, knowledge=knowledge
+        )
 
     @app.get("/api/{rest:path}")
     def api_not_found(rest: str) -> JSONResponse:

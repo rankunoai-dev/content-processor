@@ -66,7 +66,7 @@ question + scope ──► for each knowledge space in scope:
 
 - **Scopes**: one website; a whole project ("client vs all competitors"); several projects (the same competitor seen in two engagements). A scope never reaches a space the user did not include.
 - **Comparisons** ("what does each competitor say about secure printing?") are the same search grouped by website: the best passages per website, side by side.
-- **Model consistency**: each space remembers the embedding model it was built with. A space built with a different model than the one in use is skipped and named in the answer, never searched with mismatched vectors.
+- **Model consistency**: each space remembers the embedding model it was built with and is searched with that same model, so vectors are never compared across models. Results from different spaces are combined by rank, not by raw score, so spaces built with different models can still be searched together. A space whose model is not available right now (for example the local model server is off) is skipped and named in the result.
 - **Permissions**: reading is open as for reports (decision of 2026-10-30, open question 1). When viewing becomes password-protected, the scope check is where it is enforced.
 
 ## 7. Existing projects

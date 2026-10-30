@@ -21,9 +21,13 @@ __all__ = [
     "MAX_PROJECT_URLS",
     "ImportResult",
     "UnreadableFileError",
+    "belongs_to",
     "candidates_from_file",
     "candidates_from_text",
+    "domain_of",
+    "host_key",
     "merge_urls",
+    "url_domain",
 ]
 
 IMPORT_MAX_BYTES = 20 * 1024 * 1024
@@ -171,3 +175,50 @@ def merge_urls(existing: Iterable[str], candidates: Iterable[str]) -> ImportResu
             seen_now.add(key)
             result.added.append(value)
     return result
+
+
+# -- websites and their domains --------------------------------------------------
+
+
+def host_key(host: str) -> str:
+    """A host as a website key: lower case, without a leading 'www.'."""
+    host = host.lower().rstrip(".")
+    return host[4:] if host.startswith("www.") else host
+
+
+def domain_of(website: str) -> str:
+    """The domain of what a person typed for a website ('https://www.flynns.com/x' -> 'flynns.com').
+
+    Raises:
+        ValueError: The text is not a web address or a domain.
+    """
+    text = website.strip()
+    if not text:
+        raise ValueError("empty website")
+    if "://" not in text:
+        text = "https://" + text
+    try:
+        host = normalize_url(text).host
+    except InvalidInputUrl as exc:
+        raise ValueError(f"'{website}' is not a website address") from exc
+    key = host_key(host)
+    if "." not in key:
+        raise ValueError(f"'{website}' is not a website address")
+    return key
+
+
+def belongs_to(url: str, domains: Iterable[str]) -> bool:
+    """True when the URL's host is one of the domains or a subdomain of one."""
+    try:
+        host = host_key(normalize_url(url).host)
+    except InvalidInputUrl:
+        return False
+    return any(host == d or host.endswith("." + d) for d in domains)
+
+
+def url_domain(url: str) -> str | None:
+    """The website key of a URL's host, or None when it is not a usable URL."""
+    try:
+        return host_key(normalize_url(url).host)
+    except InvalidInputUrl:
+        return None

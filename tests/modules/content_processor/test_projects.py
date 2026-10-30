@@ -1,4 +1,4 @@
-"""App module 1 (Content Scraper): projects, passwords, URL import, runs and downloads."""
+"""App module 1 (Content Scraper): projects with websites, passwords, URLs, runs, the bot."""
 
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ from src.modules.content_processor.projects.security import (
     hash_password,
     verify_password,
 )
-from src.modules.content_processor.projects.store import ProjectStore, slug
+from src.modules.content_processor.projects.store import ProjectStore, SiteSpec, slug
 from src.modules.content_processor.projects.urls import (
     UnreadableFileError,
     candidates_from_file,
@@ -115,32 +115,129 @@ def test_files_from_the_device(tmp_path: Path):
         candidates_from_file("photo.png", b"x")
 
 
-# -- the store ----------------------------------------------------------------------
+# -- the store: projects with websites --------------------------------------------
 
 
-def test_store_keeps_projects_urls_and_never_the_password(tmp_path: Path):
-    store = ProjectStore(tmp_path)
-    record = store.create(
-        name="Flynn's Print Q4", owner_name="Gaurav", client_name="Flynn's", password=PASSWORD
+def _flynns(store: ProjectStore):
+    return store.create(
+        name="Print security",
+        owner_name="Gaurav",
+        client_name="Flynn's",
+        password=PASSWORD,
+        client_site=SiteSpec("Flynn's", "https://www.flynns.com"),
+        competitors=[SiteSpec("Xerox", "xerox.com"), SiteSpec("Canon", None)],
     )
-    assert record.project_id.startswith("flynn-s-print-q4-")
-    raw = (tmp_path / "projects" / record.project_id / "project.json").read_text("utf-8")
+
+
+def test_each_website_is_stored_on_its_own(tmp_path: Path):
+    store = ProjectStore(tmp_path)
+    record = _flynns(store)
+    pid = record.project_id
+    raw = (tmp_path / "projects" / pid / "project.json").read_text("utf-8")
     assert PASSWORD not in raw
-    assert store.check_password(record.project_id, PASSWORD)
-    assert [p.project_id for p in store.projects()] == [record.project_id]
-    result = store.add_urls(record.project_id, ["https://a.example/1", "https://a.example/2"])
-    assert len(result.added) == 2 and len(store.urls(record.project_id)) == 2
-    assert store.remove_urls(record.project_id, ["https://a.example/1"]) == 1
-    assert store.remove_urls(record.project_id, None) == 1
-    with pytest.raises(ValueError, match="at least 8"):
-        store.create(name="x", owner_name="y", client_name="z", password="short")
-    store.delete(record.project_id)
-    assert store.projects() == []
+    assert [(s.site_id, s.role, s.domains) for s in record.sites] == [
+        ("flynn-s", "client", ["flynns.com"]),
+        ("xerox", "competitor", ["xerox.com"]),
+        ("canon", "competitor", []),
+    ]
+    for site in record.sites:
+        assert (tmp_path / "projects" / pid / "sites" / site.site_id / "urls.json").is_file()
+
+    added = store.add_urls(pid, "flynn-s", ["https://blog.flynns.com/a", "https://www.xerox.com/x"])
+    assert added.added == ["https://blog.flynns.com/a"], "a subdomain is the same website"
+    assert dict(added.rejected) == {"https://www.xerox.com/x": "belongs to Xerox"}
+    elsewhere = store.add_urls(pid, "xerox", ["https://www.hp.com/p"])
+    assert dict(elsewhere.rejected) == {"https://www.hp.com/p": "not this website (hp.com)"}
+    learned = store.add_urls(pid, "canon", ["https://www.usa.canon.com/printers"])
+    assert learned.added and store.site(pid, "canon").domains == ["usa.canon.com"]
+
+    routed = store.add_urls_routed(
+        pid,
+        [
+            "https://www.flynns.com/b",
+            "https://www.xerox.com/security",
+            "https://www.xerox.com/security",
+            "https://www.hp.com/p",
+            "not a url",
+        ],
+    )
+    assert {sid: r.added for sid, r in routed.per_site.items()} == {
+        "flynn-s": ["https://www.flynns.com/b"],
+        "xerox": ["https://www.xerox.com/security"],
+    }
+    assert routed.per_site["xerox"].duplicates_in_input == 1
+    assert routed.unknown_domains == {"hp.com": 1}
+    assert routed.rejected == [("not a url", "not a usable web address")]
+    assert store.url_count(pid) == 4 and store.url_count(pid, "xerox") == 1
+
+    with pytest.raises(ValueError, match="cannot be removed"):
+        store.remove_site(pid, "flynn-s")
+    store.remove_site(pid, "canon")
+    assert [s.site_id for s in store.sites(pid)] == ["flynn-s", "xerox"]
+    assert not (tmp_path / "projects" / pid / "sites" / "canon").exists()
+    hp = store.add_site(pid, SiteSpec("HP", "https://www.hp.com"))
+    assert hp.role == "competitor" and hp.domains == ["hp.com"]
+    with pytest.raises(ValueError, match="already the website of 'Xerox'"):
+        store.add_site(pid, SiteSpec("Xerox again", "https://xerox.com"))
+    with pytest.raises(ValueError, match="Two websites are called"):
+        store.add_site(pid, SiteSpec("HP", None))
+    with pytest.raises(ValueError, match="not a website address"):
+        store.add_site(pid, SiteSpec("Bad", "not a site"))
     assert slug("  ") == "project"
 
 
+def test_an_older_project_becomes_one_client_website(tmp_path: Path):
+    """Projects saved before websites existed: list and runs move under the client site."""
+    folder = tmp_path / "projects" / "old-print-abc123"
+    (folder / "runs" / "old-print_20261030-120000").mkdir(parents=True)
+    (folder / "project.json").write_text(
+        json.dumps(
+            {
+                "project_id": "old-print-abc123",
+                "name": "Old print",
+                "owner_name": "Gaurav",
+                "client_name": "Flynn's",
+                "password_hash": hash_password(PASSWORD),
+                "created_at": "2026-10-30T09:00:00Z",
+                "updated_at": "2026-10-30T09:00:00Z",
+            }
+        ),
+        encoding="utf-8",
+    )
+    (folder / "urls.json").write_text(
+        json.dumps([{"url": "https://www.flynns.com/a", "added_at": "2026-10-30T09:00:00Z"}]),
+        encoding="utf-8",
+    )
+    (folder / "runs" / "old-print_20261030-120000" / "state.json").write_text(
+        json.dumps(
+            {
+                "run_id": "old-print_20261030-120000",
+                "project_id": "old-print-abc123",
+                "status": "finished",
+                "created_at": "2026-10-30T12:00:00Z",
+                "started_by": "Gaurav",
+                "url_count": 1,
+                "batch_size": 25,
+                "batches_total": 1,
+            }
+        ),
+        encoding="utf-8",
+    )
+    store = ProjectStore(tmp_path)
+    record = store.get("old-print-abc123")
+    assert [(s.site_id, s.role, s.domains) for s in record.sites] == [
+        ("flynn-s", "client", ["flynns.com"])
+    ]
+    assert [u.url for u in store.urls("old-print-abc123", "flynn-s")] == [
+        "https://www.flynns.com/a"
+    ]
+    [run] = store.runs("old-print-abc123")
+    assert run.site_id == "flynn-s" and run.status == "finished"
+    assert (folder / "urls.json.converted").is_file() and not (folder / "urls.json").exists()
+    assert store.get("old-print-abc123").sites == record.sites, "converted once"
+
+
 def test_scope_covers_each_site_free_tiers_only():
-    store_record = ProjectStore(Path(".")).__class__  # noqa: F841 - type only
     from datetime import UTC, datetime
 
     from src.modules.content_processor.contracts import RunScope
@@ -164,7 +261,7 @@ def test_scope_covers_each_site_free_tiers_only():
     assert scope.authorization.approved_by == "Gaurav"
 
 
-# -- the runner with a fake batch command -------------------------------------------
+# -- the runner with fake batches, reports and knowledge steps ----------------------
 
 
 class FakeBatches:
@@ -200,18 +297,35 @@ def _fake_report(records: Path, out_dir: Path) -> int:
     return 0
 
 
+class FakeKnowledge:
+    """Records which records file went into which namespace."""
+
+    def __init__(self, fail: bool = False) -> None:
+        self.calls: list[tuple[str, str]] = []
+        self.fail = fail
+
+    def __call__(self, records: Path, namespace: str) -> tuple[bool, str]:
+        self.calls.append((records.name, namespace))
+        if self.fail:
+            return False, "the index step failed: no model"
+        return True, f"searchable by the bot (knowledge space {namespace})"
+
+
 @pytest.fixture
 def app_env(tmp_path: Path):
     store = ProjectStore(tmp_path / "app_data")
     batches = FakeBatches()
-    runner = ScrapeRunner(store, command=batches, report=_fake_report, batch_size=2)
+    knowledge = FakeKnowledge()
+    runner = ScrapeRunner(
+        store, command=batches, report=_fake_report, knowledge=knowledge, batch_size=2
+    )
     runner.start()
     signer = TokenSigner.from_file(tmp_path / "app_data" / "secret.key")
     exports = tmp_path / "exports"
     exports.mkdir()
     app = create_app(exports, projects=(store, runner, signer))
     client = TestClient(app, base_url="http://127.0.0.1")
-    return client, store, runner, batches
+    return client, store, runner, batches, knowledge
 
 
 def _post(client: TestClient, path: str, body: object, token: str | None = None):
@@ -230,6 +344,8 @@ def _create(client: TestClient) -> tuple[str, str]:
             "owner_name": "Gaurav",
             "client_name": "Flynn's",
             "password": PASSWORD,
+            "client_website": "https://www.flynns.com",
+            "competitors": [{"name": "Xerox", "website": "xerox.com"}],
         },
     )
     assert reply.status_code == 200, reply.text
@@ -237,172 +353,312 @@ def _create(client: TestClient) -> tuple[str, str]:
     return body["project"]["project_id"], body["token"]
 
 
-def test_create_view_and_only_the_password_holder_can_change(app_env):
-    client, _, _, _ = app_env
+def test_create_with_competitors_and_only_the_password_holder_can_change(app_env):
+    client, _, _, _, _ = app_env
     project_id, token = _create(client)
-    listing = client.get("/api/projects").json()
-    assert listing[0]["project_id"] == project_id and "password_hash" not in listing[0]
-    assert listing[0]["owner_name"] == "Gaurav" and listing[0]["client_name"] == "Flynn's"
+    [listing] = client.get("/api/projects").json()
+    assert listing["project_id"] == project_id and "password_hash" not in listing
+    assert [(s["name"], s["role"], s["domains"]) for s in listing["sites"]] == [
+        ("Flynn's", "client", ["flynns.com"]),
+        ("Xerox", "competitor", ["xerox.com"]),
+    ]
+    assert listing["sites"][1]["namespace"] == f"rankuno-dev.{project_id}.xerox"
 
-    add = {"text": "https://www.example.com/a"}
-    assert _post(client, f"/api/projects/{project_id}/urls", add).status_code == 401
-    assert _post(client, f"/api/projects/{project_id}/urls", add, "forged.token").status_code == 401
-    no_header = client.post(
-        f"/api/projects/{project_id}/urls", json=add, headers={"X-Project-Token": token}
-    )
+    add = {"text": "https://www.xerox.com/a"}
+    site_urls = f"/api/projects/{project_id}/sites/xerox/urls"
+    assert _post(client, site_urls, add).status_code == 401
+    assert _post(client, site_urls, add, "forged.token").status_code == 401
+    no_header = client.post(site_urls, json=add, headers={"X-Project-Token": token})
     assert no_header.status_code == 403, "writes come only from the app"
-    assert _post(client, f"/api/projects/{project_id}/urls", add, token).json()["added"] == 1
+    assert _post(client, site_urls, add, token).json()["added"] == 1
+
+    bad = _post(
+        client,
+        "/api/projects",
+        {
+            "name": "x",
+            "owner_name": "y",
+            "client_name": "z",
+            "password": PASSWORD,
+            "client_website": "flynns.com",
+            "competitors": [{"name": "Dup", "website": "flynns.com"}],
+        },
+    )
+    assert bad.status_code == 422 and "already the website" in bad.json()["detail"]
 
     wrong = _post(client, f"/api/projects/{project_id}/unlock", {"password": "nope nope"})
     assert wrong.status_code == 401
-    unlocked = _post(client, f"/api/projects/{project_id}/unlock", {"password": PASSWORD})
-    assert unlocked.status_code == 200 and unlocked.json()["token"]
     for _ in range(5):
         _post(client, f"/api/projects/{project_id}/unlock", {"password": "nope nope"})
-    assert (
-        _post(client, f"/api/projects/{project_id}/unlock", {"password": PASSWORD}).status_code
-        == 429
+    locked_out = _post(client, f"/api/projects/{project_id}/unlock", {"password": PASSWORD})
+    assert locked_out.status_code == 429
+
+    hp = _post(
+        client, f"/api/projects/{project_id}/sites", {"name": "HP", "website": "hp.com"}, token
     )
-    short = _post(
-        client,
-        "/api/projects",
-        {"name": "x", "owner_name": "y", "client_name": "z", "password": "short"},
-    )
-    assert short.status_code == 422
+    assert hp.status_code == 200 and hp.json()["role"] == "competitor"
+    gone = _post(client, f"/api/projects/{project_id}/sites/hp/delete", {}, token)
+    assert gone.status_code == 200
+    client_gone = _post(client, f"/api/projects/{project_id}/sites/flynn-s/delete", {}, token)
+    assert client_gone.status_code == 409
 
 
-def test_import_run_progress_and_downloads(app_env):
-    client, store, runner, batches = app_env
+def test_one_list_for_all_websites_then_scrape_each_on_its_own(app_env):
+    client, store, runner, batches, knowledge = app_env
     project_id, token = _create(client)
-    csv_file = "URL\nhttps://www.example.com/a\nhttps://www.example.com/slow\nhttps://www.example.com/c\nmailto:x@y.z\n"
+    mixed = (
+        "URL\nhttps://www.flynns.com/a\nhttps://www.flynns.com/slow\nhttps://www.flynns.com/c\n"
+        "https://www.xerox.com/security\nhttps://www.hp.com/p\n"
+    )
     reply = _post(
         client,
         f"/api/projects/{project_id}/urls/import",
-        {"file_name": "urls.csv", "content_base64": base64.b64encode(csv_file.encode()).decode()},
+        {"file_name": "all.csv", "content_base64": base64.b64encode(mixed.encode()).decode()},
         token,
     )
     assert reply.status_code == 200, reply.text
-    assert reply.json()["added"] == 3 and reply.json()["url_count"] == 3
-    bad = _post(
-        client,
-        f"/api/projects/{project_id}/urls/import",
-        {"file_name": "notes.txt", "content_base64": base64.b64encode(b"nothing here").decode()},
-        token,
-    )
-    assert bad.status_code == 200 and bad.json()["rejected"] == 1
+    body = reply.json()
+    assert {s["site_id"]: s["added"] for s in body["sites"]} == {"flynn-s": 3, "xerox": 1}
+    assert body["unknown_domains"] == {"hp.com": 1}
 
     started = _post(client, f"/api/projects/{project_id}/runs", {}, token)
     assert started.status_code == 200, started.text
-    run_id = started.json()["run_id"]
+    assert sorted(r["site_id"] for r in started.json()) == ["flynn-s", "xerox"]
     assert runner.wait_idle(20)
-    state = client.get(f"/api/projects/{project_id}/runs/{run_id}").json()
-    assert state["status"] == "finished" and state["reports_ready"]
-    assert state["batches_total"] == 2 and state["batches_done"] == 2
-    assert state["results"] == {"VERIFIED_WITHIN_SCOPE": 3}
-    # the 'slow' page was unfinished on try 1 and re-run alone
-    assert batches.calls == [
-        ["https://www.example.com/a", "https://www.example.com/slow"],
-        ["https://www.example.com/slow"],
-        ["https://www.example.com/c"],
-    ]
-    merged = store.run_dir(project_id, run_id) / f"{run_id}.records.jsonl"
-    urls = [json.loads(line)["requested_url"] for line in merged.read_text("utf-8").splitlines()]
-    assert urls[:3] == [
-        "https://www.example.com/a",
-        "https://www.example.com/slow",
-        "https://www.example.com/c",
-    ], "supplied URLs first, then the pages found on them"
+    runs = {r["site_id"]: r for r in client.get(f"/api/projects/{project_id}/runs").json()}
+    flynns = runs["flynn-s"]
+    assert flynns["status"] == "finished" and flynns["reports_ready"]
+    assert flynns["results"] == {"VERIFIED_WITHIN_SCOPE": 3}
+    assert flynns["knowledge_status"] == "ready"
+    assert ["https://www.flynns.com/slow"] in batches.calls, "unfinished page re-run alone"
+    assert sorted(ns for _, ns in knowledge.calls) == [
+        f"rankuno-dev.{project_id}.flynn-s",
+        f"rankuno-dev.{project_id}.xerox",
+    ], "each website indexed into its own knowledge space"
 
-    files = client.get(f"/api/projects/{project_id}/runs/{run_id}/downloads").json()
-    names = [f["name"] for f in files]
+    run_id = flynns["run_id"]
+    folder = store.run_dir(project_id, "flynn-s", run_id)
+    assert folder.parent.parent.name == "flynn-s", "the run lives in its website's folder"
+    base = f"/api/projects/{project_id}/sites/flynn-s/runs/{run_id}"
+    names = [f["name"] for f in client.get(f"{base}/downloads").json()]
     assert f"{run_id}_project_report.xlsx" in names
-    one = client.get(f"/api/projects/{project_id}/runs/{run_id}/downloads/{names[0]}")
-    assert one.status_code == 200 and "attachment" in one.headers["content-disposition"]
-    assert (
-        client.get(
-            f"/api/projects/{project_id}/runs/{run_id}/downloads/..%2Fstate.json"
-        ).status_code
-        == 404
-    )
-    bundle = client.get(f"/api/projects/{project_id}/runs/{run_id}/downloads.zip")
-    assert bundle.status_code == 200
+    assert client.get(f"{base}/downloads/{names[0]}").status_code == 200
+    assert client.get(f"{base}/downloads/..%2Fstate.json").status_code == 404
+    bundle = client.get(f"{base}/downloads.zip")
     assert sorted(zipfile.ZipFile(io.BytesIO(bundle.content)).namelist()) == sorted(names)
+    xerox_urls = client.get(f"/api/projects/{project_id}/sites/xerox/urls").json()
+    assert [u["url"] for u in xerox_urls["items"]] == ["https://www.xerox.com/security"]
 
-    removed = _post(client, f"/api/projects/{project_id}/urls/remove", {"all": True}, token)
-    assert removed.json() == {"removed": 3, "url_count": 0}
-    empty = _post(client, f"/api/projects/{project_id}/runs", {}, token)
-    assert empty.status_code == 409 and "Add at least one URL" in empty.json()["detail"]
+    again = _post(client, f"/api/projects/{project_id}/sites/xerox/runs", {}, token)
+    assert again.status_code == 200
+    assert runner.wait_idle(20)
+    removed = _post(
+        client, f"/api/projects/{project_id}/sites/xerox/urls/remove", {"all": True}, token
+    )
+    assert removed.json() == {"removed": 1, "url_count": 0}
+    empty = _post(client, f"/api/projects/{project_id}/sites/xerox/runs", {}, token)
+    assert empty.status_code == 409 and "Add at least one URL to Xerox" in empty.json()["detail"]
+
+
+def test_a_failed_knowledge_step_keeps_the_reports(tmp_path: Path):
+    store = ProjectStore(tmp_path)
+    project = _flynns(store)
+    store.add_urls(project.project_id, "xerox", ["https://www.xerox.com/1"])
+    runner = ScrapeRunner(
+        store, command=FakeBatches(), report=_fake_report, knowledge=FakeKnowledge(fail=True)
+    )
+    runner.start()
+    state = runner.submit(project.project_id, "xerox", started_by="G")
+    assert runner.wait_idle(20)
+    final = store.run(project.project_id, "xerox", state.run_id)
+    assert final.status == "finished" and final.reports_ready
+    assert final.knowledge_status == "failed" and "no model" in final.knowledge_message
 
 
 def test_cancel_and_delete_need_the_owner(app_env):
-    client, store, runner, batches = app_env
+    client, store, runner, batches, _ = app_env
     project_id, token = _create(client)
+    site_urls = f"/api/projects/{project_id}/sites/flynn-s/urls"
     _post(
         client,
-        f"/api/projects/{project_id}/urls",
-        {"text": "https://example.com/1\nhttps://example.com/2\nhttps://example.com/3"},
+        site_urls,
+        {"text": "https://flynns.com/1\nhttps://flynns.com/2\nhttps://flynns.com/3"},
         token,
     )
     batches.gate = threading.Event()
-    run_id = _post(client, f"/api/projects/{project_id}/runs", {}, token).json()["run_id"]
-    again = _post(client, f"/api/projects/{project_id}/runs", {}, token)
-    assert again.status_code == 409, "one run of a project at a time"
-    assert _post(client, f"/api/projects/{project_id}/runs/{run_id}/cancel", {}).status_code == 401
-    assert (
-        _post(client, f"/api/projects/{project_id}/runs/{run_id}/cancel", {}, token).status_code
-        == 200
-    )
+    run = _post(client, f"/api/projects/{project_id}/sites/flynn-s/runs", {}, token).json()
+    again = _post(client, f"/api/projects/{project_id}/sites/flynn-s/runs", {}, token)
+    assert again.status_code == 409, "one run of a website at a time"
+    cancel = f"/api/projects/{project_id}/sites/flynn-s/runs/{run['run_id']}/cancel"
+    assert _post(client, cancel, {}).status_code == 401
+    assert _post(client, cancel, {}, token).status_code == 200
     batches.gate.set()
     assert runner.wait_idle(20)
-    assert store.run(project_id, run_id).status == "cancelled"
+    assert store.run(project_id, "flynn-s", run["run_id"]).status == "cancelled"
     assert len(batches.calls) == 1, "no batch starts after a cancel"
 
-    assert (
-        _post(client, f"/api/projects/{project_id}/delete", {"password": PASSWORD}).status_code
-        == 401
-    )
-    wrong = _post(client, f"/api/projects/{project_id}/delete", {"password": "nope nope"}, token)
-    assert wrong.status_code == 401
-    done = _post(client, f"/api/projects/{project_id}/delete", {"password": PASSWORD}, token)
-    assert done.status_code == 200 and client.get("/api/projects").json() == []
-    assert client.get(f"/api/projects/{project_id}").status_code == 404
+    delete = f"/api/projects/{project_id}/delete"
+    assert _post(client, delete, {"password": PASSWORD}).status_code == 401
+    assert _post(client, delete, {"password": "nope nope"}, token).status_code == 401
+    assert _post(client, delete, {"password": PASSWORD}, token).status_code == 200
+    assert client.get("/api/projects").json() == []
 
 
 def test_a_run_left_running_resumes_after_a_restart(tmp_path: Path):
     store = ProjectStore(tmp_path)
     batches = FakeBatches()
-    project = store.create(name="Resume", owner_name="G", client_name="C", password=PASSWORD)
-    store.add_urls(project.project_id, ["https://example.com/1", "https://example.com/2"])
-    first = ScrapeRunner(store, command=batches, report=_fake_report, batch_size=1)
-    state = first.submit(project.project_id, started_by="G")  # queued, never worked
-    store.save_run(state.model_copy(update={"status": "running"}))  # as if the app died mid-run
-    # batch 1 already finished before the crash: it must not run again
-    folder = store.run_dir(project.project_id, state.run_id)
+    project = _flynns(store)
+    pid = project.project_id
+    store.add_urls(pid, "flynn-s", ["https://flynns.com/1", "https://flynns.com/2"])
+    first = ScrapeRunner(
+        store, command=batches, report=_fake_report, knowledge=FakeKnowledge(), batch_size=1
+    )
+    state = first.submit(pid, "flynn-s", started_by="G")  # queued, never worked
+    store.save_run(state.model_copy(update={"status": "running"}))  # the app died mid-run
+    folder = store.run_dir(pid, "flynn-s", state.run_id)
     (folder / "b1_a1.records.jsonl").write_text(
-        json.dumps({"requested_url": "https://example.com/1", "badge": "VERIFIED_WITHIN_SCOPE"})
+        json.dumps({"requested_url": "https://flynns.com/1", "badge": "VERIFIED_WITHIN_SCOPE"})
         + "\n",
         encoding="utf-8",
     )
-    second = ScrapeRunner(store, command=batches, report=_fake_report, batch_size=1)
+    second = ScrapeRunner(
+        store, command=batches, report=_fake_report, knowledge=FakeKnowledge(), batch_size=1
+    )
     second.start()
     assert second.wait_idle(20)
-    assert store.run(project.project_id, state.run_id).status == "finished"
-    assert batches.calls == [["https://example.com/2"]]
+    assert store.run(pid, "flynn-s", state.run_id).status == "finished"
+    assert batches.calls == [["https://flynns.com/2"]]
 
 
 def test_a_run_whose_batches_all_crash_says_so_plainly(tmp_path: Path):
     store = ProjectStore(tmp_path)
-    project = store.create(name="Crash", owner_name="G", client_name="C", password=PASSWORD)
-    store.add_urls(project.project_id, ["https://example.com/1"])
+    project = _flynns(store)
+    store.add_urls(project.project_id, "flynn-s", ["https://flynns.com/1"])
 
     def crashing(scope: Path, out: Path, cancel: threading.Event) -> int:
         out.with_suffix(".log").write_text("Traceback: boom", encoding="utf-8")
         return 1
 
-    runner = ScrapeRunner(store, command=crashing, report=_fake_report, attempts=2)
+    runner = ScrapeRunner(
+        store, command=crashing, report=_fake_report, knowledge=FakeKnowledge(), attempts=2
+    )
     runner.start()
-    state = runner.submit(project.project_id, started_by="G")
+    state = runner.submit(project.project_id, "flynn-s", started_by="G")
     assert runner.wait_idle(20)
-    final = store.run(project.project_id, state.run_id)
+    final = store.run(project.project_id, "flynn-s", state.run_id)
     assert final.status == "failed" and not final.reports_ready
     assert "No page could be scraped" in final.message and "b1_a2.log" in final.message
+
+
+# -- the bot: one search over several websites, each in its own store ---------------
+
+
+def _space_store(root: Path, namespace: str, passages: dict[str, str]) -> None:
+    from src.modules.content_processor.knowledge.embedders import HashingEmbedder
+    from src.modules.content_processor.knowledge.indexing import embed_hash
+    from src.modules.content_processor.knowledge.vector_store import ChunkRow, SqliteVectorStore
+
+    embedder = HashingEmbedder()
+    store = SqliteVectorStore(root / namespace / "vectors.sqlite")
+    vectors = embedder.embed(list(passages.values())) or []
+    store.upsert_chunks(
+        [
+            ChunkRow(
+                chunk_id=f"{namespace}-{n}",
+                run_id="r",
+                url=url,
+                page_key=f"pg-{n}",
+                order=0,
+                kind="text",
+                heading_path=["Security"],
+                context_header=url,
+                verbatim_text=text,
+                embed_text=text,
+                embed_hash=embed_hash(text),
+                block_ids=["b1"],
+                evidence_ids=["evidence:1"],
+                embedding=vector,
+            )
+            for n, ((url, text), vector) in enumerate(zip(passages.items(), vectors, strict=True))
+        ]
+    )
+    store.set_meta({"model": embedder.model, "dims": str(len(vectors[0]))})
+    store.close()
+
+
+def test_the_bot_searches_several_websites_and_says_where_each_passage_came_from(
+    app_env, tmp_path: Path
+):
+    from src.modules.content_processor.knowledge.embedders import HashingEmbedder
+    from src.modules.content_processor.knowledge.vector_store import SqliteVectorStore
+    from src.modules.content_processor.webapi.projects_api import KnowledgeAccess
+
+    client, store, runner, _, _ = app_env
+    project_id, _token = _create(client)
+    root = tmp_path / "knowledge"
+    flynns_ns = runner.namespace(project_id, "flynn-s")
+    xerox_ns = runner.namespace(project_id, "xerox")
+    _space_store(
+        root,
+        flynns_ns,
+        {
+            "https://www.flynns.com/secure-print": (
+                "Secure print release keeps documents in the tray until the owner signs in."
+            ),
+            "https://www.flynns.com/lease": "Lease a Xerox printer with managed print services.",
+        },
+    )
+    _space_store(
+        root,
+        xerox_ns,
+        {
+            "https://www.xerox.com/security": (
+                "Xerox secure print release and encrypted hard drives protect documents."
+            )
+        },
+    )
+    access = KnowledgeAccess(
+        open_store=lambda space: SqliteVectorStore(root / space.namespace / "vectors.sqlite"),
+        embedder_for=lambda model: HashingEmbedder(),
+    )
+    exports = tmp_path / "exports2"
+    exports.mkdir()
+    signer = TokenSigner.from_file(tmp_path / "secret2.key")
+    bot = TestClient(
+        create_app(exports, projects=(store, runner, signer), knowledge=access),
+        base_url="http://127.0.0.1",
+    )
+
+    spaces = {s["site_name"]: s for s in bot.get("/api/knowledge/spaces").json()}
+    assert spaces["Xerox"]["ready"] and spaces["Xerox"]["role"] == "competitor"
+    assert spaces["Flynn's"]["namespace"] == flynns_ns
+
+    both = bot.get(
+        "/api/knowledge/search", params={"q": "secure print release", "project": project_id}
+    ).json()
+    assert {h["site_name"] for h in both["hits"]} == {"Flynn's", "Xerox"}
+    assert sorted(both["searched"]) == sorted([flynns_ns, xerox_ns])
+    first = both["hits"][0]
+    assert first["project_name"] == "Print security" and first["url"].startswith("https://www.")
+    assert first["evidence_ids"] == ["evidence:1"]
+
+    only_xerox = bot.get(
+        "/api/knowledge/search", params={"q": "secure print", "space": xerox_ns}
+    ).json()
+    assert {h["site_name"] for h in only_xerox["hits"]} == {"Xerox"}, "the scope is respected"
+
+    side_by_side = bot.get(
+        "/api/knowledge/search",
+        params={"q": "secure print release", "project": project_id, "per_site": 1},
+    ).json()
+    assert sorted(h["site_name"] for h in side_by_side["hits"]) == ["Flynn's", "Xerox"]
+
+    other_id, _ = _create(client)  # a second project: never indexed
+    across = bot.get(
+        "/api/knowledge/search",
+        params={"q": "secure print", "project": [project_id, other_id]},
+    ).json()
+    skipped = {s["space"]: s["reason"] for s in across["skipped"]}
+    assert skipped[runner.namespace(other_id, "xerox")].startswith("not indexed yet")
+    assert {h["project_id"] for h in across["hits"]} == {project_id}
+    assert bot.get("/api/knowledge/search", params={"q": "x y", "space": "nope"}).status_code == 404

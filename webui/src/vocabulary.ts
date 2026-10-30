@@ -1367,6 +1367,50 @@ export const PROJECTS = {
   deleted: 'Project deleted',
   saved: 'Saved',
   backToProjects: 'All projects',
+  sites: {
+    title: 'Websites',
+    client: 'Client',
+    competitor: 'Competitor',
+    count: (n: number) => `${n} ${n === 1 ? 'website' : 'websites'}`,
+    clientWebsite: "Client's website",
+    clientWebsitePlaceholder: 'For example: flynns.com',
+    competitors: 'Competitors',
+    competitorsHelp:
+      'Optional. Each competitor gets its own address list, scrapes, reports and knowledge, stored separately.',
+    addCompetitor: 'Add a competitor',
+    competitorName: 'Competitor name',
+    competitorWebsite: 'Website',
+    remove: 'Remove website',
+    removeConfirm:
+      'Remove this competitor with its address list, scrapes and reports? This cannot be undone.',
+    addTitle: 'Add a competitor',
+    noDomain: 'Website address not set yet: it is learned from the first addresses added.',
+  },
+  anySite: {
+    button: 'Add a list for all websites',
+    title: 'One list for all websites',
+    text: 'Paste or import addresses of several websites at once. Each address goes to the website of its domain.',
+    result: (r: { site_name: string; added: number }) => `${r.site_name}: ${r.added.toLocaleString()} added`,
+    unknown: (domain: string, n: number) =>
+      `${domain}: ${n.toLocaleString()} ${n === 1 ? 'address' : 'addresses'} not added. This website is not in the project; add it as a competitor first.`,
+  },
+  startAll: 'Scrape all websites',
+  startAllHelp: 'Starts a scrape for every website that has addresses. Each website is scraped and stored on its own.',
+  knowledge: {
+    building: 'Preparing for search',
+    ready: 'Searchable',
+    failed: 'Not searchable',
+  } as Record<string, string>,
+  ask: {
+    tab: 'Search all websites',
+    placeholder: 'For example: secure print release',
+    websites: 'Search in',
+    sideBySide: 'Best passage of each website, side by side',
+    empty: 'Nothing found for these words in the chosen websites.',
+    notReady: 'Scrape the websites first: they become searchable when a scrape finishes.',
+    skipped: (site: string, reason: string) => `${site} was not searched: ${reason}`,
+    from: 'From',
+  },
   about: 'What it is',
   /** What each report file is, matched on the end of its name; the first match wins. */
   reportKinds: [

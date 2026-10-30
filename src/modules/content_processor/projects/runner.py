@@ -1,12 +1,17 @@
 """Scraping runs for projects: a queue worked by one background thread.
 
-A run takes the project's URLs at the moment it starts and works them in batches
+A run belongs to one website of a project and takes that website's URLs at the
+moment it starts and works them in batches
 (`BATCH_SIZE`). Each batch is one `cli dryrun` in its own process, so a browser
 crash cannot take the app down. A batch that leaves pages unfinished is run again
 for those pages only, up to `ATTEMPTS` times. The URL history is used as in every
 run: pages already captured and unchanged are reused. When all batches are done,
 the batch records are merged into `<run id>.records.jsonl` and the report bundle
 is written to the run's `reports/` folder.
+
+Then the website's knowledge space is built (`stamp`, `catalog`, `index` into the
+namespace `<tenant>.<project>.<site>`), so the bot can search it on its own or
+together with other websites. A failed knowledge step does not fail the run.
 
 Runs survive a restart of the app: a queued or interrupted run is picked up again,
 and batch attempts that already finished are not repeated.
@@ -27,8 +32,9 @@ from urllib.parse import urlsplit
 
 from src.core.config import REPO_ROOT
 from src.core.logger import get_logger
+from src.modules.content_processor.knowledge.federated import space_namespace
 from src.modules.content_processor.projects.models import RUN_ACTIVE, ProjectRecord, RunState
-from src.modules.content_processor.projects.store import ProjectStore, slug
+from src.modules.content_processor.projects.store import ProjectStore
 
 __all__ = [
     "ATTEMPTS",
@@ -52,6 +58,8 @@ DEFAULT_TENANT = "rankuno-dev"
 
 # One batch: (scope file, output json, cancel flag) -> process exit code.
 BatchCommand = Callable[[Path, Path, threading.Event], int]
+# Knowledge step: (merged records file, namespace) -> (built?, plain message).
+KnowledgeStep = Callable[[Path, str], tuple[bool, str]]
 
 
 def _site(url: str) -> str:
@@ -138,17 +146,23 @@ class ScrapeRunner:
         tenant_id: str = DEFAULT_TENANT,
         command: BatchCommand = subprocess_command,
         report: Callable[[Path, Path], int] | None = None,
+        knowledge: KnowledgeStep | None = None,
         batch_size: int = BATCH_SIZE,
         attempts: int = ATTEMPTS,
     ) -> None:
-        """Bind to a store; `command` runs one batch, `report` writes the bundle."""
+        """Bind to a store; `command` runs one batch, `report` writes the bundle.
+
+        `knowledge` builds a website's knowledge space after its reports; pass a
+        no-op to switch that off.
+        """
         self._store = store
         self._tenant = tenant_id
         self._command = command
         self._report = report or _report_subprocess
+        self._knowledge = knowledge or _knowledge_subprocess
         self._batch_size = batch_size
         self._attempts = attempts
-        self._queue: queue.Queue[tuple[str, str]] = queue.Queue()
+        self._queue: queue.Queue[tuple[str, str, str]] = queue.Queue()
         self._cancel: dict[str, threading.Event] = {}
         self._thread: threading.Thread | None = None
         self._lock = threading.Lock()
@@ -173,22 +187,32 @@ class ScrapeRunner:
 
     def _enqueue(self, state: RunState) -> None:
         self._cancel[state.run_id] = threading.Event()
-        self._queue.put((state.project_id, state.run_id))
+        self._queue.put((state.project_id, state.site_id, state.run_id))
 
-    def submit(self, project_id: str, *, started_by: str) -> RunState:
-        """Queue a run over the project's current URLs."""
-        project = self._store.get(project_id)
-        urls = [u.url for u in self._store.urls(project_id)]
+    def namespace(self, project_id: str, site_id: str) -> str:
+        """The knowledge namespace of one website of one project."""
+        return space_namespace(self._tenant, project_id, site_id)
+
+    def submit(self, project_id: str, site_id: str, *, started_by: str) -> RunState:
+        """Queue a run over one website's current URLs."""
+        site = self._store.site(project_id, site_id)
+        urls = [u.url for u in self._store.urls(project_id, site_id)]
         if not urls:
-            raise ValueError("Add at least one URL before starting.")
-        if any(r.status in RUN_ACTIVE for r in self._store.runs(project_id)):
-            raise ValueError("A run of this project is already queued or running.")
+            raise ValueError(f"Add at least one URL to {site.name} before starting.")
+        if any(r.status in RUN_ACTIVE for r in self._store.runs(project_id, site_id)):
+            raise ValueError(f"A scrape of {site.name} is already queued or running.")
         now = datetime.now(UTC)
-        run_id = f"{slug(project.name, limit=20)}_{now:%Y%m%d-%H%M%S}"
+        run_id = f"{site_id}_{now:%Y%m%d-%H%M%S}"
+        # Two scrapes of one website started within the same second get distinct names.
+        suffix = 1
+        while self._store.run_dir(project_id, site_id, run_id).exists():
+            suffix += 1
+            run_id = f"{site_id}_{now:%Y%m%d-%H%M%S}-{suffix}"
         batches = (len(urls) + self._batch_size - 1) // self._batch_size
         state = RunState(
             run_id=run_id,
             project_id=project_id,
+            site_id=site_id,
             created_at=now,
             started_by=started_by,
             url_count=len(urls),
@@ -196,16 +220,28 @@ class ScrapeRunner:
             batches_total=batches,
             message="Waiting for its turn." if not self._queue.empty() else "Starting.",
         )
-        folder = self._store.run_dir(project_id, run_id)
+        folder = self._store.run_dir(project_id, site_id, run_id)
         folder.mkdir(parents=True, exist_ok=False)
         (folder / "urls.json").write_text(json.dumps(urls), encoding="utf-8")
         self._store.save_run(state)
         self._enqueue(state)
         return state
 
-    def cancel(self, project_id: str, run_id: str) -> RunState:
+    def submit_all(self, project_id: str, *, started_by: str) -> list[RunState]:
+        """Queue a run for every website that has URLs and is not being scraped already."""
+        started: list[RunState] = []
+        for site in self._store.sites(project_id):
+            busy = any(r.status in RUN_ACTIVE for r in self._store.runs(project_id, site.site_id))
+            if busy or not self._store.urls(project_id, site.site_id):
+                continue
+            started.append(self.submit(project_id, site.site_id, started_by=started_by))
+        if not started:
+            raise ValueError("No website has URLs waiting to be scraped.")
+        return started
+
+    def cancel(self, project_id: str, site_id: str, run_id: str) -> RunState:
         """Stop a queued or running run; finished batches are kept."""
-        state = self._store.run(project_id, run_id)
+        state = self._store.run(project_id, site_id, run_id)
         if state.status not in RUN_ACTIVE:
             return state
         event = self._cancel.get(run_id)
@@ -235,13 +271,13 @@ class ScrapeRunner:
 
     def _work(self) -> None:
         while True:
-            project_id, run_id = self._queue.get()
+            project_id, site_id, run_id = self._queue.get()
             try:
-                self._execute(project_id, run_id)
+                self._execute(project_id, site_id, run_id)
             except Exception as exc:  # noqa: BLE001 - one failed run must not stop the queue
                 _logger.exception("project_run_failed", extra={"run_id": run_id})
                 try:
-                    state = self._store.run(project_id, run_id)
+                    state = self._store.run(project_id, site_id, run_id)
                     self._store.save_run(
                         state.model_copy(
                             update={
@@ -258,13 +294,13 @@ class ScrapeRunner:
 
     # -- one run --------------------------------------------------------------
 
-    def _execute(self, project_id: str, run_id: str) -> None:
-        state = self._store.run(project_id, run_id)
+    def _execute(self, project_id: str, site_id: str, run_id: str) -> None:
+        state = self._store.run(project_id, site_id, run_id)
         if state.status != "queued":
             return
         cancel = self._cancel.setdefault(run_id, threading.Event())
         project = self._store.get(project_id)
-        folder = self._store.run_dir(project_id, run_id)
+        folder = self._store.run_dir(project_id, site_id, run_id)
         urls: list[str] = json.loads((folder / "urls.json").read_text(encoding="utf-8"))
         batches = [urls[i : i + state.batch_size] for i in range(0, len(urls), state.batch_size)]
         state = state.model_copy(
@@ -330,11 +366,25 @@ class ScrapeRunner:
         self._store.save_run(state)
         code = self._report(merged, folder / "reports")
         ready = code == 0 and any((folder / "reports").glob("*"))
-        self._finish(
-            state.model_copy(update={"reports_ready": ready, "current_batch": None}),
-            "finished" if ready else "failed",
-            "Done." if ready else "Scraping finished but the reports could not be written.",
+        state = state.model_copy(update={"reports_ready": ready, "current_batch": None})
+        if not ready:
+            self._finish(state, "failed", "Scraping finished but the reports could not be written.")
+            return
+        state = state.model_copy(
+            update={
+                "message": "Building the knowledge space for the bot.",
+                "knowledge_status": "building",
+            }
         )
+        self._store.save_run(state)
+        try:
+            built, note = self._knowledge(merged, self.namespace(project_id, site_id))
+        except Exception as exc:  # noqa: BLE001 - the reports stand even if this step breaks
+            built, note = False, f"stopped on an error: {str(exc)[:200]}"
+        state = state.model_copy(
+            update={"knowledge_status": "ready" if built else "failed", "knowledge_message": note}
+        )
+        self._finish(state, "finished", "Done.")
 
     def _finish(self, state: RunState, status: str, message: str) -> None:
         self._store.save_run(
@@ -401,6 +451,32 @@ class ScrapeRunner:
         lines = [json.dumps(r, ensure_ascii=False) for r in [*supplied.values(), *found.values()]]
         path.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
         return path
+
+
+def _cli(*args: str) -> subprocess.CompletedProcess[bytes]:
+    return subprocess.run(  # noqa: S603 - fixed argv, no shell
+        [sys.executable, "-m", "src.modules.content_processor.cli", *args],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        check=False,
+    )
+
+
+def _knowledge_subprocess(records: Path, namespace: str) -> tuple[bool, str]:
+    """Stamp and chunk the pages, build the offering catalog, index into the namespace."""
+    run_name = records.name.removesuffix(".records.jsonl")
+    folder = records.parent
+    steps = [
+        ("stamp", ["stamp", "--records", str(records), "--tenant", DEFAULT_TENANT]),
+        ("catalog", ["catalog", "--stamps", str(folder / f"{run_name}.stamps.jsonl")]),
+        ("index", ["index", "--run", run_name, "--dir", str(folder), "--tenant", namespace]),
+    ]
+    for name, argv in steps:
+        done = _cli(*argv)
+        if done.returncode != 0:
+            tail = done.stderr.decode("utf-8", "replace").strip().splitlines()[-1:] or [""]
+            return False, f"the {name} step failed: {tail[0][:200]}"
+    return True, f"searchable by the bot (knowledge space {namespace})"
 
 
 def _report_subprocess(records: Path, out_dir: Path) -> int:
