@@ -13,6 +13,10 @@ from pathlib import Path
 
 import uvicorn
 
+from src.core.config import get_settings
+from src.modules.content_processor.projects.runner import ScrapeRunner
+from src.modules.content_processor.projects.security import TokenSigner
+from src.modules.content_processor.projects.store import ProjectStore
 from src.modules.content_processor.webapi.app import create_app
 
 __all__ = ["main", "parse_args"]
@@ -33,6 +37,14 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--static", default=None, help="built web app folder, usually webui/dist (optional)"
     )
+    parser.add_argument(
+        "--app-data",
+        default=None,
+        help="projects folder for the Content Scraper module (default: CP_APP_DATA_ROOT)",
+    )
+    parser.add_argument(
+        "--no-projects", action="store_true", help="serve run results only, without projects"
+    )
     return parser.parse_args(argv)
 
 
@@ -47,7 +59,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     if static is not None and not (static / "index.html").is_file():
         sys.stderr.write(f"--static {static} has no index.html; run `npm run build` in webui/\n")
         return 2
-    app = create_app(exports, static_dir=static)
+    projects = None
+    if not args.no_projects:
+        data = Path(args.app_data) if args.app_data else get_settings().cp_app_data_root
+        store = ProjectStore(data)
+        runner = ScrapeRunner(store)
+        runner.start()
+        projects = (store, runner, TokenSigner.from_file(data / "secret.key"))
+    app = create_app(exports, static_dir=static, projects=projects)
     sys.stdout.write(f"Serving {exports} at http://{HOST}:{args.port}/\n")
     uvicorn.run(app, host=HOST, port=args.port, log_level="warning")
     return 0

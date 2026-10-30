@@ -21,6 +21,7 @@ htmlcov/
 logs/
 evidence/
 url_history/
+app_data/
 exports/
 outputs/
 scratch/

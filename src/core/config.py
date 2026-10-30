@@ -100,6 +100,8 @@ class Settings(BaseSettings):
     # Latest capture of every URL from every run (recrawl/history.py). Keep it next to
     # the evidence root: reused content cites evidence stored there.
     cp_url_history_root: Path = REPO_ROOT / "url_history"
+    # App module 1: projects, their URL lists, runs and reports (never committed).
+    cp_app_data_root: Path = REPO_ROOT / "app_data"
 
     # -- Content processor: Bright Data (T4 proxies / T5 unlocker) ---------
     # Caps are enforced in code before any request leaves (playbook §10, layer 2).

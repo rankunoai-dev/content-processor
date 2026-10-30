@@ -32,6 +32,9 @@ from src.modules.content_processor.export.decisions import (
     append_decision,
     decisions_path,
 )
+from src.modules.content_processor.projects.runner import ScrapeRunner
+from src.modules.content_processor.projects.security import TokenSigner
+from src.modules.content_processor.projects.store import ProjectStore
 from src.modules.content_processor.webapi import reports
 from src.modules.content_processor.webapi.models import (
     ContradictionsResponse,
@@ -47,6 +50,7 @@ from src.modules.content_processor.webapi.models import (
     ReviewResponse,
     RunsResponse,
 )
+from src.modules.content_processor.webapi.projects_api import register_project_routes
 from src.modules.content_processor.webapi.store import (
     PageQuery,
     RunData,
@@ -60,6 +64,7 @@ __all__ = ["DEFAULT_ALLOWED_HOSTS", "WRITE_HEADER", "WRITE_HEADER_VALUE", "creat
 WRITE_HEADER = "X-Requested-With"
 WRITE_HEADER_VALUE = "content-processor"
 _DECISIONS_PATH = re.compile(r"^/api/runs/[^/]+/decisions$")
+_PROJECT_WRITE_PATH = re.compile(r"^/api/projects(/[^/]+(/[a-z]+(/[^/]+)?(/cancel)?)?)?$")
 
 DEFAULT_ALLOWED_HOSTS: tuple[str, ...] = ("127.0.0.1", "localhost")
 _CSP = (
@@ -88,8 +93,13 @@ def create_app(
     *,
     static_dir: Path | None = None,
     allowed_hosts: Sequence[str] = DEFAULT_ALLOWED_HOSTS,
+    projects: tuple[ProjectStore, ScrapeRunner, TokenSigner] | None = None,
 ) -> FastAPI:
-    """Build the app for one exports folder (and, optionally, the built web app)."""
+    """Build the app for one exports folder (and, optionally, the built web app).
+
+    With `projects` (store, runner, token signer) the app also serves App module 1:
+    projects, their URL inventory, scraping runs and their reports.
+    """
     store = RunStore(exports_dir)
     app = FastAPI(
         title="Content processor analyst API",
@@ -255,6 +265,10 @@ def create_app(
             download_name = bundle_file_name(run, file_name)
         return FileResponse(path, filename=download_name, content_disposition_type="attachment")
 
+    if projects is not None:
+        project_store, runner, signer = projects
+        register_project_routes(app, store=project_store, runner=runner, signer=signer)
+
     @app.get("/api/{rest:path}")
     def api_not_found(rest: str) -> JSONResponse:
         return JSONResponse({"detail": "Unknown API address."}, status_code=404)
@@ -295,16 +309,24 @@ def _mount_web_app(app: FastAPI, static_dir: Path | None) -> None:
 
 
 def _write_refusal(request: Request, allowed_hosts: Sequence[str]) -> JSONResponse | None:
-    """None when this non-GET request is an acceptable decision save, else the refusal."""
-    if request.method != "POST" or not _DECISIONS_PATH.match(request.url.path):
+    """None when this non-GET request is an acceptable write, else the refusal.
+
+    Two kinds of write exist: a reviewer decision, and the project changes of App
+    module 1 (which also need the project's unlock token, checked by the route).
+    Both must come from this app (the header), as JSON, from a local page.
+    """
+    path = request.url.path
+    if request.method != "POST" or not (
+        _DECISIONS_PATH.match(path) or _PROJECT_WRITE_PATH.match(path)
+    ):
         return JSONResponse({"detail": "This server is read-only."}, status_code=405)
     if request.headers.get(WRITE_HEADER) != WRITE_HEADER_VALUE:
         return JSONResponse(
-            {"detail": "Decisions can only be saved from the web app."}, status_code=403
+            {"detail": "Changes can only be made from the web app."}, status_code=403
         )
     if not request.headers.get("content-type", "").startswith("application/json"):
-        return JSONResponse({"detail": "Decisions must be sent as JSON."}, status_code=415)
+        return JSONResponse({"detail": "Changes must be sent as JSON."}, status_code=415)
     origin = request.headers.get("origin")
     if origin and urlsplit(origin).hostname not in set(allowed_hosts):
-        return JSONResponse({"detail": "Decisions can only be saved locally."}, status_code=403)
+        return JSONResponse({"detail": "Changes can only be made locally."}, status_code=403)
     return None
