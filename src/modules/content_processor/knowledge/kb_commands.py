@@ -66,8 +66,20 @@ def _endpoint(args: argparse.Namespace) -> str:
 
 
 def _fail(message: str) -> int:
-    sys.stderr.write(message.rstrip() + "\n")
+    try:
+        sys.stderr.write(message.rstrip() + "\n")
+    except UnicodeEncodeError:
+        if hasattr(sys.stderr, "reconfigure"):
+            sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+            sys.stderr.write(message.rstrip() + "\n")
     return 2
+
+
+def _safe_write_stdout(text: str) -> None:
+    try:
+        sys.stdout.write(text)
+    except UnicodeEncodeError:
+        sys.stdout.buffer.write(text.encode("utf-8", errors="replace"))
 
 
 def cmd_kb_check(args: argparse.Namespace) -> int:
@@ -99,7 +111,7 @@ def cmd_kb_check(args: argparse.Namespace) -> int:
             "answers": "local model" if server.has(settings.cp_chat_model) else "extractive quotes",
         },
     }
-    sys.stdout.write(json.dumps(report, indent=2) + "\n")
+    _safe_write_stdout(json.dumps(report, indent=2) + "\n")
     return 0
 
 
@@ -185,7 +197,7 @@ def cmd_index(args: argparse.Namespace) -> int:
         "store_counts": counts,
         "files": files,
     }
-    sys.stdout.write(json.dumps(summary, indent=2, ensure_ascii=False) + "\n")
+    _safe_write_stdout(json.dumps(summary, indent=2, ensure_ascii=False) + "\n")
     return 0
 
 
@@ -234,9 +246,9 @@ def cmd_search(args: argparse.Namespace) -> int:
             }
             for n, h in enumerate(hits, start=1)
         ]
-        sys.stdout.write(json.dumps(payload, indent=2, ensure_ascii=False) + "\n")
+        _safe_write_stdout(json.dumps(payload, indent=2, ensure_ascii=False) + "\n")
     else:
-        sys.stdout.write(render_hits(args.query, hits))
+        _safe_write_stdout(render_hits(args.query, hits))
     return 0
 
 
@@ -271,9 +283,9 @@ def cmd_ask(args: argparse.Namespace) -> int:
         if chat is not None:
             chat.close()
     if args.json:
-        sys.stdout.write(json.dumps(answer.as_dict(), indent=2, ensure_ascii=False) + "\n")
+        _safe_write_stdout(json.dumps(answer.as_dict(), indent=2, ensure_ascii=False) + "\n")
     else:
-        sys.stdout.write(render_answer(answer))
+        _safe_write_stdout(render_answer(answer))
     return 0
 
 
