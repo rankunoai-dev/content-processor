@@ -1,6 +1,6 @@
 # Content Processor: A Plain-Language Guide
 
-Last updated: 30 October 2026 · Code version: main after the Content Scraper app (Module 1: projects, URL import, scraping from the browser, report downloads) · Maintained by every session that adds a significant feature (see "Keeping this guide current" at the end)
+Last updated: 30 October 2026 · Code version: main after the searchable knowledge base (vector store, section labels, search and checked answers) · Maintained by every session that adds a significant feature (see "Keeping this guide current" at the end)
 
 ## 1. What this is, in one paragraph
 
@@ -250,6 +250,22 @@ A fourth command ("structure") rewrites every page as a clean outline in the ord
 
 On the John Hancock run (303 pages, about a minute, $0): 7,455 paragraphs, 551 sections, 756 cards, 255 accordion items in 33 question-and-answer blocks, 244 tables and 760 images; 89% of the outline's text is matched to extracted text; 268 pages are articles (news releases) and 33 are help-centre question pages, so this run reads as a publisher site.
 
+### Step 15: The searchable knowledge base (search and questions with proof)
+
+Four commands turn a run's page sections into a knowledge base you can search and question, with every answer traced back to the stored page.
+
+**Checking what is ready ("kb-check").** It says whether the local AI model server (Ollama) is running with its models, whether the Postgres database with its vector add-on (pgvector) is reachable, and what the next steps will therefore use. Nothing is ever sent to an outside AI service: only a model server on this machine or the company's private network is accepted, and the cost stays $0.
+
+**Filling the knowledge base ("index").** Every section of every page is turned into a list of numbers that captures its meaning (a "vector"), using the free bge-m3 model on Ollama. Sections whose text has not changed since the last time keep their vectors, so a re-run only works on new or changed sections. Each section is stored with its exact text, its headings, the page it came from and the proof (evidence) behind it. The knowledge base lives in Postgres when that is set up, and otherwise in a single local file that needs nothing installed. If the AI model server is not running yet, a simple word-matching stand-in is used so everything still works; the knowledge base remembers which was used and asks for a rebuild when the real model arrives, because the two cannot be mixed.
+
+**Labelling sections (only when two signals agree).** Each section is labelled with what it does (a claim, a feature, pricing, proof such as ratings or awards, a question and answer, a call to act, or a legal disclaimer) and with the product or service it is about. A label is accepted only when at least two independent signals agree: where the text sits on the page (its heading, an accordion, a form, the page's own buttons and structured data), what the words say (prices, questions, ratings, legal wording), how close its meaning is to each offering, and, when available, a local AI model. One signal alone is not enough; signals that disagree send the section to a person instead of guessing. The workbook `<run>_chunk_labels.xlsx` lists every section with its labels and the signals behind them, and a "Needs review" sheet.
+
+**Searching ("search").** A search looks two ways at once: by meaning (sections that say the same thing in other words) and by exact words (form numbers, fund codes, product names), and puts first the sections both searches found. Each result shows its headings, its full text, the page address, and the evidence and block identifiers. A search can be limited to one product or service and everything under it.
+
+**Asking a question ("ask").** The best sections, plus the section before and after each so nothing is read out of context, are given to a local AI model, which must answer in short statements, each with the exact words it relied on. The engine then checks every statement: the quoted words must appear word for word in the cited section, every number in the statement must be in the quote, and the statement may not say more than its source. Statements that fail are dropped and listed with the reason. Without an AI model, or when nothing passes the check, the answer is the best-matching sentences quoted exactly. Every point links to the live page with the quoted words highlighted, and names the evidence it came from.
+
+On the John Hancock run (272 pages, 1,308 sections), filling the knowledge base took about 10 seconds with the word-matching stand-in, and a re-run reused all 1,308 vectors. Searches and questions answer with exact quotes (for example, the states where the Oura Ring discount is not offered). Because this run is almost all news releases, few sections carry an accepted label from page code alone: 12 questions-and-answers and 4 sections about annuities. The rest are left unlabelled or marked as having only one signal rather than guessed. The AI model signal, once Ollama is running, is the second opinion that will confirm more of them.
+
 ## 5. Safety and cost promises
 
 - Read-only: the engine never submits forms, logs in, buys, unsubscribes or clicks anything that changes the website.
@@ -277,8 +293,8 @@ On the John Hancock run (303 pages, about a minute, $0): 7,455 paragraphs, 551 s
 - Durable database: the PostgreSQL storage exists but has never been tested against a real database.
 - Starting runs from the web: the analyst web app reviews finished runs, but runs are still started from the command line, and there is no live progress feed or deployment package yet.
 - Some content types: text drawn on canvas or in CSS, combinations of product options (each option is captured on its own, never every combination), audio and video, archives and email files, and old-style .doc and .xls files.
-- Semantic similarity: finding pages that say the same thing in different words (planned with a vector database).
-- The rest of the knowledge base: labelling every page and section by its content (not only by its address), search across sections, and competitor comparison and gap reports are designed but not built yet (steps 1 and 2, stamping and the offering catalog, are done). The AI steps of the catalog have been tested against a simulated server only, until the company's Ollama server address is available.
+- Semantic similarity in the reports: the knowledge base can search by meaning, but the overlap and contradiction reports still compare exact wording.
+- The rest of the knowledge base: competitor comparison and gap reports are designed but not built yet (stamping, the offering catalog, section labels, search and questions are done). The AI steps (embeddings with bge-m3, labels and answers from a local model) have been tested against a simulated server only, and the Postgres vector store only in automated tests, until Ollama and Postgres with pgvector are installed; until then the local file and the word-matching stand-in are used.
 - Hidden page text: some text present in the page code (for example frequently-asked-question answers) is not yet revealed and captured by the browser exploration; the engine flags these pages for review rather than counting them complete.
 - Skipping a page without asking the website at all (for example from the dates in the site's sitemap): every page seen before still gets one light request.
 
@@ -313,6 +329,7 @@ On the John Hancock run (303 pages, about a minute, $0): 7,455 paragraphs, 551 s
 
 | Date | Significant change |
 |---|---|
+| 2026-10-30 | Searchable knowledge base: "index" stores every page section with its meaning (local bge-m3 model, or a word-matching stand-in until Ollama runs), its exact text and its evidence, in Postgres with pgvector or a local file, re-using unchanged sections; sections are labelled by role and product only when two independent signals agree; "search" combines meaning and exact words; "ask" answers with statements each checked against a word-for-word quote and linked to the page; "kb-check" says what is ready. John Hancock: 1,308 sections in about 10 seconds, $0. |
 | 2026-10-30 | Content Scraper app (Module 1): password-protected projects, addresses pasted or imported from a file, scraping started and followed in the browser, every report downloadable (one by one or as a zip). |
 | 2026-10-29 | Project report, "Matching content": the shared text of each pair of pages is now shown in full (every shared passage, with the number of passages), instead of a short example cut after 300 characters, with the number of shared words and a "Shared text by line" sheet that shows every shared line on its own row. |
 | 2026-10-28 | Page outlines and page types: a "structure" command rewrites every page as an outline in reading order (sections, tabs, accordions, questions and answers, cards, tables, images, videos, forms), one Markdown file per page, with text behind clicks marked, and labels each page as product, category, service, article and so on, and the site as e-commerce, B2B services, publisher or mixed. John Hancock: 303 pages, about a minute, $0. |

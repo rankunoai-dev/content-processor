@@ -22,6 +22,7 @@ logs/
 evidence/
 url_history/
 app_data/
+knowledge_store/
 exports/
 outputs/
 scratch/

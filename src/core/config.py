@@ -103,6 +103,14 @@ class Settings(BaseSettings):
     # App module 1: projects, their URL lists, runs and reports (never committed).
     cp_app_data_root: Path = REPO_ROOT / "app_data"
 
+    # -- Content processor: knowledge base (RFC 0002 stages 5-7) -----------
+    # Embedded vector store, used when Postgres with pgvector is not configured.
+    cp_knowledge_root: Path = REPO_ROOT / "knowledge_store"
+    # OpenAI-compatible model endpoint; only local or private-network hosts are accepted.
+    cp_model_endpoint: str = "http://localhost:11434/v1"
+    cp_embed_model: str = "bge-m3"
+    cp_chat_model: str = "qwen2.5:7b-instruct"
+
     # -- Content processor: Bright Data (T4 proxies / T5 unlocker) ---------
     # Caps are enforced in code before any request leaves (playbook §10, layer 2).
     brightdata_enabled: bool = Field(default=False, description="Kill switch for T4/T5.")

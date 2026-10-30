@@ -70,6 +70,7 @@ from src.modules.content_processor.governor.paid import (
 from src.modules.content_processor.governor.paid import register as register_paid_commands
 from src.modules.content_processor.governor.spend import approvals_lookup
 from src.modules.content_processor.knowledge.commands import register as register_stamp_command
+from src.modules.content_processor.knowledge.kb_commands import register as register_kb_commands
 from src.modules.content_processor.ledger.memory import MemoryLedger
 from src.modules.content_processor.ledger.tasks import TaskLedger, new_run_id
 from src.modules.content_processor.planner import fetch_tasks_for
@@ -860,6 +861,7 @@ def main(argv: list[str] | None = None) -> int:
     register_paid_commands(sub)
     register_stamp_command(sub)
     register_history_command(sub)
+    register_kb_commands(sub)
 
     p_status = sub.add_parser("status", help="durable: task and resource counts")
     p_status.add_argument("--run", required=True)
