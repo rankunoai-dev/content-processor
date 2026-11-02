@@ -424,6 +424,16 @@ def test_card_tools_and_preflight(themed: World) -> None:
     assert is_error and "not in the latest research snapshot" in text
     text, is_error = run_tool(play, "get_keyword_rankings", {"website": "nope.org"})
     assert is_error
+    # with Claude off, a keyword card's free context pack already carries the search data
+    pack_runner = themed.runner(enabled=False)
+    treemap = card("keyword-value-matrix")
+    record = pack_runner.start(treemap, {"project": themed.project_id}, "pack")
+    done = pack_runner.execute(treemap, record)
+    assert done.status == "finished" and done.tool_calls >= 3
+    pack = (pack_runner.runs.folder(done.run_id) / done.files["context_pack"]).read_text(
+        encoding="utf-8"
+    )
+    assert '<tool_result tool="get_search_demand"' in pack and "pet insurance for dogs" in pack
 
 
 def test_unit_log_location(themed: World) -> None:

@@ -74,6 +74,13 @@ _OFFICE_MIME = ("msword", "officedocument", "ms-excel", "ms-powerpoint", "opendo
 _ERROR_TITLE = re.compile(
     r"^\s*(errors?|404|410|500|page not found|not found|oops)\b", re.IGNORECASE
 )
+# The title of a bot-check page that was downloaded before the browser got through:
+# not the page's title (the heading stands in for it).
+_CHALLENGE_TITLE = re.compile(
+    r"^\s*(just a moment|attention required|checking your browser|please wait|"
+    r"one moment,? please|verifying you are human|ddos-guard)",
+    re.IGNORECASE,
+)
 _PLACEHOLDER = re.compile(r"\b[lj]orem ipsum dolor\b|\bsed ut perspiciatis\b", re.IGNORECASE)
 _VOWELS = re.compile(r"[aeiouy]+")
 _WORD = re.compile(r"[A-Za-z]+")
@@ -276,7 +283,10 @@ def _stamp_page(page: _Page, run_id: str, now: datetime) -> PageStamp:
     schema = html.schema if html is not None else SchemaFacts()
     main_text = "\n".join(b.normalized_text for b in main)
     lang = meta.get("lang") or next((b.language for b in main if b.language), None)
-    title = (meta.get("title") or "").casefold()
+    page_title = meta.get("title") or None
+    if page_title and _CHALLENGE_TITLE.match(page_title):
+        page_title = None
+    title = (page_title or "").casefold()
     summary = next(
         (
             text
@@ -285,7 +295,7 @@ def _stamp_page(page: _Page, run_id: str, now: datetime) -> PageStamp:
         ),
         None,
     ) or _first_sentence(main)
-    exclusion = _exclusion(page, mime, main, meta.get("title"))
+    exclusion = _exclusion(page, mime, main, page_title)
     return PageStamp(
         run_id=run_id,
         url=record.requested_url,
@@ -307,7 +317,7 @@ def _stamp_page(page: _Page, run_id: str, now: datetime) -> PageStamp:
         path_depth=len(segments),
         template_fingerprint=record.template_fingerprint,
         breadcrumbs=_breadcrumbs(html, visible),
-        title=meta.get("title") or None,
+        title=page_title,
         meta_description=meta.get("description"),
         h1=(html.h1 if html is not None else None)
         or next((b.heading_path[0] for b in main if b.heading_path), None),

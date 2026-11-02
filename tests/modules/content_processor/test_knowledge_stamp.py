@@ -376,6 +376,13 @@ def _loader(*bodies: bytes) -> dict[str, bytes]:
     return {sha(b): b for b in bodies}
 
 
+CHALLENGED = (
+    PAGE.replace("<title>Term life insurance | Example Life", "<title>Just a moment...")
+    .replace("https://example.com/life/term", "https://example.com/challenged")
+    .encode()
+)
+
+
 def test_stamp_records_end_to_end() -> None:
     store = _loader(PAGE.encode(), RENDERED.encode())
     english = " ".join(
@@ -401,10 +408,16 @@ def test_stamp_records_end_to_end() -> None:
             ["An error happened"],
             html=PAGE.replace("<title>Term", "<title>Errors - Term").encode(),
         ),
+        _page(
+            "https://example.com/challenged",
+            ["Real words " + words(5, 30)],
+            html=CHALLENGED,
+        ),
         _page("https://example.com/draft", ["Lorem ipsum dolor sit amet " + words(1, 20)]),
         _page("https://example.com/missing", ["Real words " + words(4, 30)], html=b"never stored"),
     ]
     store.update(_loader(PAGE.replace("<title>Term", "<title>Errors - Term").encode()))
+    store.update(_loader(CHALLENGED))
     when = datetime(2026, 10, 26, tzinfo=UTC)
     result = stamp_records(records, store.get, now=when)
     by_url = {s.url.rsplit("/", 1)[-1]: s for s in result.stamps}
@@ -440,6 +453,11 @@ def test_stamp_records_end_to_end() -> None:
     assert by_url["gone"].exclusion_reason == "soft_404"
     assert by_url["errors"].exclusion_reason == "error_page"
     assert by_url["draft"].exclusion_reason == "placeholder_text"
+    # a bot-check title from the first download is not the page's title
+    challenged = by_url["challenged"]
+    assert challenged.title is None
+    assert challenged.exclusion_reason is None
+    assert challenged.h1 == "Term life insurance"
     assert by_url["missing"].metadata_source == "missing_evidence"
     assert by_url["missing"].knowledge_eligible
 
@@ -448,7 +466,7 @@ def test_stamp_records_end_to_end() -> None:
     header = next(m for m in site.menus if m.kind == "header")
     # Source and rendered views merged: the rendered sub-menu is in the tree.
     assert _labels(header.items) == [("Life", ["Term"])]
-    assert header.page_count == 7  # every page with stored HTML, eligible or not
+    assert header.page_count == 8  # every page with stored HTML, eligible or not
     assert term.menus[0].menu_id == header.menu_id
     assert site.excluded["duplicate"] == 1
     assert site.knowledge_pages == sum(s.knowledge_eligible for s in result.stamps)
@@ -457,9 +475,10 @@ def test_stamp_records_end_to_end() -> None:
         "https://example.com/life/term",
         "https://example.com/life/whole",
         "https://example.com/missing",
+        "https://example.com/challenged",
     }
-    assert site.metadata_coverage["title"] == 1.0
-    assert site.schema_types == {"Service": 7}
+    assert site.metadata_coverage["title"] == 7 / 8  # the bot-check title is not counted
+    assert site.schema_types == {"Service": 8}
     # Chunk context uses the short title and the site name.
     term_chunk = next(c for c in result.chunks if c.url.endswith("/life/term"))
     assert term_chunk.context_header.startswith("Example Life › Term life insurance\n")

@@ -337,7 +337,7 @@ def collect(
                 PageDoc(
                     url=url,
                     website=website.key,
-                    title=stamp.title,
+                    title=stamp.title or stamp.h1,
                     h1=stamp.h1,
                     weighted=weighted,
                     words=stamp.main_word_count or stamp.word_count,

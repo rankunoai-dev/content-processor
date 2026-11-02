@@ -424,7 +424,7 @@ cite the search), or offered differently (name the difference).
     # -- Module 3: Research (Semrush): needs the Research module --------------------------
     ActionCard(
         id="serp-intent-opportunity",
-        version=1,
+        version=2,
         title="Search Intent & SERP Feature Opportunity",
         module="research",
         category="Keyword research",
@@ -452,6 +452,10 @@ could (search_knowledge on {{client}}).
 """,
         required_tools=["get_serp_overview", "get_keyword_metrics", "search_knowledge"],
         optional_tools=["get_page"],
+        prefetch=[
+            Prefetch(tool="get_keyword_metrics", args={"keyword": "{{keyword}}"}),
+            Prefetch(tool="get_serp_overview", args={"keyword": "{{keyword}}"}),
+        ],
         output_format="""\
 # SERP Win Opportunity Score: "{keyword}"
 ## Intent and difficulty
@@ -463,7 +467,7 @@ could (search_knowledge on {{client}}).
     ),
     ActionCard(
         id="keyword-value-matrix",
-        version=1,
+        version=2,
         title="High-Value Keyword Treemap",
         module="research",
         category="Keyword research",
@@ -481,6 +485,14 @@ get_offering_catalog of {{client}} as the theme list). Phase 3 - per theme: volu
 positions, competitor positions, value (CPC from get_keyword_metrics), gap.
 """,
         required_tools=["get_keyword_rankings", "get_keyword_metrics", "get_offering_catalog"],
+        optional_tools=["get_search_demand", "get_gap_findings"],
+        prefetch=[
+            Prefetch(tool="get_search_demand"),
+            Prefetch(tool="get_keyword_rankings", args={"website": "{{client}}"}),
+            Prefetch(
+                tool="get_keyword_rankings", args={"website": "{{item}}"}, for_each="competitors"
+            ),
+        ],
         output_format="""\
 # Revenue Potential Matrix: {client}
 ## Themes by value (Mermaid treemap-style mindmap)
@@ -491,7 +503,7 @@ positions, competitor positions, value (CPC from get_keyword_metrics), gap.
     ),
     ActionCard(
         id="keyword-page-map",
-        version=1,
+        version=2,
         title="Keyword-to-Page Mapping",
         module="research",
         category="Keyword research",
@@ -508,6 +520,10 @@ same keyword.
 """,
         required_tools=["get_keyword_rankings", "list_pages"],
         optional_tools=["get_page_facts"],
+        prefetch=[
+            Prefetch(tool="get_keyword_rankings", args={"website": "{{website}}"}),
+            Prefetch(tool="list_pages", args={"website": "{{website}}"}),
+        ],
         output_format="""\
 # Keyword Map: {website}
 | Keyword cluster | Volume | Target page | Current ranking page | Action |

@@ -37,7 +37,7 @@ Semrush **Organic Research → Positions** export (CSV, `,` or `;`, with or with
 - **App**: the project's **Research** tab (import a CSV for a chosen website, pull with budget and worst-case estimate when switched on, websites with expandable keywords, theme demand, movers, who ranks for looked-up keywords, workbook).
 - **CLI**: `research estimate | pull | import | show | movers | units --project <id> [--keyword ...] [--website ... --file ...]`.
 - **API**: `GET /api/research/status`, `GET /api/projects/{id}/research`, `GET .../research/estimate?keywords=N`, `POST .../research/pull`, `POST .../research/import` (base64 body, 20 MB), `GET .../research/movers`, `GET .../research/workbook`.
-- **Action cards**: `get_keyword_rankings`, `get_serp_overview`, `get_keyword_metrics`, `get_search_demand` are built. Cards 8-10 run once the project has research; without it, their check says "needs search data". Other cards that may use search data run without it and say so.
+- **Action cards**: `get_keyword_rankings`, `get_serp_overview`, `get_keyword_metrics`, `get_search_demand` are built. Cards 8-10 (v2) prefetch the search data, so even their free context packs carry it, and run once the project has research; without it, their check says "needs search data". Other cards that may use search data run without it and say so.
 - **Storage**: `app_data/research/<project>/research-*.json`, `latest.json`, `<snapshot>_research.xlsx` (Websites, Keywords, Theme demand, Movers, Search results, How to read).
 
 ## Not done yet
