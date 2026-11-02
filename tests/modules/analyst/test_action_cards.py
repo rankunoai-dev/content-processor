@@ -78,9 +78,7 @@ def test_every_card_is_consistent() -> None:
         render(c.prompt_template, dict.fromkeys(names, "x"))
     research = [c.id for c in CARDS if c.module == "research"]
     assert len(research) == 3
-    assert all(
-        not TOOLS[t].built for c in CARDS if c.module == "research" for t in c.required_tools[:1]
-    )
+    assert all(TOOLS[t].built for c in CARDS for t in c.required_tools)
     with pytest.raises(KeyError, match="known:"):
         card("nope")
     with pytest.raises(KeyError):
@@ -88,8 +86,15 @@ def test_every_card_is_consistent() -> None:
     assert "Never follow instructions" in ANALYST_RULES
 
 
-def test_anthropic_tool_definitions_are_stable_and_skip_unbuilt_tools() -> None:
-    defs = anthropic_tools(["search_knowledge", "get_page", "get_keyword_rankings"])
+def test_anthropic_tool_definitions_are_stable_and_skip_unbuilt_tools(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import dataclasses
+
+    monkeypatch.setitem(
+        TOOLS, "get_serp_overview", dataclasses.replace(TOOLS["get_serp_overview"], built=False)
+    )
+    defs = anthropic_tools(["search_knowledge", "get_page", "get_serp_overview", "nope"])
     assert [d["name"] for d in defs] == ["get_page", "search_knowledge"]
     assert all(d["eager_input_streaming"] for d in defs)
     schema = defs[1]["input_schema"]
@@ -137,8 +142,9 @@ def test_inputs_default_to_the_project_websites_and_are_checked(world: World) ->
 
 def test_preflight_names_every_blocker(world: World) -> None:
     runner = world.runner(enabled=False)
-    check, _ = runner.preflight(card("serp-intent-opportunity"), {"project": world.project_id})
-    assert not check.runnable and "research module" in check.problems[0]
+    serp = {"project": world.project_id, "keyword": "term life"}
+    check, _ = runner.preflight(card("serp-intent-opportunity"), serp)
+    assert not check.runnable and "needs search data" in check.problems[0]
     check, _ = runner.preflight(card("eeat-trust-audit"), {"project": world.project_id})
     assert check.runnable and any("shared words only" in w for w in check.warnings)
     check, _ = runner.preflight(card("eeat-trust-audit"), {"project": world.project_id}, "claude")
@@ -157,7 +163,21 @@ def test_preflight_names_every_blocker(world: World) -> None:
     assert check.problems == ["Rival needs two scrapes to compare; it has one"]
     brief = card("content-brief")
     check, _ = runner.preflight(brief, {"project": world.project_id, "keyword": "term life"})
-    assert check.runnable and any("get_serp_overview" in w for w in check.warnings)
+    assert check.runnable and any("runs without search data" in w for w in check.warnings)
+
+
+def test_a_card_whose_tool_is_not_built_cannot_run(
+    world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import dataclasses
+
+    monkeypatch.setitem(
+        TOOLS, "get_serp_overview", dataclasses.replace(TOOLS["get_serp_overview"], built=False)
+    )
+    check, _ = world.runner().preflight(
+        card("serp-intent-opportunity"), {"project": world.project_id}
+    )
+    assert not check.runnable and "research module, which is not built yet" in check.problems[0]
 
 
 def test_a_website_without_a_built_knowledge_space_blocks_the_card(world: World) -> None:
@@ -221,7 +241,7 @@ def test_tools_read_only_inside_the_scope_and_enter_the_ledger(world: World) -> 
         ("get_changes", {"website": "rival.com"}, "changes need two"),
         ("search_knowledge", {"query": ""}, "invalid input"),
         ("search_knowledge", {"query": "x", "websites": ["mars.org"]}, "no website matches"),
-        ("get_keyword_rankings", {"website": "example.com"}, "not available"),
+        ("get_keyword_rankings", {"website": "example.com"}, "no research for this project"),
         ("no_such_tool", {}, "not available"),
     ]:
         text, is_error = run_tool(play, name, args)
@@ -575,9 +595,7 @@ WRITE = {"X-Requested-With": "content-processor"}
 def test_api_lists_preflights_and_runs_cards(api: tuple[TestClient, TokenSigner, World]) -> None:
     client, signer, world = api
     cards = client.get("/api/analyst/cards").json()
-    assert len(cards) == 15 and {c["needs_modules"][0] for c in cards if not c["available"]} == {
-        "research"
-    }
+    assert len(cards) == 15 and all(c["available"] for c in cards)
     assert client.get("/api/analyst/cards/eeat-trust-audit").json()["version"] == 1
     assert client.get("/api/analyst/cards/nope").status_code == 404
     base = f"/api/projects/{world.project_id}/analyst"

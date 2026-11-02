@@ -124,6 +124,15 @@ class Settings(BaseSettings):
     )
     cp_claude_max_tool_calls: int = Field(default=40, ge=1, le=200)
 
+    # -- Research module (Semrush, src/modules/research) --------------------
+    # Off until switched on; a monthly unit cap of 0 means unset and refuses every pull.
+    # Costs are units per returned line; check them against your Semrush plan.
+    cp_semrush_enabled: bool = False
+    cp_semrush_monthly_units: int = Field(default=0, ge=0)
+    cp_semrush_pull_units: int = Field(default=5000, ge=0, description="Most one pull may use")
+    cp_semrush_database: str = "us"
+    cp_semrush_keyword_limit: int = Field(default=200, ge=1, le=10000)
+
     # -- Content processor: Bright Data (T4 proxies / T5 unlocker) ---------
     # Caps are enforced in code before any request leaves (playbook §10, layer 2).
     brightdata_enabled: bool = Field(default=False, description="Kill switch for T4/T5.")

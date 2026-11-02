@@ -385,6 +385,22 @@ class CardRunner:
             )
             return check, None
         values, play, problems = resolve_inputs(card, raw, self.playground)
+        no_research_warning: str | None = None
+        uses = [*card.required_tools, *card.optional_tools]
+        if play is not None and any(TOOLS[t].module == "research" for t in uses):
+            from src.modules.research.service import research_store
+
+            if research_store(self.store).latest(play.project_ids[0]) is None:
+                if any(TOOLS[t].module == "research" for t in card.required_tools):
+                    problems.append(
+                        "this card needs search data: import a Semrush Organic Positions export "
+                        "or pull from Semrush in the Research tab first"
+                    )
+                else:
+                    no_research_warning = (
+                        "runs without search data (volumes, rankings): this project has no "
+                        "research yet"
+                    )
         warnings: list[str] = []
         tools = [t for t in [*card.required_tools, *card.optional_tools] if TOOLS[t].built]
         if play is not None:
@@ -436,6 +452,8 @@ class CardRunner:
                         "these projects are marked client_confidential and may not be sent to "
                         f"Claude: {', '.join(blocked)} (use the context pack instead)"
                     )
+        if no_research_warning:
+            warnings.append(no_research_warning)
         if missing_optional:
             warnings.append(
                 "runs without " + ", ".join(missing_optional) + " (module not built yet)"

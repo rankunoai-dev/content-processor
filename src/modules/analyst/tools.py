@@ -127,10 +127,30 @@ class MonitorInput(StrictModel):
 
 
 class KeywordInput(StrictModel):
-    """A keyword research request (Research module, not built yet)."""
+    """One keyword."""
 
     keyword: str = Field(min_length=1, max_length=200)
-    database: str = Field(default="us", max_length=8)
+
+
+class GapInput(StrictModel):
+    """The project's gap findings."""
+
+    kind: str | None = Field(
+        default=None,
+        description="Only this kind: theme_gap, theme_behind, pillar_gap, funnel_gap, "
+        "keyword_gap, striking_distance, competitor_momentum, offering_gap",
+    )
+    limit: int = Field(default=40, ge=1, le=200)
+    rebuild: bool = Field(default=False, description="Build the gap analysis again first")
+
+
+class RankingsInput(StrictModel):
+    """A website's rankings in the latest research snapshot."""
+
+    website: str = Field(min_length=3, max_length=300)
+    theme_id: str | None = Field(default=None, description="Only keywords of this theme")
+    max_position: int = Field(default=100, ge=1, le=100)
+    limit: int = Field(default=100, ge=1, le=500)
 
 
 # -- helpers -------------------------------------------------------------------------------
@@ -655,7 +675,7 @@ def _changes(play: Playground, args: WebsiteInput) -> dict[str, Any]:
     changed_out = []
     for c in changed[:_MAX_CHANGED]:
         ref = play.ledger.fact(
-            f"{c.url}{old_run.run_id}{new_run.run_id}",
+            f"{c.url}\x1f{old_run.run_id}\x1f{new_run.run_id}",
             kind="change",
             website=key,
             url=c.url,
@@ -709,7 +729,7 @@ def _monitoring(play: Playground, args: MonitorInput) -> dict[str, Any]:
     alerts = []
     for a in check.alerts:
         ref = play.ledger.fact(
-            f"{check.check_id}{a.alert_id}",
+            f"{check.check_id}\x1f{a.alert_id}",
             kind="alert",
             website=a.website,
             url=a.urls[0] if a.urls else None,
@@ -754,7 +774,7 @@ def _theme_map(play: Playground, args: ThemeInput) -> dict[str, Any]:
     themes = []
     for t in theme_map.themes:
         ref = play.ledger.fact(
-            f"{theme_map.map_id}{t.theme_id}",
+            f"{theme_map.map_id}\x1f{t.theme_id}",
             kind="theme",
             website=",".join(c.website for c in t.coverage if c.pages),
             project=project_id,
@@ -792,6 +812,180 @@ def _theme_map(play: Playground, args: ThemeInput) -> dict[str, Any]:
         "themes": themes,
         "unclustered_pages": theme_map.stats.get("unclustered", 0),
         "skipped": theme_map.skipped,
+    }
+
+
+def _snapshot(play: Playground) -> Any:
+    from src.modules.research.service import research_store
+
+    snapshot = research_store(play.store).latest(play.project_ids[0])
+    if snapshot is None:
+        msg = (
+            "no research for this project yet: import a Semrush Organic Positions export or "
+            "pull from Semrush in the Research tab"
+        )
+        raise ToolError(msg)
+    return snapshot
+
+
+def _rankings(play: Playground, args: RankingsInput) -> dict[str, Any]:
+    from src.modules.research.build import estimated_visits
+
+    snapshot = _snapshot(play)
+    try:
+        website = play.website(args.website)
+    except ScopeError as exc:
+        raise ToolError(str(exc)) from exc
+    site = next((w for w in snapshot.websites if w.website == website.key), None)
+    if site is None:
+        msg = f"{website.name} is not in the latest research snapshot ({snapshot.snapshot_id})"
+        raise ToolError(msg)
+    rows = [
+        r
+        for r in site.keywords
+        if r.position <= args.max_position
+        and (args.theme_id is None or r.theme_id == args.theme_id)
+    ]
+    rows.sort(key=lambda r: (-r.volume, r.position))
+    out = []
+    for r in rows[: args.limit]:
+        ref = play.ledger.fact(
+            f"{snapshot.snapshot_id}\x1f{site.website}\x1f{r.keyword}",
+            kind="ranking",
+            website=site.website,
+            url=r.url,
+            title=f"{r.keyword}: #{r.position} ({r.volume}/month)",
+            text=f"source {site.source}, snapshot {snapshot.snapshot_id}",
+        )
+        out.append(
+            {
+                "ref": ref,
+                **r.model_dump(),
+                "estimated_visits": estimated_visits(r.volume, r.position),
+            }
+        )
+    return {
+        "website": site.website,
+        "source": site.source,
+        "snapshot": snapshot.snapshot_id,
+        "pulled_at": site.pulled_at.isoformat(),
+        "total_keywords": len(site.keywords),
+        "keywords": out,
+    }
+
+
+def _serp(play: Playground, args: KeywordInput) -> dict[str, Any]:
+    snapshot = _snapshot(play)
+    wanted = args.keyword.strip().casefold()
+    metric = next((k for k in snapshot.keywords if k.keyword.casefold() == wanted), None)
+    ref = play.ledger.fact(
+        f"{snapshot.snapshot_id}\x1fserp\x1f{wanted}",
+        kind="serp",
+        website=",".join(w.website for w in snapshot.websites),
+        title=f'search results for "{args.keyword}"',
+        text=f"snapshot {snapshot.snapshot_id}",
+    )
+    project_ranks = [
+        {"website": w.website, "role": w.role, "position": r.position, "url": r.url}
+        for w in snapshot.websites
+        for r in w.keywords
+        if r.keyword.casefold() == wanted
+    ]
+    return {
+        "ref": ref,
+        "keyword": args.keyword,
+        "pulled_results": [s.model_dump() for s in metric.serp] if metric else [],
+        "project_websites": sorted(project_ranks, key=lambda x: x["position"]),
+        "notes": []
+        if metric
+        else ["this keyword's full results were not pulled; only the project's websites are shown"],
+    }
+
+
+def _keyword_metrics(play: Playground, args: KeywordInput) -> dict[str, Any]:
+    snapshot = _snapshot(play)
+    wanted = args.keyword.strip().casefold()
+    metric = next((k for k in snapshot.keywords if k.keyword.casefold() == wanted), None)
+    rows = [r for w in snapshot.websites for r in w.keywords]
+    exact = next((r for r in rows if r.keyword.casefold() == wanted), None)
+    related: dict[str, int] = {}
+    for r in rows:
+        if wanted in r.keyword.casefold() and r.keyword.casefold() != wanted:
+            related[r.keyword] = max(related.get(r.keyword, 0), r.volume)
+    if metric is None and exact is None and not related:
+        msg = f'"{args.keyword}" is not in the latest research snapshot ({snapshot.snapshot_id})'
+        raise ToolError(msg)
+    ref = play.ledger.fact(
+        f"{snapshot.snapshot_id}\x1fmetrics\x1f{wanted}",
+        kind="keyword",
+        website=",".join(w.website for w in snapshot.websites),
+        title=f'"{args.keyword}" demand',
+        text=f"snapshot {snapshot.snapshot_id}",
+    )
+    return {
+        "ref": ref,
+        "keyword": args.keyword,
+        "volume": metric.volume if metric else (exact.volume if exact else None),
+        "cpc": metric.cpc if metric else (exact.cpc if exact else None),
+        "competition": metric.competition if metric else (exact.competition if exact else None),
+        "related": [
+            {"keyword": k, "volume": v}
+            for k, v in sorted(related.items(), key=lambda kv: -kv[1])[:30]
+        ],
+    }
+
+
+def _demand(play: Playground, _args: NoInput) -> dict[str, Any]:
+    snapshot = _snapshot(play)
+    themes = []
+    for d in snapshot.demand:
+        ref = play.ledger.fact(
+            f"{snapshot.snapshot_id}\x1fdemand\x1f{d.theme_id}",
+            kind="demand",
+            website=",".join(sorted(d.ranked)),
+            title=f"demand: {d.label}",
+            text=f"{d.keywords} keywords, {d.volume} searches/month",
+        )
+        themes.append({"ref": ref, **d.model_dump()})
+    return {
+        "snapshot": snapshot.snapshot_id,
+        "database": snapshot.database,
+        "websites": [
+            {"website": w.website, "role": w.role, "source": w.source} for w in snapshot.websites
+        ],
+        "themes": themes,
+    }
+
+
+def _gaps(play: Playground, args: GapInput) -> dict[str, Any]:
+    from src.modules.gaps.service import build_project_gaps, gap_store
+
+    project_id = play.project_ids[0]
+    report = None if args.rebuild else gap_store(play.store).latest(project_id)
+    if report is None:
+        report, _files = build_project_gaps(play.store, play.access, project_id)
+    findings = []
+    for f in report.findings:
+        if args.kind and f.kind != args.kind:
+            continue
+        if f.status == "dismissed":
+            continue
+        ref = play.ledger.fact(
+            f"{report.report_id}\x1f{f.finding_id}",
+            kind="gap",
+            website=",".join(f.competitors),
+            url=next((e.url for e in f.evidence if e.url), None),
+            project=project_id,
+            title=f.title,
+            text=f.detail,
+        )
+        findings.append({"ref": ref, **f.model_dump(exclude={"note"})})
+    return {
+        "report_id": report.report_id,
+        "created_at": report.created_at.isoformat(),
+        "missing_inputs": report.missing_inputs,
+        "findings": findings[: args.limit],
+        "resolved_since_last_time": report.resolved,
     }
 
 
@@ -893,28 +1087,47 @@ TOOLS: dict[str, ToolSpec] = {
             _monitoring,
         ),
         ToolSpec(
+            "get_gap_findings",
+            "gap",
+            "The project's gap findings, highest priority first: themes the client misses or "
+            "trails in, missing pillar pages and funnel stages, competitor keywords the client "
+            "misses, page-two keywords, competitor momentum and offerings; each with evidence, "
+            "a recommended action and its status (dismissed findings are left out).",
+            GapInput,
+            _gaps,
+        ),
+        ToolSpec(
             "get_keyword_rankings",
             "research",
-            "Keywords a domain ranks for, with positions, volume and difficulty (Semrush).",
-            WebsiteInput,
-            None,
-            built=False,
+            "Keywords a website ranks for in the latest research snapshot (Semrush pull or "
+            "export): position, previous position, volume, CPC, ranking URL, theme and "
+            "estimated visits. Filter by theme or position.",
+            RankingsInput,
+            _rankings,
         ),
         ToolSpec(
             "get_serp_overview",
             "research",
-            "Who ranks for a keyword, the search intent and the SERP features (Semrush).",
+            "Who ranks for a keyword: from the snapshot's search results when the keyword was "
+            "pulled, else every website of the project that ranks for it, with position and URL.",
             KeywordInput,
-            None,
-            built=False,
+            _serp,
         ),
         ToolSpec(
             "get_keyword_metrics",
             "research",
-            "Volume, CPC, difficulty and trend of a keyword and its related keywords (Semrush).",
+            "Volume, CPC and competition of a keyword, and keywords of the snapshot that contain "
+            "it (related demand), from the latest research snapshot.",
             KeywordInput,
-            None,
-            built=False,
+            _keyword_metrics,
+        ),
+        ToolSpec(
+            "get_search_demand",
+            "research",
+            "Search demand per theme of the project: keywords, monthly volume, and each "
+            "website's keywords in the top 10 and estimated visits.",
+            NoInput,
+            _demand,
         ),
     )
 }

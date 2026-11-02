@@ -633,7 +633,7 @@ CTAs, structured data, freshness.
 Phase 4 - Score each gap's impact on ranking and conversion (1-10) and say how to close it.
 """,
         required_tools=["get_page", "search_knowledge"],
-        optional_tools=["get_page_facts"],
+        optional_tools=["get_page_facts", "get_gap_findings"],
         prefetch=[
             Prefetch(tool="get_page", args={"url": "{{client_url}}"}),
             Prefetch(tool="get_page", args={"url": "{{competitor_url}}"}),
@@ -687,6 +687,8 @@ Phase 4 - Synthesise the brief.
             "get_offering_catalog",
             "get_serp_overview",
             "get_keyword_metrics",
+            "get_search_demand",
+            "get_gap_findings",
         ],
         prefetch=[
             Prefetch(
@@ -743,6 +745,8 @@ Phase 4 - The five things that matter most, each with evidence and a recommended
             "get_page",
             "get_theme_map",
             "get_monitoring_alerts",
+            "get_gap_findings",
+            "get_search_demand",
         ],
         prefetch=[Prefetch(tool="list_websites")],
         output_format="""\

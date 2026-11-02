@@ -1,6 +1,6 @@
 # Content Processor: A Plain-Language Guide
 
-Last updated: 2 November 2026 · Code version: main after the Monitoring module (what changed between scrapes, price changes, theme drift and alerts) and the client's several websites (brands) with notes and tags · Maintained by every session that adds a significant feature (see "Keeping this guide current" at the end)
+Last updated: 2 November 2026 · Code version: main after the Research module (search data from a free Semrush export or a capped Semrush pull) and the Gap Analysis module (what the client is missing, ranked, tracked to closure) · Maintained by every session that adds a significant feature (see "Keeping this guide current" at the end)
 
 ## 1. What this is, in one paragraph
 
@@ -314,11 +314,36 @@ The **Monitoring** tab of a project compares each website's latest scrape with t
 
 On the John Hancock test project, comparing an earlier 107-page scrape with the 318-page one took 2 seconds: 206 new pages placed in their themes, 4 pages that really changed, and 9 template lines set apart. Testing on this real data removed false alarms: a change in how the engine splits pages, a title captured only in the newer scrape, a page still online but now marked as a duplicate, and tracking images are no longer reported as changes.
 
+### Step 19: Research (search data: who ranks for what, and how many people search)
+
+The **Research** tab of a project adds search data: for the client and each competitor, the keywords each website appears for in Google, its position, how many people search each keyword per month, and the page that ranks. The keywords are then placed in the project's themes, so each theme shows how much search demand it has and who wins it. When research is added again later, the tab lists the **movers**: keywords that moved three places or more, entered or left the first page, or appeared or disappeared.
+
+There are two ways to add it:
+
+- **Import a Semrush export (free).** In Semrush, export a website's "Organic Positions" list as a CSV file and upload it for that website. Nothing is sent anywhere.
+- **Pull from Semrush (spends units).** The app asks Semrush directly for every website of the project. This uses Semrush API units, which cost money, so it is **off** until an operator sets the API key, switches it on and sets a **monthly unit cap**. Before a pull, the tab shows the most units it could use; the app refuses a pull that could go over the per-pull limit or what is left this month, and logs every unit spent. Only website addresses and keywords are sent to Semrush, never page content.
+
+A workbook of every snapshot can be downloaded. Three analyst cards that needed search data (search intent and results, high-value keywords, keyword-to-page mapping) can now run on a project once it has research. Semrush has not been called for real yet: it waits for a key and a cap; the import works today.
+
+### Step 20: Gaps (what the client is missing, most important first)
+
+The **Gaps** tab brings the other modules together and lists what the client is missing compared with its competitors, ranked by priority:
+
+- themes competitors cover and the client does not, themes where a competitor leads, themes without a pillar page on the client's side, and buying stages (learn, compare, decide, onboard, support) missing in a theme;
+- with research: keywords where a competitor is on the first page and the client is nowhere near, and the client's keywords on page two that could reach page one with some work;
+- with monitoring: competitors putting effort into a theme (adding pages);
+- with the offering catalogs: products or services competitors offer that the client's catalog does not show (menu items such as "Read more" or "About us" are ignored).
+
+Each finding says why, gives the evidence with links, how many searches a month are behind it when known, and a recommended next step. Its priority grows with how many competitor pages and how much search demand are behind it. The team can mark a finding **accepted**, **done** or **dismissed** with a note; the mark stays when the analysis is built again, and findings that are no longer a gap are listed as such, so progress can be followed. If research or monitoring is missing, the report says so and works with what it has. It runs on this computer and costs nothing; a workbook can be downloaded, and the analyst cards can read the findings.
+
+On the John Hancock test project (with a printing-security competitor, no research yet) the analysis took under a second: 15 findings, one missing theme (the competitor's print-security subject) and 14 offerings the client does not have, as expected for two unrelated companies.
+
 ## 5. Safety and cost promises
 
 - Read-only: the engine never submits forms, logs in, buys, unsubscribes or clicks anything that changes the website.
 - Polite: robots rules and requested delays are respected; a struggling site is paused, not hammered.
 - Free by default: every run starts at $0. Paid access (Bright Data) needs your explicit approval per website, with caps of $5 per run and $25 per day, a monthly cap and a kill switch.
+- Semrush pulls are off until an operator sets a key and a monthly unit cap; each pull is checked against the per-pull and monthly limits before the first request, and every unit is logged. Importing a Semrush export is always free.
 - How paid access works: when a website blocks every free method, the engine stops and asks. An operator can approve that one website, for a set amount (for example $5 per run), with one command; nothing else changes. Before every paid request the engine checks the kill switch, the approval and every limit (per run, per day, per month, per website and per page), and refuses rather than overspend. Every paid request is written to a spending log, and one command shows what has been spent and which websites are approved. Prices are counted on the high side, so the log never understates the bill.
 - Private networks are off-limits: the engine checks every address before contacting it, at every redirect. The basic downloader also connects only to the exact public address it checked, so a trick that swaps the address mid-way cannot redirect it into a private network (the browser and the Chrome-like downloader re-check each request instead).
 - Evidence first: originals are stored before anything is changed, so every claim can be proven.
@@ -342,8 +367,8 @@ On the John Hancock test project, comparing an earlier 107-page scrape with the 
 - Starting runs from the web: the analyst web app reviews finished runs, but runs are still started from the command line, and there is no live progress feed or deployment package yet.
 - Some content types: text drawn on canvas or in CSS, combinations of product options (each option is captured on its own, never every combination), audio and video, archives and email files, and old-style .doc and .xls files.
 - Semantic similarity in the reports: the knowledge base can search by meaning, but the overlap and contradiction reports still compare exact wording.
-- Action cards: Claude stays off until the data policy is confirmed, so no card has been run through Claude on real data yet; the Claude part is tested against a simulated Claude only. The three keyword cards need the Research module (Semrush), which is not built.
-- The rest of the knowledge base: competitor comparison and gap reports are designed but not built yet (stamping, the offering catalog, section labels, search and questions are done). The AI steps (embeddings with bge-m3, labels and answers from a local model) have been tested against a simulated server only, and the Postgres vector store only in automated tests, until Ollama and Postgres with pgvector are installed; until then the local file and the word-matching stand-in are used.
+- Action cards: Claude stays off until the data policy is confirmed, so no card has been run through Claude on real data yet; the Claude part is tested against a simulated Claude only. The three keyword cards run once a project has research (a Semrush export can be imported for free); a live Semrush pull has not been made yet.
+- The rest of the knowledge base: a screen that compares several projects at once is not built yet (gap findings are per project; stamping, the offering catalog, section labels, search and questions are done). The AI steps (embeddings with bge-m3, labels and answers from a local model) have been tested against a simulated server only, and the Postgres vector store only in automated tests, until Ollama and Postgres with pgvector are installed; until then the local file and the word-matching stand-in are used.
 - Hidden page text: some text present in the page code (for example frequently-asked-question answers) is not yet revealed and captured by the browser exploration; the engine flags these pages for review rather than counting them complete.
 - Skipping a page without asking the website at all (for example from the dates in the site's sitemap): every page seen before still gets one light request.
 
@@ -378,6 +403,8 @@ On the John Hancock test project, comparing an earlier 107-page scrape with the 
 
 | Date | Significant change |
 |---|---|
+| 2026-11-02 | Gaps: one ranked list of what the client is missing against its competitors (themes, pillar pages, buying stages, keywords, page-two keywords, competitor momentum, offerings), each with evidence, demand and a next step; the team's decisions (accepted, done, dismissed) carry over and closed gaps are listed. Built on this computer at no cost. |
+| 2026-11-02 | Research: search data per website (keywords, positions, searches per month, ranking page), placed in themes for demand per theme, with movers between snapshots; free import of a Semrush export, or a Semrush pull that is off until a key and a monthly unit cap are set, checked against caps and logged. The three keyword analyst cards can now run. |
 | 2026-11-02 | Monitoring: each check compares the latest scrapes with the previous ones (new, removed and changed pages, rewrites, price changes, template changes), places new pages in their themes, follows theme ownership, and ranks alerts; it runs by itself after new scrapes; scheduled re-scraping is an opt-in per project. |
 | 2026-11-02 | A project can hold several websites of the client (brands, regional sites, sections of one domain); they are always the client's side and never competitors of one another, in theming, gap findings, search and analyst cards, across all projects. Every website can carry a note and tags, editable at any time. |
 | 2026-11-02 | Themes: each project's pages, client and competitors together, grouped into themes and topics, with the pillar page on each website, who owns each theme (client, competitor, contested, client gap), funnel stages and a workbook; built on this computer at no cost, and followed over time as the map is rebuilt. |

@@ -1663,3 +1663,98 @@ export const MONITORING = {
   save: 'Save',
   saved: 'Saved.',
 };
+
+/** Research module: the project's "Research" tab. */
+export const RESEARCH = {
+  tab: 'Research',
+  intro:
+    'Search data for the client and its competitors: which keywords each website ranks for, how many people search them, and how that adds up per theme. Importing a Semrush export is free; pulling from Semrush spends units and stays off until it is switched on with a monthly cap.',
+  empty: 'No search data has been added to this project yet.',
+  needsUnlock: 'Unlock the project with its password to import or pull search data.',
+  importTitle: 'Import a Semrush export (free)',
+  importHelp:
+    'In Semrush, open Organic Research → Positions for one website and export it as CSV. Choose the website it belongs to, then the file.',
+  website: 'Website',
+  chooseFile: 'Choose the CSV file',
+  imported: (n: number) => `Imported ${n} keyword${n === 1 ? '' : 's'}.`,
+  pullTitle: 'Pull from Semrush (spends units)',
+  pullOff: (keySet: boolean) =>
+    keySet
+      ? 'Semrush pulls are switched off. Set CP_SEMRUSH_ENABLED=true and a monthly unit cap (CP_SEMRUSH_MONTHLY_UNITS) in .env.'
+      : 'Semrush pulls are switched off: no API key is set. Imports work without one.',
+  budget: (used: number, cap: number) => `Units used this month: ${used} of ${cap}`,
+  estimate: (units: number, websites: number, cap: number) =>
+    `At most ${units} units for ${websites} website${websites === 1 ? '' : 's'} (limit per pull: ${cap}).`,
+  overCap: 'This pull would go over the limit per pull; lower the keyword limit or raise CP_SEMRUSH_PULL_UNITS.',
+  keywords: 'Keywords to look up too (optional, one per line)',
+  pull: 'Pull from Semrush',
+  pulling: 'Pulling…',
+  pulled: (units: number) => `Pulled. ${units} units spent.`,
+  workbook: 'Download workbook',
+  addedAt: (when: string, units: number) => `Last added ${when}${units ? ` · ${units} units spent` : ''}`,
+  source: { semrush_api: 'Semrush pull', csv_import: 'Imported export' } as Record<string, string>,
+  columns: {
+    website: 'Website',
+    source: 'Source',
+    keywords: 'Keywords',
+    top10: 'In top 10',
+    traffic: 'Organic traffic',
+    note: 'Note',
+    keyword: 'Keyword',
+    position: 'Position',
+    previous: 'Before',
+    volume: 'Searches / month',
+    url: 'Ranking page',
+    theme: 'Theme',
+    demand: 'Searches / month',
+    ranked: 'Ranked (top 10)',
+    change: 'Change',
+  },
+  demandTitle: 'Search demand per theme',
+  noDemand: 'No keywords could be placed in a theme yet.',
+  moversTitle: 'Biggest movers since last time',
+  noMovers: 'Nothing moved much since the previous research.',
+  firstTime: 'Add research again later to see what moved.',
+  serpTitle: 'Who ranks for the keywords you looked up',
+  notRanked: 'not ranked',
+};
+
+/** Gap Analysis module: the project's "Gaps" tab. */
+export const GAPS = {
+  tab: 'Gaps',
+  intro:
+    'What the client is missing compared with its competitors, ranked by priority: themes and pillar pages it lacks, funnel stages, keywords competitors win, page-two keywords, competitor momentum and offerings. It reads the themes, research and monitoring already in the app; nothing is fetched and it costs nothing.',
+  empty: 'No gap analysis has been built for this project yet.',
+  build: 'Build the gap analysis',
+  rebuild: 'Build again',
+  building: 'Building…',
+  needsUnlock: 'Unlock the project with its password to build the analysis or record decisions.',
+  workbook: 'Download workbook',
+  builtAt: (when: string, n: number, high: number) => `Built ${when} · ${n} finding${n === 1 ? '' : 's'} · ${high} high`,
+  missing: 'Built without some inputs',
+  resolved: 'No longer a gap since last time',
+  kind: 'Kind',
+  status: 'Status',
+  allKinds: 'All kinds',
+  hideDismissed: 'Hide dismissed',
+  kinds: {
+    theme_gap: 'Missing theme',
+    theme_behind: 'Behind in theme',
+    pillar_gap: 'Missing pillar page',
+    funnel_gap: 'Missing funnel stage',
+    keyword_gap: 'Keyword gap',
+    striking_distance: 'Page two',
+    competitor_momentum: 'Competitor momentum',
+    offering_gap: 'Missing offering',
+  } as Record<string, string>,
+  severity: { high: 'High', medium: 'Medium', low: 'Low' } as Record<string, string>,
+  severityColor: { high: 'red', medium: 'orange', low: 'blue' } as Record<string, string>,
+  statuses: { open: 'Open', accepted: 'Accepted', done: 'Done', dismissed: 'Dismissed' } as Record<string, string>,
+  priority: 'Priority',
+  demand: (n: number) => `${n.toLocaleString()} searches / month`,
+  action: 'Next step',
+  evidence: 'Evidence',
+  competitors: 'Competitors',
+  saved: 'Saved.',
+  none: 'No findings match.',
+};

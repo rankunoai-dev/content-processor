@@ -63,9 +63,11 @@ import { QueryState } from '../components/QueryState';
 import { AnalystTab } from './AnalystTab';
 import { ThemesTab } from './ThemesTab';
 import { MonitoringTab } from './MonitoringTab';
+import { ResearchTab } from './ResearchTab';
+import { GapsTab } from './GapsTab';
 import { StatusBar, StatusLegend } from '../components/StatusBar';
 import { PageHeading } from '../components/bits';
-import { PROJECTS, formatDate, reportKind, ANALYST, MONITORING, THEMES } from '../vocabulary';
+import { PROJECTS, formatDate, reportKind, ANALYST, GAPS, MONITORING, RESEARCH, THEMES } from '../vocabulary';
 
 const STATUS_COLOR: Record<string, string> = {
   queued: 'default',
@@ -1233,6 +1235,8 @@ export default function ProjectPage() {
                   label: MONITORING.tab,
                   children: <MonitoringTab project={p} token={token} />,
                 },
+                { key: 'research', label: RESEARCH.tab, children: <ResearchTab project={p} token={token} /> },
+                { key: 'gaps', label: GAPS.tab, children: <GapsTab project={p} token={token} /> },
                 { key: 'analyst', label: ANALYST.tab, children: <AnalystTab project={p} token={token} /> },
                 { key: 'settings', label: PROJECTS.tabs.settings, children: <SettingsTab project={p} token={token} /> },
               ]}

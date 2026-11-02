@@ -291,6 +291,12 @@ def create_app(
             from src.modules.monitoring.api import register_monitoring_routes
 
             register_monitoring_routes(app, projects=project_store, access=knowledge, signer=signer)
+            from src.modules.research.api import register_research_routes
+
+            register_research_routes(app, projects=project_store, access=knowledge, signer=signer)
+            from src.modules.gaps.api import register_gap_routes
+
+            register_gap_routes(app, projects=project_store, access=knowledge, signer=signer)
 
     @app.get("/api/{rest:path}")
     def api_not_found(rest: str) -> JSONResponse:
