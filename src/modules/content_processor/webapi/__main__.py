@@ -20,7 +20,7 @@ from src.modules.content_processor.projects.store import ProjectStore
 from src.modules.content_processor.webapi.app import create_app
 from src.modules.content_processor.webapi.projects_api import KnowledgeAccess
 
-__all__ = ["main", "parse_args"]
+__all__ = ["knowledge_access", "main", "parse_args"]
 
 HOST = "127.0.0.1"
 
@@ -49,7 +49,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def _knowledge_access() -> KnowledgeAccess:
+def knowledge_access() -> KnowledgeAccess:
     """Open each website's knowledge space as indexing did: Postgres or the SQLite file."""
     from src.modules.content_processor.knowledge.embedders import (
         HASHING_DIMS,
@@ -100,7 +100,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         runner = ScrapeRunner(store)
         runner.start()
         projects = (store, runner, TokenSigner.from_file(data / "secret.key"))
-    app = create_app(exports, static_dir=static, projects=projects, knowledge=_knowledge_access())
+    access = knowledge_access()
+    analyst = None
+    if projects is not None:
+        from src.modules.analyst.runs import CardRunner
+
+        analyst = CardRunner(projects[0], access, data / "analyst")
+    app = create_app(
+        exports, static_dir=static, projects=projects, knowledge=access, analyst=analyst
+    )
     sys.stdout.write(f"Serving {exports} at http://{HOST}:{args.port}/\n")
     uvicorn.run(app, host=HOST, port=args.port, log_level="warning")
     return 0

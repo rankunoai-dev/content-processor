@@ -52,6 +52,7 @@ from src.integrations.browser_client import BrowserRenderer, RenderLimits
 from src.integrations.evidence_store import EvidenceStore, LocalEvidenceStore
 from src.integrations.http_client import FetchLimits, HttpFetcher
 from src.integrations.impersonated_client import ImpersonatedFetcher, impersonation_available
+from src.modules.analyst.commands import register as register_analyst_commands
 from src.modules.content_processor.contracts import RunScope
 from src.modules.content_processor.enums import AccessTier, tier_rank
 from src.modules.content_processor.export.bundle import write_run_reports
@@ -862,6 +863,7 @@ def main(argv: list[str] | None = None) -> int:
     register_stamp_command(sub)
     register_history_command(sub)
     register_kb_commands(sub)
+    register_analyst_commands(sub)
 
     p_status = sub.add_parser("status", help="durable: task and resource counts")
     p_status.add_argument("--run", required=True)

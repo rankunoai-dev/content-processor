@@ -111,6 +111,19 @@ class Settings(BaseSettings):
     cp_embed_model: str = "bge-m3"
     cp_chat_model: str = "qwen2.5:7b-instruct"
 
+    # -- Analyst action cards (Claude, src/modules/analyst) ----------------
+    # Off until the product owner confirms what data may go to Claude. Caps work like
+    # the paid-scraping caps: a monthly cap of 0 means unset, and runs are refused.
+    cp_claude_enabled: bool = False
+    cp_claude_model: str = "claude-opus-5-5"
+    cp_claude_effort: str = "high"
+    cp_claude_run_cap_usd: float = Field(default=2.0, ge=0.0)
+    cp_claude_daily_cap_usd: float = Field(default=10.0, ge=0.0)
+    cp_claude_monthly_cap_usd: float = Field(
+        default=0.0, ge=0.0, description="0 means unset: Claude runs refuse to start until set."
+    )
+    cp_claude_max_tool_calls: int = Field(default=40, ge=1, le=200)
+
     # -- Content processor: Bright Data (T4 proxies / T5 unlocker) ---------
     # Caps are enforced in code before any request leaves (playbook §10, layer 2).
     brightdata_enabled: bool = Field(default=False, description="Kill switch for T4/T5.")

@@ -18,7 +18,7 @@ from __future__ import annotations
 import re
 from collections.abc import Awaitable, Callable, Sequence
 from pathlib import Path
-from typing import Annotated, Any, Literal
+from typing import TYPE_CHECKING, Annotated, Any, Literal
 from urllib.parse import urlsplit
 
 from fastapi import FastAPI, HTTPException, Query, Request, Response
@@ -62,6 +62,9 @@ from src.modules.content_processor.webapi.store import (
     SortField,
 )
 
+if TYPE_CHECKING:
+    from src.modules.analyst.runs import CardRunner
+
 __all__ = ["DEFAULT_ALLOWED_HOSTS", "WRITE_HEADER", "WRITE_HEADER_VALUE", "create_app"]
 
 WRITE_HEADER = "X-Requested-With"
@@ -99,11 +102,13 @@ def create_app(
     allowed_hosts: Sequence[str] = DEFAULT_ALLOWED_HOSTS,
     projects: tuple[ProjectStore, ScrapeRunner, TokenSigner] | None = None,
     knowledge: KnowledgeAccess | None = None,
+    analyst: CardRunner | None = None,
 ) -> FastAPI:
     """Build the app for one exports folder (and, optionally, the built web app).
 
     With `projects` (store, runner, token signer) the app also serves App module 1:
-    projects, their URL inventory, scraping runs and their reports.
+    projects, their URL inventory, scraping runs and their reports. With `analyst`
+    as well, it serves the Senior Analyst Action Cards of those projects.
     """
     store = RunStore(exports_dir)
     app = FastAPI(
@@ -275,6 +280,10 @@ def create_app(
         register_project_routes(
             app, store=project_store, runner=runner, signer=signer, knowledge=knowledge
         )
+        if analyst is not None:
+            from src.modules.analyst.api import register_analyst_routes
+
+            register_analyst_routes(app, runner=analyst, signer=signer)
 
     @app.get("/api/{rest:path}")
     def api_not_found(rest: str) -> JSONResponse:

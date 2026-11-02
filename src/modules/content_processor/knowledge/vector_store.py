@@ -142,6 +142,14 @@ class VectorStore(Protocol):
         """Chunks by id (without their vectors)."""
         ...
 
+    def page_chunks(self, url: str) -> list[ChunkRow]:
+        """Every chunk of one page, in page order (without vectors)."""
+        ...
+
+    def pages(self) -> list[PageRow]:
+        """Every page with its type, offering and mean vector."""
+        ...
+
     def counts(self) -> dict[str, int]:
         """Rows per table."""
         ...
@@ -451,6 +459,33 @@ class SqliteVectorStore:
                 found[row["chunk_id"]] = _row_from(row)
         return found
 
+    def page_chunks(self, url: str) -> list[ChunkRow]:
+        """Every chunk of one page, in page order."""
+        rows = self._db.execute(
+            f"SELECT {_CHUNK_COLUMNS} FROM chunk_vectors WHERE url = ? ORDER BY order_no",  # noqa: S608
+            (url,),
+        )
+        return [_row_from(row) for row in rows]
+
+    def pages(self) -> list[PageRow]:
+        """Every page with its type, offering and mean vector."""
+        rows = self._db.execute(
+            "SELECT page_key, run_id, url, title, page_type, offering_id, embedding"
+            " FROM page_vectors ORDER BY url"
+        )
+        return [
+            PageRow(
+                page_key=r["page_key"],
+                run_id=r["run_id"],
+                url=r["url"],
+                title=r["title"],
+                page_type=r["page_type"],
+                offering_id=r["offering_id"],
+                embedding=np.frombuffer(r["embedding"], np.float32).tolist(),
+            )
+            for r in rows
+        ]
+
     def counts(self) -> dict[str, int]:
         """Rows per table."""
         return {
@@ -720,6 +755,35 @@ class PgVectorStore:
             (self.tenant, list(dict.fromkeys(ids))),
         ).fetchall()
         return {r["chunk_id"]: _row_from(r) for r in rows}
+
+    def page_chunks(self, url: str) -> list[ChunkRow]:
+        """Every chunk of one page, in page order."""
+        rows = self._conn.execute(
+            f"SELECT {_CHUNK_COLUMNS} FROM knowledge.chunk_vectors"  # noqa: S608
+            " WHERE tenant = %s AND url = %s ORDER BY order_no",
+            (self.tenant, url),
+        ).fetchall()
+        return [_row_from(r) for r in rows]
+
+    def pages(self) -> list[PageRow]:
+        """Every page with its type, offering and mean vector."""
+        rows = self._conn.execute(
+            "SELECT page_key, run_id, url, title, page_type, offering_id, embedding::text AS v"
+            " FROM knowledge.page_vectors WHERE tenant = %s ORDER BY url",
+            (self.tenant,),
+        ).fetchall()
+        return [
+            PageRow(
+                page_key=r["page_key"],
+                run_id=r["run_id"],
+                url=r["url"],
+                title=r["title"],
+                page_type=r["page_type"],
+                offering_id=r["offering_id"],
+                embedding=[float(x) for x in r["v"].strip("[]").split(",")],
+            )
+            for r in rows
+        ]
 
     def counts(self) -> dict[str, int]:
         """Rows per table."""
