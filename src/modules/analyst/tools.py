@@ -15,7 +15,6 @@ from __future__ import annotations
 import json
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, Field, ValidationError
@@ -27,7 +26,7 @@ from src.modules.content_processor.export.commands import load_records
 from src.modules.content_processor.knowledge.catalog_models import Catalog
 from src.modules.content_processor.knowledge.federated import federated_search
 from src.modules.content_processor.knowledge.inventory_models import PageInventory
-from src.modules.content_processor.knowledge.models import Chunk, PageStamp
+from src.modules.content_processor.knowledge.models import PageStamp
 from src.modules.content_processor.knowledge.numeric import np
 
 __all__ = [
@@ -117,6 +116,14 @@ class ThemeInput(StrictModel):
     """The project's theme map."""
 
     rebuild: bool = Field(default=False, description="Build it again from the latest scrapes")
+
+
+class MonitorInput(StrictModel):
+    """The project's latest monitoring check."""
+
+    run_check: bool = Field(
+        default=False, description="Run a new check first (compares the latest scrapes)"
+    )
 
 
 class KeywordInput(StrictModel):
@@ -622,19 +629,9 @@ def _similar_pages(play: Playground, args: SimilarInput) -> dict[str, Any]:
     return {"website": data.website.key, "pages": len(pages), "pairs": pairs, "notes": notes}
 
 
-def _chunks_by_page(path: Path | None) -> dict[str, dict[str, str]]:
-    out: dict[str, dict[str, str]] = {}
-    if path is None:
-        return out
-    with path.open(encoding="utf-8") as handle:
-        for line in handle:
-            if line.strip():
-                c = Chunk.model_validate_json(line)
-                out.setdefault(c.url, {})[c.embed_text] = c.text
-    return out
-
-
 def _changes(play: Playground, args: WebsiteInput) -> dict[str, Any]:
+    from src.modules.monitoring.diff import diff_runs, load_run_files
+
     data = _data(play, args.website)
     runs = play.ready_runs(data)
     if len(runs) < 2:
@@ -645,93 +642,105 @@ def _changes(play: Playground, args: WebsiteInput) -> dict[str, Any]:
         raise ToolError(msg)
     old_run, new_run = runs[-2], runs[-1]
     folder = play.store.run_dir
-    old_dir = folder(data.copy.project_id, data.copy.site_id, old_run.run_id)
-    new_dir = folder(data.copy.project_id, data.copy.site_id, new_run.run_id)
-
-    def stamps_in(dir_: Any, run_id: str) -> dict[str, PageStamp]:
-        path = dir_ / f"{run_id}.stamps.jsonl"
-        if not path.exists():
-            return {}
-        with path.open(encoding="utf-8") as handle:
-            return {
-                s.url: s for s in (PageStamp.model_validate_json(x) for x in handle if x.strip())
-            }
-
-    old_s, new_s = stamps_in(old_dir, old_run.run_id), stamps_in(new_dir, new_run.run_id)
-    old_c = _chunks_by_page(
-        (old_dir / f"{old_run.run_id}.chunks.jsonl")
-        if (old_dir / f"{old_run.run_id}.chunks.jsonl").exists()
-        else None
+    old = load_run_files(
+        folder(data.copy.project_id, data.copy.site_id, old_run.run_id), old_run.run_id
     )
-    new_c = _chunks_by_page(
-        (new_dir / f"{new_run.run_id}.chunks.jsonl")
-        if (new_dir / f"{new_run.run_id}.chunks.jsonl").exists()
-        else None
+    new = load_run_files(
+        folder(data.copy.project_id, data.copy.site_id, new_run.run_id), new_run.run_id
     )
-    added = sorted(set(new_s) - set(old_s))
-    removed = sorted(set(old_s) - set(new_s))
-    changed = []
-    for url in sorted(set(old_s) & set(new_s)):
-        a, b = old_s[url], new_s[url]
-        head = {
-            field_name: {"before": getattr(a, field_name), "after": getattr(b, field_name)}
-            for field_name in ("title", "meta_description", "h1", "canonical")
-            if getattr(a, field_name) != getattr(b, field_name)
-        }
-        before, after = old_c.get(url, {}), new_c.get(url, {})
-        new_text = [after[k] for k in after if k not in before]
-        gone_text = [before[k] for k in before if k not in after]
-        numbers = sorted(set(b.numbers) - set(a.numbers))
-        if not (head or new_text or gone_text or numbers):
-            continue
+    result = diff_runs(old, new)
+    added, removed, changed = result.added, result.removed, result.changed
+    unchanged = result.unchanged
+    key = data.website.key
+    changed_out = []
+    for c in changed[:_MAX_CHANGED]:
         ref = play.ledger.fact(
-            f"{url}\x1f{old_run.run_id}\x1f{new_run.run_id}",
+            f"{c.url}{old_run.run_id}{new_run.run_id}",
             kind="change",
-            website=data.website.key,
-            url=url,
+            website=key,
+            url=c.url,
             project=data.copy.project_name,
-            title=f"changed: {b.title or url}",
-            text=" | ".join(_clip(t, 300) for t in new_text[:3]),
+            title=f"changed: {c.title or c.url}",
+            text=" | ".join(_clip(t, 300) for t in c.added_text[:3]),
         )
-        changed.append(
+        changed_out.append(
             {
                 "ref": ref,
-                "url": url,
-                "head_changes": head,
-                "new_numbers": numbers[:20],
-                "added_text": [_clip(t, 800) for t in new_text[:5]],
-                "removed_text": [_clip(t, 800) for t in gone_text[:5]],
-                "sections_added": len(new_text),
-                "sections_removed": len(gone_text),
+                "url": c.url,
+                "head_changes": c.head_changes,
+                "new_numbers": c.new_numbers,
+                "prices": [p.model_dump() for p in c.prices],
+                "drift": c.drift,
+                "added_text": c.added_text,
+                "removed_text": c.removed_text,
+                "sections_added": c.sections_added,
+                "sections_removed": c.sections_removed,
             }
         )
-    for url in added:
-        b = new_s[url]
-        play.ledger.fact(
-            url, kind="new-page", website=data.website.key, url=url, title=b.title or url
-        )
     return {
-        "website": data.website.key,
+        "website": key,
         "baseline": {"run": old_run.run_id, "finished": str(old_run.finished_at)},
         "latest": {"run": new_run.run_id, "finished": str(new_run.finished_at)},
         "new_pages": [
             {
                 "ref": play.ledger.fact(
-                    url,
-                    kind="new-page",
-                    website=data.website.key,
-                    url=url,
-                    title=new_s[url].title or url,
+                    url, kind="new-page", website=key, url=url, title=new.stamps[url].title or url
                 ),
                 "url": url,
-                "title": new_s[url].title,
-                "h1": new_s[url].h1,
+                "title": new.stamps[url].title,
+                "h1": new.stamps[url].h1,
             }
             for url in added
         ],
         "removed_pages": removed,
-        "changed_pages": changed[:_MAX_CHANGED],
-        "unchanged_pages": len(set(old_s) & set(new_s)) - len(changed),
+        "changed_pages": changed_out,
+        "unchanged_pages": unchanged,
+        "template_changes": [t.model_dump() for t in result.template],
+    }
+
+
+def _monitoring(play: Playground, args: MonitorInput) -> dict[str, Any]:
+    from src.modules.monitoring.service import monitor_store, run_project_check
+
+    project_id = play.project_ids[0]
+    check = None if args.run_check else monitor_store(play.store).latest(project_id)
+    if check is None:
+        check, _files = run_project_check(play.store, play.access, project_id)
+    alerts = []
+    for a in check.alerts:
+        ref = play.ledger.fact(
+            f"{check.check_id}{a.alert_id}",
+            kind="alert",
+            website=a.website,
+            url=a.urls[0] if a.urls else None,
+            project=project_id,
+            title=a.title,
+            text=a.detail,
+        )
+        alerts.append({"ref": ref, **a.model_dump(exclude={"alert_id"})})
+    return {
+        "check_id": check.check_id,
+        "created_at": check.created_at.isoformat(),
+        "stats": check.stats,
+        "alerts": alerts,
+        "websites": [
+            {
+                "website": d.website,
+                "role": d.role,
+                "compared": [d.baseline_run, d.latest_run],
+                "note": d.note,
+                "new_pages": len(d.new_pages),
+                "removed_pages": len(d.removed_pages),
+                "changed_pages": len(d.changed_pages),
+                "drift": d.drift,
+            }
+            for d in check.websites
+        ],
+        "theme_drift": [
+            t.model_dump()
+            for t in check.theme_drift
+            if t.new_pages or t.removed_pages or t.ownership_before != t.ownership_after
+        ],
     }
 
 
@@ -872,6 +881,16 @@ TOOLS: dict[str, ToolSpec] = {
             "client_only). Built offline from the scrapes; reuses the latest build.",
             ThemeInput,
             _theme_map,
+        ),
+        ToolSpec(
+            "get_monitoring_alerts",
+            "monitoring",
+            "The project's latest monitoring check: alerts ranked by severity (competitor pushes "
+            "into client themes, new competitor themes, ownership shifts, price changes, removed "
+            "pages, rewrites, pillar drift), what changed on each website, and theme drift. Runs "
+            "a check when none exists.",
+            MonitorInput,
+            _monitoring,
         ),
         ToolSpec(
             "get_keyword_rankings",

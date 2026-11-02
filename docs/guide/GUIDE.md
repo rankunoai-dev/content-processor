@@ -1,6 +1,6 @@
 # Content Processor: A Plain-Language Guide
 
-Last updated: 2 November 2026 · Code version: main after the client's several websites (brands) with notes and tags, never treated as competitors of one another · Maintained by every session that adds a significant feature (see "Keeping this guide current" at the end)
+Last updated: 2 November 2026 · Code version: main after the Monitoring module (what changed between scrapes, price changes, theme drift and alerts) and the client's several websites (brands) with notes and tags · Maintained by every session that adds a significant feature (see "Keeping this guide current" at the end)
 
 ## 1. What this is, in one paragraph
 
@@ -302,6 +302,18 @@ A workbook with every theme, the ownership table, topics and pages can be downlo
 
 On the John Hancock test project (272 pages, plus a 2-page competitor) the map took under a second: 9 themes, such as fund notices to shareholders (130 pages), monthly fund distributions (79), earnings releases (32) and the "Longer Healthier Better" podcast (18); every theme there is client-only except the competitor's security pages, which show as a client gap.
 
+### Step 18: Monitoring (what changed, and what needs attention)
+
+The **Monitoring** tab of a project compares each website's latest scrape with the previous one and says what changed and what an analyst should look at first. A check reads the scrapes already made: nothing is fetched and it costs nothing.
+
+**What a check shows.** For the client and each competitor: the new pages (each placed in its theme), the pages that disappeared, and the pages that changed, with their new or removed text, title and heading rewrites, how much of the page changed, and **price changes** (an amount in the same sentence that changed, for example "$25 per month" becoming "$19 per month"). Lines that appeared or disappeared on many pages at once (navigation, "Read more", links to other articles) are listed once as template changes, so they do not make every page look changed. The theme section shows, for each theme, how many new pages each website added and whether its owner changed.
+
+**Alerts**, most important first: a competitor adding several pages in one of the client's themes, a theme moving away from the client, a competitor changing prices, client pages disappearing; then a competitor building a theme the client does not cover, competitor title rewrites, pillar pages changing a lot; then smaller changes.
+
+**Automatic.** After each new scrape, the app runs a check by itself (on this computer, nothing is sent). A project can also be **scraped again on a schedule** (every 1, 3, 7, 14 or 30 days): that contacts the client's and competitors' websites, so it is off unless someone who unlocked the project turns it on. A workbook of every check can be downloaded, and the analyst cards read the alerts.
+
+On the John Hancock test project, comparing an earlier 107-page scrape with the 318-page one took 2 seconds: 206 new pages placed in their themes, 4 pages that really changed, and 9 template lines set apart. Testing on this real data removed false alarms: a change in how the engine splits pages, a title captured only in the newer scrape, a page still online but now marked as a duplicate, and tracking images are no longer reported as changes.
+
 ## 5. Safety and cost promises
 
 - Read-only: the engine never submits forms, logs in, buys, unsubscribes or clicks anything that changes the website.
@@ -366,6 +378,7 @@ On the John Hancock test project (272 pages, plus a 2-page competitor) the map t
 
 | Date | Significant change |
 |---|---|
+| 2026-11-02 | Monitoring: each check compares the latest scrapes with the previous ones (new, removed and changed pages, rewrites, price changes, template changes), places new pages in their themes, follows theme ownership, and ranks alerts; it runs by itself after new scrapes; scheduled re-scraping is an opt-in per project. |
 | 2026-11-02 | A project can hold several websites of the client (brands, regional sites, sections of one domain); they are always the client's side and never competitors of one another, in theming, gap findings, search and analyst cards, across all projects. Every website can carry a note and tags, editable at any time. |
 | 2026-11-02 | Themes: each project's pages, client and competitors together, grouped into themes and topics, with the pillar page on each website, who owns each theme (client, competitor, contested, client gap), funnel stages and a workbook; built on this computer at no cost, and followed over time as the map is rebuilt. |
 | 2026-11-02 | Analyst cards in the app: a tab on every project to choose a card, check it, run it (after unlocking the project), follow it live, and read, copy or download the result with its citation check. |

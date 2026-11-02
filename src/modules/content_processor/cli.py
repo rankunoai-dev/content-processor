@@ -107,6 +107,7 @@ from src.modules.content_processor.workers.doc_worker import DocWorker
 from src.modules.content_processor.workers.fetch_worker import FetchWorker, user_agent_for
 from src.modules.content_processor.workers.ports import LedgerPort
 from src.modules.content_processor.workers.render_worker import RenderWorker
+from src.modules.monitoring.commands import register as register_monitoring_commands
 from src.modules.theming.commands import register as register_theming_commands
 
 __all__ = ["main"]
@@ -866,6 +867,7 @@ def main(argv: list[str] | None = None) -> int:
     register_kb_commands(sub)
     register_analyst_commands(sub)
     register_theming_commands(sub)
+    register_monitoring_commands(sub)
 
     p_status = sub.add_parser("status", help="durable: task and resource counts")
     p_status.add_argument("--run", required=True)

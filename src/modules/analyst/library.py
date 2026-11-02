@@ -519,7 +519,7 @@ same keyword.
     # -- Module 4: Monitoring ---------------------------------------------------------------
     ActionCard(
         id="competitor-strategy-radar",
-        version=1,
+        version=2,
         title="Competitor Strategy Radar & Drift Detector",
         module="monitoring",
         category="Competitive intelligence",
@@ -541,7 +541,8 @@ same keyword.
         prompt_template="""\
 Examine what {{competitor}} changed between its last two scrapes (get_changes, already called).
 
-Phase 1 - Read every new page and the most changed pages (get_page).
+Phase 1 - Read the monitoring alerts and theme drift (get_monitoring_alerts) for what code
+already flagged, then every new page and the most changed pages (get_page).
 Phase 2 - Categorise each change: (a) new product or service launch, (b) pricing or fee
 change, (c) SEO optimisation (title, H1, description rewrites), (d) messaging or positioning
 shift, (e) removal or retreat.
@@ -549,7 +550,7 @@ Phase 3 - Executive threat assessment: what the competitor is trying to achieve,
 {{client}} (search {{client}} for the same themes and cite), and the counter-moves.
 """,
         required_tools=["get_changes", "get_page"],
-        optional_tools=["search_knowledge", "get_page_facts"],
+        optional_tools=["search_knowledge", "get_page_facts", "get_monitoring_alerts"],
         prefetch=[Prefetch(tool="get_changes", args={"website": "{{competitor}}"})],
         output_format="""\
 # Alert: New Pages & Pivots ({competitor})
@@ -584,7 +585,7 @@ Phase 3 - Ranking data is only available with the Research module; without it, s
 by business importance (page type, offering) and staleness.
 """,
         required_tools=["list_pages", "get_page_facts"],
-        optional_tools=["get_page", "get_changes", "get_keyword_rankings"],
+        optional_tools=["get_page", "get_changes", "get_keyword_rankings", "get_monitoring_alerts"],
         prefetch=[Prefetch(tool="list_pages", args={"website": "{{website}}"})],
         output_format="""\
 # Priority Content Update List: {website}
@@ -741,6 +742,7 @@ Phase 4 - The five things that matter most, each with evidence and a recommended
             "find_similar_pages",
             "get_page",
             "get_theme_map",
+            "get_monitoring_alerts",
         ],
         prefetch=[Prefetch(tool="list_websites")],
         output_format="""\

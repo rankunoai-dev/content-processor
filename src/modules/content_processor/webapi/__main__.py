@@ -106,6 +106,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         from src.modules.analyst.runs import CardRunner
 
         analyst = CardRunner(projects[0], access, data / "analyst")
+        from src.modules.monitoring.service import MonitorWatcher
+
+        # checks by itself after new scrapes; re-scrapes only where a project opted in
+        MonitorWatcher(projects[0], access, projects[1]).start()
     app = create_app(
         exports, static_dir=static, projects=projects, knowledge=access, analyst=analyst
     )
