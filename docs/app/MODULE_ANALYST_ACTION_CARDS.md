@@ -97,7 +97,7 @@ Each run keeps `app_data/analyst/runs/<run>/`: `run.json` (inputs, card version,
 | Step | What | State |
 |---|---|---|
 | **1** | **Action Card Engine and Claude control plane**: 15-card library, inter-module tool bridge (Module 1 + theming catalog + monitoring diffs), Claude API loop with budget, verification and sources, context-pack mode, CLI and API | **built**, including the web screen (2026-11-02) |
-| 2 | Theming module: topic clustering from page vectors, funnel and audience labels, theme projects | next |
+| 2 | Theming module: themes and topics across websites, pillars, ownership, funnel stages, theme map over time (`MODULE_THEMING.md`) | **built** 2026-11-02 (audience and brand-voice labels still to do) |
 | 3 | Research module: Semrush connectors (rankings, SERP, keyword metrics) storing snapshots; unlocks cards 8-10 | needs Semrush key and cap |
 | 4 | Monitoring module: scheduled re-scrapes and rank tracking, change alerts; feeds cards 11-12 | after 3 |
 | 5 | Gap Analysis and unified playground: cross-module joins (content x topics x keywords x monitoring), findings tracked to closure, multi-site playground screen | after 2-4 |

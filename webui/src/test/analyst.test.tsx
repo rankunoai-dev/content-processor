@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from '@testing-library/react';
+import { act, screen, waitFor, within } from '@testing-library/react';
 import userEvent, { PointerEventsCheckLevel } from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ActionCard, CardRun, CardSummary } from '../api/analyst';
@@ -228,7 +228,7 @@ describe('analyst cards', () => {
       expect(buttonIn(within(form), /^Run$/)).toBeDisabled();
       expect(within(form).getByText('Unlock the project with its password to run cards.')).toBeInTheDocument();
 
-      useProjectTokens.getState().remember('p1', 'tok-1', '2099-01-01T00:00:00Z');
+      act(() => useProjectTokens.getState().remember('p1', 'tok-1', '2099-01-01T00:00:00Z'));
       await waitFor(() => expect(buttonIn(within(form), /^Run$/)).not.toBeDisabled());
       await user.click(buttonIn(within(form), /^Run$/));
       await waitFor(() => expect(sent).toHaveLength(2));

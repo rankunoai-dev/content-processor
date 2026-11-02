@@ -1,6 +1,6 @@
 # Content Processor: A Plain-Language Guide
 
-Last updated: 2 November 2026 · Code version: main after the Analyst cards screen in the app (choose, check and run a card, follow it live, read and download the result) · Maintained by every session that adds a significant feature (see "Keeping this guide current" at the end)
+Last updated: 2 November 2026 · Code version: main after the Theming module (themes, topics, pillar pages, theme ownership and funnel stages across the client and its competitors) · Maintained by every session that adds a significant feature (see "Keeping this guide current" at the end)
 
 ## 1. What this is, in one paragraph
 
@@ -282,6 +282,22 @@ An action card is a ready-made analysis a senior SEO analyst would run, for exam
 
 **Cost and data safety.** Claude is switched off until you confirm which data may go to it. Until then each card produces a **context pack** instead: the full brief and the data, as a file you can give to Claude yourself where your policy allows. It costs nothing and sends nothing. Once Claude is switched on, a monthly cap must be set (no cap means no runs), and every call is checked in advance against the run, daily and monthly caps, so they cannot be crossed. A project can be marked confidential, and then none of its data is sent to Claude. Every run is kept with its brief, inputs, cost and checks.
 
+### Step 17: Themes (what each website covers, and who owns each subject)
+
+The **Themes** tab of a project groups all the pages of the client and its competitors into **themes** (subjects such as "term life insurance" or "secure printing") and, where a theme is broad, into narrower **topics**. Everything is worked out on this computer from the scraped pages: nothing is sent anywhere and it costs nothing.
+
+**How pages are grouped.** Each page is described by the words in its title, main heading, breadcrumb, section headings, description and the start of its text; the title and heading count most. Words that appear on nearly every page of one website (its brand name, its footer) are ignored for that website. Pages that use the same distinctive words are grouped together, across all websites at once, so a client page and a competitor page about the same subject end up in the same theme. Each theme is named after the words that set it apart.
+
+**What each theme shows.**
+- How many pages each website has on it.
+- **Who owns it**: the client owns it (at least one and a half times the pages of any competitor), a competitor leads it, it is contested, it is a **client gap** (competitors cover it and the client does not), or only the client covers it.
+- The **pillar page** on each website: the page that anchors the subject (central to it, high in the site, an offering page in the catalog, and rich in content), with the reasons. The other pages are its supporting pages.
+- Its topics, the matching offerings from the catalog, and the **funnel stage** of its pages: learning, comparing, deciding, getting started or getting help.
+
+A workbook with every theme, the ownership table, topics and pages can be downloaded. When the map is built again later, a theme keeps its identity even as pages are added, so changes over time can be followed (which themes appeared, grew, shrank or changed owner). The analyst cards use the theme map too: the "Topic Cluster & Pillar Map" card starts from it.
+
+On the John Hancock test project (272 pages, plus a 2-page competitor) the map took under a second: 9 themes, such as fund notices to shareholders (130 pages), monthly fund distributions (79), earnings releases (32) and the "Longer Healthier Better" podcast (18); every theme there is client-only except the competitor's security pages, which show as a client gap.
+
 ## 5. Safety and cost promises
 
 - Read-only: the engine never submits forms, logs in, buys, unsubscribes or clicks anything that changes the website.
@@ -346,6 +362,7 @@ An action card is a ready-made analysis a senior SEO analyst would run, for exam
 
 | Date | Significant change |
 |---|---|
+| 2026-11-02 | Themes: each project's pages, client and competitors together, grouped into themes and topics, with the pillar page on each website, who owns each theme (client, competitor, contested, client gap), funnel stages and a workbook; built on this computer at no cost, and followed over time as the map is rebuilt. |
 | 2026-11-02 | Analyst cards in the app: a tab on every project to choose a card, check it, run it (after unlocking the project), follow it live, and read, copy or download the result with its citation check. |
 | 2026-11-02 | Senior Analyst Action Cards: 15 ready-made SEO analyses (trust audit, cannibalization, technical fixes, AI answer readiness, topic clusters, funnel, offering matrix, competitor radar, content refresh, head-to-head gap, content brief, executive briefing; 3 keyword cards wait for Semrush). Each gives Claude a detailed brief and the project's data, and every statement in the result is checked against the pages and listed with its proof. Claude is off until the data policy is confirmed; meanwhile each card produces a free context pack. Spending caps per run, day and month. |
 | 2026-10-31 | Projects hold the client's website and competitor websites, each stored on its own (addresses, scrapes, reports, searchable knowledge). One list can fill several websites at once. Search across websites, by default the client and every competitor known in any project, each website searched once in its most recent scrape. |

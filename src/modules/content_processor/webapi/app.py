@@ -284,6 +284,10 @@ def create_app(
             from src.modules.analyst.api import register_analyst_routes
 
             register_analyst_routes(app, runner=analyst, signer=signer)
+        if knowledge is not None:
+            from src.modules.theming.api import register_theming_routes
+
+            register_theming_routes(app, projects=project_store, access=knowledge, signer=signer)
 
     @app.get("/api/{rest:path}")
     def api_not_found(rest: str) -> JSONResponse:

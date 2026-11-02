@@ -1534,3 +1534,55 @@ export const ANALYST = {
     error: (message: string) => `Error: ${message}`,
   },
 };
+
+/** Theming module: the project's "Themes" tab. */
+export const THEMES = {
+  tab: 'Themes',
+  intro:
+    'The project’s content grouped into themes and topics across the client and its competitors, with the pillar page of each theme on each website and who owns each theme. Built from the scrapes on this computer; nothing is sent anywhere and it costs nothing.',
+  empty: 'No theme map has been built for this project yet.',
+  build: 'Build the theme map',
+  rebuild: 'Build again',
+  building: 'Building…',
+  built: (when: string) => `Built ${when}`,
+  needsUnlock: 'Unlock the project with its password to build the theme map.',
+  workbook: 'Download workbook',
+  websites: 'Websites',
+  skipped: 'Left out:',
+  stats: (s: Record<string, number>) =>
+    `${s.themes ?? 0} themes · ${s.topics ?? 0} topics · ${s.pages ?? 0} pages (${s.unclustered ?? 0} not in any theme)`,
+  filter: 'Show',
+  all: 'All themes',
+  ownership: {
+    client_gap: 'Client gap',
+    competitor_led: 'Competitor leads',
+    contested: 'Contested',
+    client_owned: 'Client owns',
+    client_only: 'Only the client',
+  } as Record<string, string>,
+  ownershipColor: {
+    client_gap: 'red',
+    competitor_led: 'orange',
+    contested: 'gold',
+    client_owned: 'green',
+    client_only: 'blue',
+  } as Record<string, string>,
+  columns: { theme: 'Theme', owner: 'Ownership', pages: 'Pages' },
+  terms: 'Defining terms',
+  topics: 'Topics',
+  pillars: 'Pillar page on each website',
+  noPillar: 'no pillar (fewer than two pages)',
+  funnel: 'Funnel stages',
+  offerings: 'Matches catalog offerings',
+  why: 'Why',
+  funnelTitle: 'Funnel stages per website',
+  stages: {
+    learn: 'Learn',
+    compare: 'Compare',
+    decide: 'Decide',
+    onboard: 'Onboard',
+    support: 'Support',
+    unknown: 'Unclear',
+  } as Record<string, string>,
+  pageCount: (n: number) => `${n} page${n === 1 ? '' : 's'}`,
+};

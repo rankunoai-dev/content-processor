@@ -113,6 +113,12 @@ class SimilarInput(StrictModel):
     min_similarity: float = Field(default=0.85, ge=0.5, le=0.99)
 
 
+class ThemeInput(StrictModel):
+    """The project's theme map."""
+
+    rebuild: bool = Field(default=False, description="Build it again from the latest scrapes")
+
+
 class KeywordInput(StrictModel):
     """A keyword research request (Research module, not built yet)."""
 
@@ -726,6 +732,57 @@ def _changes(play: Playground, args: WebsiteInput) -> dict[str, Any]:
     }
 
 
+def _theme_map(play: Playground, args: ThemeInput) -> dict[str, Any]:
+    from src.modules.theming.service import build_project_themes, theme_store
+
+    project_id = play.project_ids[0]
+    theme_map = None if args.rebuild else theme_store(play.store).latest(project_id)
+    if theme_map is None:
+        theme_map, _files = build_project_themes(play.store, play.access, project_id)
+    themes = []
+    for t in theme_map.themes:
+        ref = play.ledger.fact(
+            f"{theme_map.map_id}{t.theme_id}",
+            kind="theme",
+            website=",".join(c.website for c in t.coverage if c.pages),
+            project=project_id,
+            title=f"theme: {t.label}",
+            text=f"{t.ownership}: {t.ownership_reason}",
+        )
+        themes.append(
+            {
+                "ref": ref,
+                "theme_id": t.theme_id,
+                "label": t.label,
+                "terms": t.terms,
+                "pages": t.pages,
+                "ownership": t.ownership,
+                "why": t.ownership_reason,
+                "per_website": {
+                    c.website: {
+                        "pages": c.pages,
+                        "words": c.words,
+                        "pillar": c.pillar.url if c.pillar else None,
+                    }
+                    for c in t.coverage
+                },
+                "topics": [{"label": tp.label, "pages": len(tp.pages)} for tp in t.topics],
+                "funnel": t.funnel,
+                "offerings": t.offerings,
+            }
+        )
+    return {
+        "map_id": theme_map.map_id,
+        "built_at": theme_map.built_at.isoformat(),
+        "websites": [
+            {"website": w.website, "role": w.role, "pages": w.pages} for w in theme_map.websites
+        ],
+        "themes": themes,
+        "unclustered_pages": theme_map.stats.get("unclustered", 0),
+        "skipped": theme_map.skipped,
+    }
+
+
 TOOLS: dict[str, ToolSpec] = {
     spec.name: spec
     for spec in (
@@ -802,6 +859,16 @@ TOOLS: dict[str, ToolSpec] = {
             "title/H1/description rewrites, added and removed text, new numbers (prices, rates).",
             WebsiteInput,
             _changes,
+        ),
+        ToolSpec(
+            "get_theme_map",
+            "theming",
+            "The project's theme map: themes (topic clusters) across the client and its "
+            "competitors, each with its pages per website, pillar page per website, topics, "
+            "funnel stages and ownership (client_owned, contested, competitor_led, client_gap, "
+            "client_only). Built offline from the scrapes; reuses the latest build.",
+            ThemeInput,
+            _theme_map,
         ),
         ToolSpec(
             "get_keyword_rankings",

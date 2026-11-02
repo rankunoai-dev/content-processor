@@ -275,7 +275,7 @@ directly (check with search_knowledge, role "faq", and cite the search).
     # -- Module 2: Theming & topics --------------------------------------------------------
     ActionCard(
         id="topic-cluster-map",
-        version=1,
+        version=2,
         title="Topic Cluster & Pillar Map",
         module="theming",
         category="Information architecture",
@@ -288,11 +288,14 @@ directly (check with search_knowledge, role "faq", and cite the search).
         prompt_template="""\
 Map {{website}} into topic clusters.
 
-Phase 1 - Read the offering catalog and the page list (both already called). Use the catalog's
-families and offerings as candidate pillars and the URL path families as a second signal.
+Phase 1 - Start from the theme map (get_theme_map, already called): its themes, topics,
+pillar pages and ownership are computed by code from the scrapes of every website in the
+project. Check them against the offering catalog and the page list (both already called):
+the catalog's families and offerings are candidate pillars, the URL path families a second
+signal. Where the theme map and the catalog disagree, say so and cite both.
 
-Phase 2 - Place every page: pillar (hub), spoke (supporting), or unclustered. Note pages
-mapped by both catalog and path (strong) and by only one (weak).
+Phase 2 - Place every page of {{website}}: pillar (hub), spoke (supporting), or unclustered.
+Note pages placed by both the theme map and the catalog or path (strong) and by one (weak).
 
 Phase 3 - Diagnose: orphan spokes (supporting pages with no pillar), missing spokes (sub-topics
 a pillar should cover but no page does; check with search_knowledge and cite the search),
@@ -301,9 +304,10 @@ diluted pillars (one page trying to cover many topics; read it with get_page).
 Phase 4 - Propose the target cluster structure and the internal links between hub and spokes
 (source page, target page, suggested anchor text).
 """,
-        required_tools=["get_offering_catalog", "list_pages"],
+        required_tools=["get_theme_map", "get_offering_catalog", "list_pages"],
         optional_tools=["get_page", "get_page_facts", "search_knowledge"],
         prefetch=[
+            Prefetch(tool="get_theme_map"),
             Prefetch(tool="get_offering_catalog", args={"website": "{{website}}"}),
             Prefetch(tool="list_pages", args={"website": "{{website}}"}),
         ],
@@ -346,7 +350,7 @@ content they offer at each stage that the client does not.
 Phase 3 - Report empty or thin stages and the calls to action at each stage (role "cta").
 """,
         required_tools=["list_pages", "search_knowledge"],
-        optional_tools=["get_page_facts", "get_offering_catalog", "get_page"],
+        optional_tools=["get_page_facts", "get_offering_catalog", "get_page", "get_theme_map"],
         prefetch=[
             Prefetch(tool="list_pages", args={"website": "{{client}}"}),
             Prefetch(
@@ -394,7 +398,7 @@ Phase 3 - Mark each cell: offered and well covered, offered but thin, not offere
 cite the search), or offered differently (name the difference).
 """,
         required_tools=["get_offering_catalog", "search_knowledge"],
-        optional_tools=["get_page", "list_pages", "list_websites"],
+        optional_tools=["get_page", "list_pages", "list_websites", "get_theme_map"],
         prefetch=[
             Prefetch(tool="get_offering_catalog", args={"website": "{{client}}"}),
             Prefetch(
@@ -725,7 +729,13 @@ when available (skip with a note when a competitor has only one scrape).
 Phase 4 - The five things that matter most, each with evidence and a recommended move.
 """,
         required_tools=["list_websites", "get_offering_catalog", "search_knowledge"],
-        optional_tools=["get_seo_issues", "get_changes", "find_similar_pages", "get_page"],
+        optional_tools=[
+            "get_seo_issues",
+            "get_changes",
+            "find_similar_pages",
+            "get_page",
+            "get_theme_map",
+        ],
         prefetch=[Prefetch(tool="list_websites")],
         output_format="""\
 # Executive Briefing: {client}
