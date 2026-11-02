@@ -863,3 +863,25 @@ mark {
 .ant-list-item-action a {
   white-space: nowrap;
 }
+
+/* Analyst cards */
+.analyst-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
+}
+.analyst-grid .ant-card-head-title {
+  white-space: normal;
+}
+.analyst-card-unavailable {
+  opacity: 0.6;
+}
+.analyst-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 60vh;
+  overflow: auto;
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+}

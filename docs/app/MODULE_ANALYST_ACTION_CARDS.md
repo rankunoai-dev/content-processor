@@ -55,7 +55,8 @@ The added cards fill gaps in the proposed eleven: GEO readiness (how quotable th
 
 - **Context pack** (default, $0, nothing leaves the machine): `python -m src.modules.content_processor.cli analyze run <card> --project <id> [--set name=value]`. It writes `context_pack.md` (instructions, task and prefetched data) for a person to use in a Claude app if the data policy allows.
 - **Claude**: add `--backend claude` (needs `CP_CLAUDE_ENABLED=true`, a monthly cap and `ANTHROPIC_API_KEY` or an `ant auth login` profile). It writes `deliverable.md` with code's verification and sources.
-- **API** (for the web app's card screen, next step): `GET /api/analyst/cards`, `POST /api/projects/{id}/analyst/preflight`, `POST /api/projects/{id}/analyst/runs` (needs the project's unlock token), `GET .../runs/{run}`, `GET .../runs/{run}/events` (live progress).
+- **Web app**: the project's **Analyst cards** tab (library by module, card form with project defaults, Check, Run after unlocking, run list, run viewer with live progress, citation check, copy and download).
+- **API** (used by the tab): `GET /api/analyst/cards`, `POST /api/projects/{id}/analyst/preflight`, `POST /api/projects/{id}/analyst/runs` (needs the project's unlock token), `GET .../runs/{run}`, `GET .../runs/{run}/events` (live progress).
 - Other commands: `analyze cards | show | preflight | runs | policy | spend`.
 
 Each run keeps `app_data/analyst/runs/<run>/`: `run.json` (inputs, card version, backend, model, turns, tool calls, tokens, cost, verification), `prompt.md`, `context_pack.md` or `deliverable.md`, `ledger.json` (every reference shown to Claude, with URL and evidence ids) and `events.jsonl`.
@@ -95,7 +96,7 @@ Each run keeps `app_data/analyst/runs/<run>/`: `run.json` (inputs, card version,
 
 | Step | What | State |
 |---|---|---|
-| **1** | **Action Card Engine and Claude control plane**: 15-card library, inter-module tool bridge (Module 1 + theming catalog + monitoring diffs), Claude API loop with budget, verification and sources, context-pack mode, CLI and API | **built** (this branch); next in this step: the web screen for cards and live run view |
+| **1** | **Action Card Engine and Claude control plane**: 15-card library, inter-module tool bridge (Module 1 + theming catalog + monitoring diffs), Claude API loop with budget, verification and sources, context-pack mode, CLI and API | **built**, including the web screen (2026-11-02) |
 | 2 | Theming module: topic clustering from page vectors, funnel and audience labels, theme projects | next |
 | 3 | Research module: Semrush connectors (rankings, SERP, keyword metrics) storing snapshots; unlocks cards 8-10 | needs Semrush key and cap |
 | 4 | Monitoring module: scheduled re-scrapes and rank tracking, change alerts; feeds cards 11-12 | after 3 |

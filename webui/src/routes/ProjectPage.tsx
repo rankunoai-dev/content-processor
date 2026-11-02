@@ -58,9 +58,10 @@ import {
   type Site,
 } from '../api/projects';
 import { QueryState } from '../components/QueryState';
+import { AnalystTab } from './AnalystTab';
 import { StatusBar, StatusLegend } from '../components/StatusBar';
 import { PageHeading } from '../components/bits';
-import { PROJECTS, formatDate, reportKind } from '../vocabulary';
+import { PROJECTS, formatDate, reportKind, ANALYST } from '../vocabulary';
 
 const STATUS_COLOR: Record<string, string> = {
   queued: 'default',
@@ -1070,6 +1071,7 @@ export default function ProjectPage() {
                   ),
                 },
                 { key: 'search', label: PROJECTS.ask.tab, children: <SearchTab project={p} /> },
+                { key: 'analyst', label: ANALYST.tab, children: <AnalystTab project={p} token={token} /> },
                 { key: 'settings', label: PROJECTS.tabs.settings, children: <SettingsTab project={p} token={token} /> },
               ]}
             />

@@ -1,6 +1,6 @@
 # Content Processor: A Plain-Language Guide
 
-Last updated: 2 November 2026 · Code version: main after the Senior Analyst Action Cards (packaged SEO analyses run by Claude over the project's data, every claim checked) · Maintained by every session that adds a significant feature (see "Keeping this guide current" at the end)
+Last updated: 2 November 2026 · Code version: main after the Analyst cards screen in the app (choose, check and run a card, follow it live, read and download the result) · Maintained by every session that adds a significant feature (see "Keeping this guide current" at the end)
 
 ## 1. What this is, in one paragraph
 
@@ -278,6 +278,8 @@ An action card is a ready-made analysis a senior SEO analyst would run, for exam
 
 **Every claim is checked.** Claude must cite, after every statement, a reference the engine handed out in this run. When it finishes, the engine checks that every reference is real, that every quote appears word for word on the page, and that statements with numbers are cited. It then adds a "Sources" table with the page address and the proof (evidence) behind each reference, so those details never come from the AI. A deliverable that fails a check is marked "needs review" with the reasons. Claude is told never to estimate search volume or traffic, and never to follow instructions written inside the websites it reads.
 
+**In the app.** Each project has an **Analyst cards** tab. It shows the cards grouped by module (cards that need a module not built yet are greyed out, with the reason). Choosing a card opens its inputs, already set to the project's client and competitor websites; **Check** says whether it can run and what is missing or weak, and **Run** (once the project is unlocked with its password) starts it. Each run appears in a list with its status, cost and citation check; opening it shows its progress as it happens, the check of every citation and quote, and the result, which can be copied or downloaded.
+
 **Cost and data safety.** Claude is switched off until you confirm which data may go to it. Until then each card produces a **context pack** instead: the full brief and the data, as a file you can give to Claude yourself where your policy allows. It costs nothing and sends nothing. Once Claude is switched on, a monthly cap must be set (no cap means no runs), and every call is checked in advance against the run, daily and monthly caps, so they cannot be crossed. A project can be marked confidential, and then none of its data is sent to Claude. Every run is kept with its brief, inputs, cost and checks.
 
 ## 5. Safety and cost promises
@@ -308,7 +310,7 @@ An action card is a ready-made analysis a senior SEO analyst would run, for exam
 - Starting runs from the web: the analyst web app reviews finished runs, but runs are still started from the command line, and there is no live progress feed or deployment package yet.
 - Some content types: text drawn on canvas or in CSS, combinations of product options (each option is captured on its own, never every combination), audio and video, archives and email files, and old-style .doc and .xls files.
 - Semantic similarity in the reports: the knowledge base can search by meaning, but the overlap and contradiction reports still compare exact wording.
-- Action cards: the screen in the web app to choose and run cards is not built yet (cards run from the command line and the server's API). Claude stays off until the data policy is confirmed, so no card has been run through Claude on real data yet; the Claude part is tested against a simulated Claude only. The three keyword cards need the Research module (Semrush), which is not built.
+- Action cards: Claude stays off until the data policy is confirmed, so no card has been run through Claude on real data yet; the Claude part is tested against a simulated Claude only. The three keyword cards need the Research module (Semrush), which is not built.
 - The rest of the knowledge base: competitor comparison and gap reports are designed but not built yet (stamping, the offering catalog, section labels, search and questions are done). The AI steps (embeddings with bge-m3, labels and answers from a local model) have been tested against a simulated server only, and the Postgres vector store only in automated tests, until Ollama and Postgres with pgvector are installed; until then the local file and the word-matching stand-in are used.
 - Hidden page text: some text present in the page code (for example frequently-asked-question answers) is not yet revealed and captured by the browser exploration; the engine flags these pages for review rather than counting them complete.
 - Skipping a page without asking the website at all (for example from the dates in the site's sitemap): every page seen before still gets one light request.
@@ -344,6 +346,7 @@ An action card is a ready-made analysis a senior SEO analyst would run, for exam
 
 | Date | Significant change |
 |---|---|
+| 2026-11-02 | Analyst cards in the app: a tab on every project to choose a card, check it, run it (after unlocking the project), follow it live, and read, copy or download the result with its citation check. |
 | 2026-11-02 | Senior Analyst Action Cards: 15 ready-made SEO analyses (trust audit, cannibalization, technical fixes, AI answer readiness, topic clusters, funnel, offering matrix, competitor radar, content refresh, head-to-head gap, content brief, executive briefing; 3 keyword cards wait for Semrush). Each gives Claude a detailed brief and the project's data, and every statement in the result is checked against the pages and listed with its proof. Claude is off until the data policy is confirmed; meanwhile each card produces a free context pack. Spending caps per run, day and month. |
 | 2026-10-31 | Projects hold the client's website and competitor websites, each stored on its own (addresses, scrapes, reports, searchable knowledge). One list can fill several websites at once. Search across websites, by default the client and every competitor known in any project, each website searched once in its most recent scrape. |
 | 2026-10-30 | Searchable knowledge base: "index" stores every page section with its meaning (local bge-m3 model, or a word-matching stand-in until Ollama runs), its exact text and its evidence, in Postgres with pgvector or a local file, re-using unchanged sections; sections are labelled by role and product only when two independent signals agree; "search" combines meaning and exact words; "ask" answers with statements each checked against a word-for-word quote and linked to the page; "kb-check" says what is ready. John Hancock: 1,308 sections in about 10 seconds, $0. |

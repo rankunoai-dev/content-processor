@@ -1444,3 +1444,93 @@ export function reportKind(name: string): { rank: number; text: string } {
   return kind ? { rank: index, text: kind[1] } : { rank: 99, text: '' };
 }
 
+
+/** Senior Analyst Action Cards: the project's "Analyst cards" tab. */
+export const ANALYST = {
+  tab: 'Analyst cards',
+  intro:
+    'Ready-made analyses a senior SEO analyst would run on this project. Choose a card: it fills in the websites from the project, gathers the data, and (with Claude) writes the deliverable. Every statement must cite the pages it comes from, and the engine checks each citation and quote.',
+  modules: {
+    content: 'Content',
+    theming: 'Themes and topics',
+    research: 'Keyword research',
+    monitoring: 'Monitoring',
+    gap: 'Gap analysis',
+    playground: 'Across modules',
+  } as Record<string, string>,
+  needs: (modules: string[]) =>
+    `Needs the ${modules.map((m) => (m === 'research' ? 'Research (Semrush)' : m)).join(', ')} module, which is not built yet.`,
+  deliverable: 'Produces',
+  open: 'Use this card',
+  inputs: 'Inputs',
+  inputHelp: {
+    website: 'A website of this project (or one it competes with in another project).',
+    url: 'A full page address on one of the project’s websites.',
+  },
+  defaultClient: 'The client’s website',
+  defaultCompetitors: 'All competitor websites of the project',
+  optional: 'optional',
+  backend: 'How to run it',
+  backends: {
+    pack: 'Context pack (free; nothing is sent anywhere)',
+    claude: 'Claude writes the deliverable (paid; must be switched on)',
+  } as Record<string, string>,
+  backendHelp: {
+    pack: 'Writes the full brief with the data gathered for it, as a file you can give to Claude yourself where your data policy allows.',
+    claude:
+      'Sends the brief and the data to Claude, which may look up more on the project’s websites. Spending is capped per run, day and month. Refused until Claude is switched on and a monthly cap is set.',
+  } as Record<string, string>,
+  check: 'Check',
+  checking: 'Checking…',
+  ready: 'Ready to run.',
+  notReady: 'This card cannot run yet:',
+  warnings: 'Worth knowing:',
+  run: 'Run',
+  started: 'The card is running. It appears in the list below.',
+  needsUnlock: 'Unlock the project with its password to run cards.',
+  runsTitle: 'Card runs',
+  noRuns: 'No card has been run for this project yet.',
+  columns: {
+    card: 'Card',
+    how: 'How',
+    status: 'Status',
+    started: 'Started',
+    cost: 'Cost',
+    check: 'Citations',
+  },
+  status: {
+    queued: 'Waiting',
+    running: 'Running',
+    finished: 'Finished',
+    failed: 'Failed',
+    refused: 'Not started',
+  } as Record<string, string>,
+  verified: 'Checked',
+  needsReview: 'Needs review',
+  noCheck: '-',
+  view: 'Open',
+  viewer: {
+    title: (card: string) => `Card run: ${card}`,
+    progress: 'Progress',
+    result: 'Result',
+    pack: 'Context pack',
+    deliverable: 'Deliverable',
+    download: 'Download (.md)',
+    copy: 'Copy',
+    copied: 'Copied.',
+    waiting: 'The result appears here when the run ends.',
+    noText: 'This run has no text to show.',
+    check: (v: { resolved: number; references: number; quotes_checked: number; quotes_failed: string[]; uncited_lines: string[] }) =>
+      `${v.resolved} of ${v.references} citations point at data from this run; ${v.quotes_checked - v.quotes_failed.length} of ${v.quotes_checked} quotes match their page word for word; ${v.uncited_lines.length} statement(s) without a citation.`,
+    cost: (usd: number, cap: number | null) =>
+      cap === null ? `$${usd.toFixed(4)}` : `$${usd.toFixed(4)} of a $${cap.toFixed(2)} cap`,
+    usage: (turns: number, calls: number) => `${turns} Claude turn(s), ${calls} data look-up(s)`,
+  },
+  events: {
+    prefetch: (tool: string, error: boolean) => `Gathered data: ${tool.replace(/_/g, ' ')}${error ? ' (failed)' : ''}`,
+    tool: (name: string, error: boolean) => `Claude looked up: ${name.replace(/_/g, ' ')}${error ? ' (failed)' : ''}`,
+    cost: (usd: number) => `Cost so far: $${usd.toFixed(4)}`,
+    end: (status: string, message: string) => `Ended: ${status}${message ? ` (${message})` : ''}`,
+    error: (message: string) => `Error: ${message}`,
+  },
+};
