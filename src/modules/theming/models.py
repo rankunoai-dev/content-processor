@@ -42,10 +42,14 @@ class ThemeWebsite(StrictModel):
 
     website: str = Field(description="Its key (shortest domain)")
     name: str
-    role: Literal["client", "competitor"]
+    role: Literal["client", "competitor"] = Field(
+        description="client for every website of the client (its brands too), else competitor"
+    )
     project: str = Field(description="The project whose scrape was used (freshest copy)")
     run_id: str
     pages: int = Field(ge=0)
+    note: str = Field(default="", description="What the website is, as the project team wrote it")
+    tags: list[str] = Field(default_factory=list)
 
 
 class Pillar(StrictModel):

@@ -97,7 +97,10 @@ def _as_list(value: Any) -> list[str]:
 
 
 def _project_sites(play: Playground, project_id: str) -> tuple[str | None, list[str]]:
-    """The project's client website key and its competitor keys."""
+    """The project's main client website key and its competitor keys.
+
+    The client's other websites or brands are neither: they are never competitors.
+    """
     project = play.store.get(project_id)
     client: str | None = None
     competitors: list[str] = []
@@ -108,7 +111,7 @@ def _project_sites(play: Playground, project_id: str) -> tuple[str | None, list[
         if website is None:
             continue
         if site.role == "client":
-            client = website.key
+            client = client or website.key
         else:
             competitors.append(website.key)
     return client, competitors

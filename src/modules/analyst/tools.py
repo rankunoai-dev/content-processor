@@ -236,8 +236,11 @@ def _list_websites(play: Playground, _args: NoInput) -> dict[str, Any]:
                 "website": website.key,
                 "name": website.name,
                 "role_in_this_run": play.role_in_run(website),
+                "note": website.note,
+                "tags": website.tags,
                 "domains": sorted(website.domains),
                 "competes_with": sorted(website.competitors),
+                "same_client_as": sorted(w.key for w in play.graph.sisters_of(website)),
                 "projects": sorted({c.project_name for c in website.copies}),
                 "searchable": data is not None,
                 "last_scrape": data.run.finished_at.isoformat()

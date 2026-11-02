@@ -24,7 +24,75 @@ interface CreateForm {
   password: string;
   confirm: string;
   client_website?: string;
-  competitors?: { name?: string; website?: string }[];
+  client_note?: string;
+  client_brands?: { name?: string; website?: string; note?: string }[];
+  competitors?: { name?: string; website?: string; note?: string }[];
+}
+
+type Row = { name?: string; website?: string; note?: string };
+
+/** The filled rows of a website list, as the API takes them (a note only when written). */
+function rows(list: Row[] | undefined) {
+  return (list ?? [])
+    .filter((c) => c.name?.trim())
+    .map((c) => ({
+      name: (c.name ?? '').trim(),
+      website: c.website?.trim() || null,
+      ...(c.note?.trim() ? { note: c.note.trim() } : {}),
+    }));
+}
+
+/** One editable list of websites (brands or competitors): name, address and a note each. */
+function SiteRows({
+  list,
+  nameLabel,
+  addLabel,
+}: {
+  list: 'client_brands' | 'competitors';
+  nameLabel: string;
+  addLabel: string;
+}) {
+  return (
+    <Form.List name={list}>
+      {(fields, { add, remove }) => (
+        <>
+          {fields.map((field, index) => (
+            <Space key={field.key} align="baseline" wrap style={{ display: 'flex' }}>
+              <Form.Item
+                name={[field.name, 'name']}
+                rules={[{ required: true, whitespace: true, message: PROJECTS.form.required }]}
+              >
+                <Input aria-label={`${nameLabel} ${index + 1}`} placeholder={nameLabel} maxLength={120} />
+              </Form.Item>
+              <Form.Item name={[field.name, 'website']}>
+                <Input
+                  aria-label={`${list === 'competitors' ? PROJECTS.sites.competitorWebsite : PROJECTS.sites.brandWebsite} ${index + 1}`}
+                  placeholder={PROJECTS.sites.competitorWebsite}
+                  maxLength={500}
+                />
+              </Form.Item>
+              <Form.Item name={[field.name, 'note']}>
+                <Input
+                  aria-label={`${PROJECTS.sites.note} ${nameLabel} ${index + 1}`}
+                  placeholder={PROJECTS.sites.notePlaceholderShort}
+                  maxLength={2000}
+                />
+              </Form.Item>
+              <Button
+                type="text"
+                icon={<MinusCircleOutlined />}
+                aria-label={`${PROJECTS.sites.remove} ${index + 1}`}
+                onClick={() => remove(field.name)}
+              />
+            </Space>
+          ))}
+          <Button type="dashed" icon={<PlusOutlined />} onClick={() => add({})} block>
+            {addLabel}
+          </Button>
+        </>
+      )}
+    </Form.List>
+  );
 }
 
 function CreateProject({ open, onClose }: { open: boolean; onClose: () => void }) {
@@ -45,9 +113,9 @@ function CreateProject({ open, onClose }: { open: boolean; onClose: () => void }
         client_name: values.client_name.trim(),
         password: values.password,
         client_website: values.client_website?.trim() || null,
-        competitors: (values.competitors ?? [])
-          .filter((c) => c.name?.trim())
-          .map((c) => ({ name: (c.name ?? '').trim(), website: c.website?.trim() || null })),
+        ...(values.client_note?.trim() ? { client_note: values.client_note.trim() } : {}),
+        ...(rows(values.client_brands).length > 0 ? { client_brands: rows(values.client_brands) } : {}),
+        competitors: rows(values.competitors),
       });
       remember(created.project.project_id, created.token, created.expires_at);
       await client.invalidateQueries({ queryKey: projectKeys.all() });
@@ -97,46 +165,23 @@ function CreateProject({ open, onClose }: { open: boolean; onClose: () => void }
         <Form.Item name="client_website" label={PROJECTS.sites.clientWebsite}>
           <Input maxLength={500} placeholder={PROJECTS.sites.clientWebsitePlaceholder} />
         </Form.Item>
+        <Form.Item name="client_note" label={PROJECTS.sites.note}>
+          <Input.TextArea rows={2} maxLength={2000} placeholder={PROJECTS.sites.notePlaceholder} />
+        </Form.Item>
+        <Divider orientation="left" orientationMargin={0} plain>
+          {PROJECTS.sites.brands}
+        </Divider>
+        <Typography.Paragraph type="secondary">{PROJECTS.sites.brandsHelp}</Typography.Paragraph>
+        <SiteRows list="client_brands" nameLabel={PROJECTS.sites.brandName} addLabel={PROJECTS.sites.addBrand} />
         <Divider orientation="left" orientationMargin={0} plain>
           {PROJECTS.sites.competitors}
         </Divider>
         <Typography.Paragraph type="secondary">{PROJECTS.sites.competitorsHelp}</Typography.Paragraph>
-        <Form.List name="competitors">
-          {(fields, { add, remove }) => (
-            <>
-              {fields.map((field, index) => (
-                <Space key={field.key} align="baseline" wrap style={{ display: 'flex' }}>
-                  <Form.Item
-                    name={[field.name, 'name']}
-                    rules={[{ required: true, whitespace: true, message: PROJECTS.form.required }]}
-                  >
-                    <Input
-                      aria-label={`${PROJECTS.sites.competitorName} ${index + 1}`}
-                      placeholder={PROJECTS.sites.competitorName}
-                      maxLength={120}
-                    />
-                  </Form.Item>
-                  <Form.Item name={[field.name, 'website']}>
-                    <Input
-                      aria-label={`${PROJECTS.sites.competitorWebsite} ${index + 1}`}
-                      placeholder={PROJECTS.sites.competitorWebsite}
-                      maxLength={500}
-                    />
-                  </Form.Item>
-                  <Button
-                    type="text"
-                    icon={<MinusCircleOutlined />}
-                    aria-label={`${PROJECTS.sites.remove} ${index + 1}`}
-                    onClick={() => remove(field.name)}
-                  />
-                </Space>
-              ))}
-              <Button type="dashed" icon={<PlusOutlined />} onClick={() => add({})} block>
-                {PROJECTS.sites.addCompetitor}
-              </Button>
-            </>
-          )}
-        </Form.List>
+        <SiteRows
+          list="competitors"
+          nameLabel={PROJECTS.sites.competitorName}
+          addLabel={PROJECTS.sites.addCompetitor}
+        />
         <Divider />
         <Form.Item
           name="password"

@@ -39,8 +39,14 @@ export interface RunState {
 export interface Site {
   site_id: string;
   name: string;
+  /** client: one of the client's websites (never a competitor of the others); competitor. */
   role: 'client' | 'competitor';
+  /** True for the client's main website. */
+  main: boolean;
   domains: string[];
+  /** What this website is, as the project team describes it. */
+  note: string;
+  tags: string[];
   url_count: number;
   last_run: RunState | null;
   namespace: string;
@@ -123,7 +129,27 @@ export interface NewProject {
   client_name: string;
   password: string;
   client_website: string | null;
-  competitors: { name: string; website: string | null }[];
+  client_note?: string;
+  /** The client's other websites or brands: never its competitors. */
+  client_brands?: SiteInput[];
+  competitors: SiteInput[];
+}
+
+/** A website as entered in a form. */
+export interface SiteInput {
+  name: string;
+  website: string | null;
+  note?: string;
+  tags?: string[];
+  role?: 'client' | 'competitor';
+}
+
+/** Changes to a website; fields left out stay as they are. */
+export interface SiteChange {
+  name?: string;
+  note?: string;
+  tags?: string[];
+  role?: 'client' | 'competitor';
 }
 
 export const ACTIVE: ReadonlySet<RunStatus> = new Set(['queued', 'running']);
@@ -225,8 +251,10 @@ export const projectsApi = {
   remove: (id: string, password: string, token: string | null) =>
     post<{ deleted: string }>(`${projectPath(id)}/delete`, { password }, token),
 
-  addSite: (id: string, name: string, website: string | null, token: string | null) =>
-    post<Site>(`${projectPath(id)}/sites`, { name, website }, token),
+  addSite: (id: string, site: SiteInput, token: string | null) =>
+    post<Site>(`${projectPath(id)}/sites`, site, token),
+  updateSite: (id: string, site: string, change: SiteChange, token: string | null) =>
+    post<Site>(`${sitePath(id, site)}/update`, change, token),
   removeSite: (id: string, site: string, token: string | null) =>
     post<{ deleted: string }>(`${sitePath(id, site)}/delete`, {}, token),
 

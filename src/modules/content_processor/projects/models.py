@@ -1,8 +1,10 @@
 """Contracts for projects, their websites, URL inventories and scraping runs.
 
-A project holds one client website and any number of competitor websites; each
-website has its own URL list, runs, reports and knowledge space
-(docs/app/ARCHITECTURE_PROJECTS_AND_SITES.md).
+A project holds the client's website (its main website, plus any other websites or
+brands of the same client) and any number of competitor websites; each website has
+its own URL list, runs, reports and knowledge space, and a note and tags that say
+what it is (docs/app/ARCHITECTURE_PROJECTS_AND_SITES.md). The client's websites are
+never competitors of one another.
 """
 
 from __future__ import annotations
@@ -16,6 +18,9 @@ from src.core.schemas import StrictModel
 
 __all__ = [
     "RUN_ACTIVE",
+    "MAX_NOTE_LENGTH",
+    "MAX_SITE_TAGS",
+    "MAX_TAG_LENGTH",
     "KnowledgeStatus",
     "ProjectRecord",
     "ProjectUrl",
@@ -29,18 +34,32 @@ RunStatus = Literal["queued", "running", "finished", "failed", "cancelled", "int
 RUN_ACTIVE: frozenset[str] = frozenset({"queued", "running"})
 SiteRole = Literal["client", "competitor"]
 KnowledgeStatus = Literal["", "building", "ready", "failed", "skipped"]
+MAX_SITE_TAGS = 12
+MAX_TAG_LENGTH = 40
+MAX_NOTE_LENGTH = 2000
 
 
 class SiteRecord(StrictModel):
-    """One website of a project: the client's or a competitor's."""
+    """One website of a project: one of the client's, or a competitor's.
+
+    Every `client` website belongs to the client (its main website is the first one;
+    the others are its other websites or brands); they are never compared with one
+    another as competitors.
+    """
 
     site_id: str
     name: str = Field(min_length=1, max_length=120)
     role: SiteRole
     domains: list[str] = Field(
-        default_factory=list, description="e.g. flynns.com; subdomains count as the same site"
+        default_factory=list,
+        description=(
+            "addresses: a domain (flynns.com; subdomains count as the same site) or, when "
+            "one domain holds several websites, a subdomain or a section (client.com/brand-a)"
+        ),
     )
     created_at: datetime
+    note: str = Field(default="", max_length=MAX_NOTE_LENGTH, description="what this website is")
+    tags: list[str] = Field(default_factory=list, max_length=MAX_SITE_TAGS)
 
 
 class ProjectRecord(StrictModel):
@@ -54,6 +73,10 @@ class ProjectRecord(StrictModel):
     created_at: datetime
     updated_at: datetime
     sites: list[SiteRecord] = Field(default_factory=list)
+
+    def main_site(self) -> SiteRecord | None:
+        """The client's main website: the first client website."""
+        return next((s for s in self.sites if s.role == "client"), None)
 
 
 class ProjectUrl(StrictModel):

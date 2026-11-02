@@ -34,11 +34,14 @@ from src.modules.content_processor.knowledge.embedders import Embedder
 from src.modules.content_processor.knowledge.federated import Space, federated_search
 from src.modules.content_processor.knowledge.vector_store import VectorStore
 from src.modules.content_processor.projects.models import (
+    MAX_NOTE_LENGTH,
+    MAX_SITE_TAGS,
     RUN_ACTIVE,
     ProjectRecord,
     ProjectUrl,
     RunState,
     SiteRecord,
+    SiteRole,
 )
 from src.modules.content_processor.projects.runner import ScrapeRunner
 from src.modules.content_processor.projects.security import (
@@ -85,7 +88,10 @@ class SiteOut(StrictModel):
     site_id: str
     name: str
     role: str
+    main: bool = Field(description="True for the client's main website")
     domains: list[str]
+    note: str
+    tags: list[str]
     url_count: int
     last_run: RunState | None = None
     namespace: str
@@ -106,10 +112,30 @@ class ProjectOut(StrictModel):
 
 
 class SiteIn(StrictModel):
-    """A website as entered: its name and, usually, its address."""
+    """A website as entered: its name, usually its address, a note and tags.
+
+    `role` client adds another website or brand of the client (never a competitor
+    of the client's other websites); competitor (the default) adds a competitor.
+    """
 
     name: str = Field(min_length=1, max_length=120)
     website: str | None = Field(default=None, max_length=500)
+    note: str = Field(default="", max_length=MAX_NOTE_LENGTH)
+    tags: list[str] = Field(default_factory=list, max_length=MAX_SITE_TAGS)
+    role: SiteRole = "competitor"
+
+    def spec(self) -> SiteSpec:
+        """As the store takes it."""
+        return SiteSpec(name=self.name, website=self.website, note=self.note, tags=tuple(self.tags))
+
+
+class SiteUpdate(StrictModel):
+    """Changes to a website; fields left out stay as they are."""
+
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    note: str | None = Field(default=None, max_length=MAX_NOTE_LENGTH)
+    tags: list[str] | None = Field(default=None, max_length=MAX_SITE_TAGS)
+    role: SiteRole | None = None
 
 
 class ProjectCreate(StrictModel):
@@ -120,6 +146,13 @@ class ProjectCreate(StrictModel):
     client_name: str = Field(min_length=1, max_length=120)
     password: str = Field(min_length=MIN_PASSWORD_LENGTH, max_length=200)
     client_website: str | None = Field(default=None, max_length=500)
+    client_note: str = Field(default="", max_length=MAX_NOTE_LENGTH)
+    client_tags: list[str] = Field(default_factory=list, max_length=MAX_SITE_TAGS)
+    client_brands: list[SiteIn] = Field(
+        default_factory=list,
+        max_length=50,
+        description="the client's other websites or brands (never its competitors)",
+    )
     competitors: list[SiteIn] = Field(default_factory=list, max_length=50)
 
 
@@ -229,6 +262,9 @@ class WebsiteOut(StrictModel):
     domains: list[str]
     projects: list[str]
     competitors: list[str]
+    same_client: list[str] = Field(description="the same client's other websites or brands")
+    note: str
+    tags: list[str]
     searchable: bool
     freshest_project: str | None
 
@@ -293,11 +329,15 @@ def register_project_routes(
 
     def site_out(record: ProjectRecord, s: SiteRecord) -> SiteOut:
         runs = store.runs(record.project_id, s.site_id)
+        main = record.main_site()
         return SiteOut(
             site_id=s.site_id,
             name=s.name,
             role=s.role,
+            main=main is not None and main.site_id == s.site_id,
             domains=s.domains,
+            note=s.note,
+            tags=s.tags,
             url_count=len(store.urls(record.project_id, s.site_id)),
             last_run=runs[0] if runs else None,
             namespace=runner.namespace(record.project_id, s.site_id),
@@ -389,8 +429,14 @@ def register_project_routes(
                 owner_name=body.owner_name,
                 client_name=body.client_name,
                 password=body.password,
-                client_site=SiteSpec(name=body.client_name, website=body.client_website),
-                competitors=[SiteSpec(name=c.name, website=c.website) for c in body.competitors],
+                client_site=SiteSpec(
+                    name=body.client_name,
+                    website=body.client_website,
+                    note=body.client_note,
+                    tags=tuple(body.client_tags),
+                ),
+                client_brands=[b.spec() for b in body.client_brands],
+                competitors=[c.spec() for c in body.competitors],
             )
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from None
@@ -436,10 +482,29 @@ def register_project_routes(
     def add_site(project_id: str, body: SiteIn, token: TokenHeader = None) -> SiteOut:
         require_token(project_id, token)
         try:
-            new = store.add_site(project_id, SiteSpec(name=body.name, website=body.website))
+            new = store.add_site(project_id, body.spec(), body.role)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from None
         return site_out(store.get(project_id), new)
+
+    @app.post("/api/projects/{project_id}/sites/{site_id}/update")
+    def update_site(
+        project_id: str, site_id: str, body: SiteUpdate, token: TokenHeader = None
+    ) -> SiteOut:
+        require_token(project_id, token)
+        site(project_id, site_id)
+        try:
+            changed = store.update_site(
+                project_id,
+                site_id,
+                name=body.name,
+                note=body.note,
+                tags=body.tags,
+                role=body.role,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from None
+        return site_out(store.get(project_id), changed)
 
     @app.post("/api/projects/{project_id}/sites/{site_id}/delete")
     def remove_site(project_id: str, site_id: str, token: TokenHeader = None) -> dict[str, str]:
@@ -637,6 +702,9 @@ def register_project_routes(
                     domains=sorted(w.domains),
                     projects=sorted({c.project_name for c in w.copies}),
                     competitors=[c.name for k in sorted(w.competitors) if (c := g.get(k))],
+                    same_client=[s.name for s in g.sisters_of(w)],
+                    note=w.note,
+                    tags=w.tags,
                     searchable=fresh is not None,
                     freshest_project=fresh.project_name if fresh else None,
                 )
@@ -654,15 +722,17 @@ def register_project_routes(
     ) -> SearchOut:
         """Search a scope of knowledge spaces.
 
-        With `website`, the scope is that website and every website it competes with
-        in any project, each searched once in its freshest copy, whatever project
-        asked. Otherwise the scope is the given spaces and/or projects.
+        With `website`, the scope is that website, the same client's other websites,
+        and every website any of them competes with in any project, each searched
+        once in its freshest copy, whatever project asked.
+        Otherwise the scope is the given spaces and/or projects.
         """
         if knowledge is None:
             raise HTTPException(status_code=503, detail="The knowledge store is not set up.")
         not_built: list[dict[str, str]] = []
         considered: list[str] = []
         site_of: dict[str, str] = {}
+        role_of: dict[str, str] = {}
         if website:
             g = graph()
             target = g.find(website)
@@ -671,6 +741,7 @@ def register_project_routes(
                     status_code=404, detail=f"No project has a website at {website}."
                 )
             scope = []
+            family = g.family_keys(target)
             for w in g.competitive_scope(target):
                 considered.append(w.name)
                 fresh = w.freshest()
@@ -685,6 +756,8 @@ def register_project_routes(
                     continue
                 scope.append(fresh.space())
                 site_of[fresh.namespace] = w.key
+                # Relative to the website asked about: its sister websites are the client's.
+                role_of[fresh.namespace] = "client" if w.key in family else "competitor"
         else:
             scope = spaces(space)
             if project:
@@ -712,7 +785,7 @@ def register_project_routes(
                     project_name=h.space.project_name,
                     site_id=h.space.site_id,
                     site_name=h.space.site_name,
-                    role=h.space.role,
+                    role=role_of.get(h.space.namespace, h.space.role),
                     url=h.hit.chunk.url,
                     headings=h.hit.chunk.heading_path,
                     text=h.hit.chunk.verbatim_text,

@@ -13,6 +13,9 @@ const site = (site_id: string, name: string, role: Site['role'], domain: string)
   url_count: 3,
   last_run: null,
   namespace: `rankuno-dev.p1.${site_id}`,
+  main: role === 'client',
+  note: '',
+  tags: [],
 });
 
 const project: Project = {

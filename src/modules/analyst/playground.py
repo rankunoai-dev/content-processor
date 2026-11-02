@@ -177,6 +177,10 @@ class Playground:
             if any(c.project_id in self.project_ids for c in website.copies):
                 for member in self.graph.competitive_scope(website):
                     self._scope[member.key] = member
+        self._client_side: set[str] = set()
+        for website in self.graph.websites():
+            if any(c.project_id in self.project_ids and c.role == "client" for c in website.copies):
+                self._client_side |= self.graph.family_keys(website)
         self._site_cache: dict[str, SiteData | None] = {}
         self._stamps: dict[str, dict[str, PageStamp]] = {}
 
@@ -211,10 +215,14 @@ class Playground:
         return ", ".join(f"{w.name} ({w.key})" for w in self.websites()) or "none"
 
     def role_in_run(self, website: Website) -> str:
-        """`client` when it is a client in one of the run's projects, else `competitor`."""
-        for copy in website.copies:
-            if copy.project_id in self.project_ids and copy.role == "client":
-                return "client"
+        """`client` for the client's websites, else `competitor`.
+
+        The client's websites are those that are a client website in one of the run's
+        projects, and their sister websites (the same client's other websites or
+        brands, from any project): they are never treated as competitors.
+        """
+        if website.key in self._client_side:
+            return "client"
         return "competitor"
 
     # -- data of one website ---------------------------------------------------------

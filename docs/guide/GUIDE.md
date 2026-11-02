@@ -1,6 +1,6 @@
 # Content Processor: A Plain-Language Guide
 
-Last updated: 2 November 2026 · Code version: main after the Theming module (themes, topics, pillar pages, theme ownership and funnel stages across the client and its competitors) · Maintained by every session that adds a significant feature (see "Keeping this guide current" at the end)
+Last updated: 2 November 2026 · Code version: main after the client's several websites (brands) with notes and tags, never treated as competitors of one another · Maintained by every session that adds a significant feature (see "Keeping this guide current" at the end)
 
 ## 1. What this is, in one paragraph
 
@@ -178,6 +178,10 @@ The engine is becoming one app with several modules. Module 1, the Content Scrap
 4. **Download the reports**: every scrape keeps its own reports. Each file is listed with what it is ("Start here: every page with its content…"), and all of them can be downloaded at once as a zip.
 
 **Several websites per project.** A project holds the client's website and any number of competitor websites (name and address each), entered when the project is created or added later. Each website is kept completely apart: its own address list, scrapes, reports and searchable knowledge. Addresses of several websites can be added in one list: each goes to the website of its domain, and addresses of a website that is not in the project are listed so it can be added as a competitor. "Scrape all websites" scrapes each website on its own.
+
+**The client's several websites (brands).** Many clients have more than one website: separate brands, regional sites, or several sites on one domain. A project can hold all of them as **the client's websites**, next to the competitors. The first is the client's main website; the others are entered under "The client's other websites or brands", or added later with "Add a website". The client's websites are always on the same side: the engine never compares two of them as competitors, whether it is grouping pages into themes, deciding who owns a theme, looking for gaps, searching, or preparing an analyst card, and this holds across all projects, even one that was entered the wrong way round. When one domain holds several websites, each gets its own subdomain or section (for example `brand.client.com` or `client.com/brand`), and every address goes to the most specific website.
+
+**Notes and tags on every website.** Each website can carry a short note saying what it is (for example "B2B brand for hospitals, US only") and a few tags (such as "brand", "US", "B2B"). They are shown on the website's page, can be changed at any time with "Edit website", and are passed on to the theme map and the analyst so both know what each website is. A note describes the website; it is never treated as a fact found on its pages.
 
 **Searching across websites.** After a scrape, each website's pages are prepared for search in their own store. The "Search all websites" tab finds the passages that answer a question and says which website (and which project's scrape) each came from; the best passage of each website can be shown side by side. By default it covers the client's website and **every website it competes with in any project**: websites are recognised as the same across projects by their domain, each is searched once in its most recent scrape, and a project that lists the client as someone else's competitor counts too.
 
@@ -362,6 +366,7 @@ On the John Hancock test project (272 pages, plus a 2-page competitor) the map t
 
 | Date | Significant change |
 |---|---|
+| 2026-11-02 | A project can hold several websites of the client (brands, regional sites, sections of one domain); they are always the client's side and never competitors of one another, in theming, gap findings, search and analyst cards, across all projects. Every website can carry a note and tags, editable at any time. |
 | 2026-11-02 | Themes: each project's pages, client and competitors together, grouped into themes and topics, with the pillar page on each website, who owns each theme (client, competitor, contested, client gap), funnel stages and a workbook; built on this computer at no cost, and followed over time as the map is rebuilt. |
 | 2026-11-02 | Analyst cards in the app: a tab on every project to choose a card, check it, run it (after unlocking the project), follow it live, and read, copy or download the result with its citation check. |
 | 2026-11-02 | Senior Analyst Action Cards: 15 ready-made SEO analyses (trust audit, cannibalization, technical fixes, AI answer readiness, topic clusters, funnel, offering matrix, competitor radar, content refresh, head-to-head gap, content brief, executive briefing; 3 keyword cards wait for Semrush). Each gives Claude a detailed brief and the project's data, and every statement in the result is checked against the pages and listed with its proof. Claude is off until the data policy is confirmed; meanwhile each card produces a free context pack. Spending caps per run, day and month. |

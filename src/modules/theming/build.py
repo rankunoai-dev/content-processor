@@ -355,6 +355,8 @@ def collect(
                 project=data.copy.project_name,
                 run_id=data.run.run_id,
                 pages=count,
+                note=website.note,
+                tags=website.tags,
             )
         )
     return websites, docs, catalogs, skipped

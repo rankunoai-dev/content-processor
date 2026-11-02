@@ -1,6 +1,7 @@
 import {
   CloudDownloadOutlined,
   DeleteOutlined,
+  EditOutlined,
   GlobalOutlined,
   LockOutlined,
   PlayCircleOutlined,
@@ -25,6 +26,7 @@ import {
   Modal,
   Popconfirm,
   Progress,
+  Radio,
   Segmented,
   Select,
   Space,
@@ -85,11 +87,147 @@ function bytes(n: number): string {
   return `${(n / 1024 / 1024).toFixed(1)} MB`;
 }
 
+/** Marks the client's websites in the website tabs. */
+const CLIENT_DOT = { display: 'inline-block', width: 8, height: 8, borderRadius: 4, background: '#1677ff' };
+
 function RoleTag({ site }: { site: Site }) {
+  const label =
+    site.role === 'competitor'
+      ? PROJECTS.sites.competitor
+      : site.main
+        ? PROJECTS.sites.mainWebsite
+        : PROJECTS.sites.clientBrand;
   return (
     <Tag color={site.role === 'client' ? 'blue' : 'default'} bordered={false}>
-      {site.role === 'client' ? PROJECTS.sites.client : PROJECTS.sites.competitor}
+      {label}
     </Tag>
+  );
+}
+
+function SiteTags({ tags }: { tags: string[] }) {
+  return (
+    <>
+      {tags.map((t) => (
+        <Tag key={t} color="geekblue">
+          {t}
+        </Tag>
+      ))}
+    </>
+  );
+}
+
+interface SiteForm {
+  name: string;
+  website?: string;
+  note?: string;
+  tags?: string[];
+  role: 'client' | 'competitor';
+}
+
+/** Note, tags and (except for the main website) whether it is the client's or a competitor. */
+function SiteFields({ lockRole, withWebsite }: { lockRole: boolean; withWebsite: boolean }) {
+  return (
+    <>
+      <Form.Item name="role" label={PROJECTS.sites.kind} extra={lockRole ? PROJECTS.sites.mainLocked : null}>
+        <Radio.Group disabled={lockRole}>
+          <Space direction="vertical">
+            <Radio value="competitor">{PROJECTS.sites.kindCompetitor}</Radio>
+            <Radio value="client">
+              {PROJECTS.sites.kindClient}
+              <Typography.Text type="secondary"> · {PROJECTS.sites.kindClientHelp}</Typography.Text>
+            </Radio>
+          </Space>
+        </Radio.Group>
+      </Form.Item>
+      <Form.Item
+        name="name"
+        label={PROJECTS.sites.brandName}
+        rules={[{ required: true, whitespace: true, message: PROJECTS.form.required }]}
+      >
+        <Input maxLength={120} autoFocus />
+      </Form.Item>
+      {withWebsite ? (
+        <Form.Item name="website" label={PROJECTS.sites.competitorWebsite} extra={PROJECTS.sites.sameDomainHelp}>
+          <Input maxLength={500} placeholder={PROJECTS.sites.clientWebsitePlaceholder} />
+        </Form.Item>
+      ) : null}
+      <Form.Item name="note" label={PROJECTS.sites.note}>
+        <Input.TextArea rows={3} maxLength={2000} placeholder={PROJECTS.sites.notePlaceholder} />
+      </Form.Item>
+      <Form.Item name="tags" label={PROJECTS.sites.tags}>
+        <Select
+          mode="tags"
+          aria-label={PROJECTS.sites.tags}
+          placeholder={PROJECTS.sites.tagsPlaceholder}
+          tokenSeparators={[',']}
+          maxCount={12}
+          open={false}
+          suffixIcon={null}
+        />
+      </Form.Item>
+    </>
+  );
+}
+
+function EditSiteModal({
+  project,
+  site,
+  token,
+  open,
+  onClose,
+}: {
+  project: Project;
+  site: Site;
+  token: string | null;
+  open: boolean;
+  onClose: () => void;
+}) {
+  const id = project.project_id;
+  const [form] = Form.useForm<SiteForm>();
+  const [error, setError] = useState<string | null>(null);
+  const save = useProjectChange(id, (v: SiteForm) =>
+    projectsApi.updateSite(
+      id,
+      site.site_id,
+      {
+        name: v.name.trim(),
+        note: (v.note ?? '').trim(),
+        tags: v.tags ?? [],
+        ...(site.main ? {} : { role: v.role }),
+      },
+      token,
+    ),
+  );
+  return (
+    <Modal
+      title={`${PROJECTS.sites.editTitle}: ${site.name}`}
+      open={open}
+      onCancel={onClose}
+      onOk={() => form.submit()}
+      okText={PROJECTS.sites.save}
+      confirmLoading={save.isPending}
+      destroyOnClose
+    >
+      <Form
+        form={form}
+        layout="vertical"
+        requiredMark={false}
+        preserve={false}
+        initialValues={{ name: site.name, note: site.note, tags: site.tags, role: site.role }}
+        onFinish={(v) =>
+          save.mutate(v, {
+            onSuccess: () => {
+              setError(null);
+              onClose();
+            },
+            onError: (e) => setError(e.message),
+          })
+        }
+      >
+        <SiteFields lockRole={site.main} withWebsite={false} />
+        {error ? <Alert type="error" showIcon message={error} /> : null}
+      </Form>
+    </Modal>
   );
 }
 
@@ -328,10 +466,20 @@ function AddCompetitorModal({
   onAdded: (site: Site) => void;
 }) {
   const id = project.project_id;
-  const [form] = Form.useForm<{ name: string; website?: string }>();
+  const [form] = Form.useForm<SiteForm>();
   const [error, setError] = useState<string | null>(null);
-  const add = useProjectChange(id, (v: { name: string; website?: string }) =>
-    projectsApi.addSite(id, v.name.trim(), v.website?.trim() || null, token),
+  const add = useProjectChange(id, (v: SiteForm) =>
+    projectsApi.addSite(
+      id,
+      {
+        name: v.name.trim(),
+        website: v.website?.trim() || null,
+        note: (v.note ?? '').trim(),
+        tags: v.tags ?? [],
+        role: v.role,
+      },
+      token,
+    ),
   );
   return (
     <Modal
@@ -339,7 +487,7 @@ function AddCompetitorModal({
       open={open}
       onCancel={onClose}
       onOk={() => form.submit()}
-      okText={PROJECTS.sites.addCompetitor}
+      okText={PROJECTS.sites.addWebsite}
       confirmLoading={add.isPending}
       destroyOnClose
     >
@@ -347,6 +495,7 @@ function AddCompetitorModal({
         form={form}
         layout="vertical"
         requiredMark={false}
+        initialValues={{ role: 'competitor' }}
         onFinish={(v) =>
           add.mutate(v, {
             onSuccess: (site) => {
@@ -359,16 +508,7 @@ function AddCompetitorModal({
           })
         }
       >
-        <Form.Item
-          name="name"
-          label={PROJECTS.sites.competitorName}
-          rules={[{ required: true, whitespace: true, message: PROJECTS.form.required }]}
-        >
-          <Input maxLength={120} autoFocus />
-        </Form.Item>
-        <Form.Item name="website" label={PROJECTS.sites.competitorWebsite}>
-          <Input maxLength={500} placeholder={PROJECTS.sites.clientWebsitePlaceholder} />
-        </Form.Item>
+        <SiteFields lockRole={false} withWebsite />
         {error ? <Alert type="error" showIcon message={error} /> : null}
       </Form>
     </Modal>
@@ -721,13 +861,20 @@ function SitePanel({
   const id = project.project_id;
   const { message } = AntApp.useApp();
   const removeSite = useProjectChange(id, () => projectsApi.removeSite(id, site.site_id, token));
+  const [editing, setEditing] = useState(false);
   return (
     <Space direction="vertical" size={16} style={{ width: '100%' }}>
       <Space wrap style={{ width: '100%', justifyContent: 'space-between' }}>
-        <Space wrap>
-          <RoleTag site={site} />
-          <Typography.Text type="secondary">
-            <GlobalOutlined /> {site.domains.length > 0 ? site.domains.join(', ') : PROJECTS.sites.noDomain}
+        <Space direction="vertical" size={4}>
+          <Space wrap size={[4, 4]}>
+            <RoleTag site={site} />
+            <SiteTags tags={site.tags} />
+            <Typography.Text type="secondary">
+              <GlobalOutlined /> {site.domains.length > 0 ? site.domains.join(', ') : PROJECTS.sites.noDomain}
+            </Typography.Text>
+          </Space>
+          <Typography.Text type={site.note ? undefined : 'secondary'} italic={!site.note}>
+            {site.note || PROJECTS.sites.noNote}
           </Typography.Text>
         </Space>
         <Space wrap>
@@ -740,7 +887,12 @@ function SitePanel({
               { value: 'reports', label: PROJECTS.tabs.reports },
             ]}
           />
-          {site.role === 'competitor' ? (
+          <Guarded unlocked={token !== null}>
+            <Button type="text" icon={<EditOutlined />} disabled={token === null} onClick={() => setEditing(true)}>
+              {PROJECTS.sites.edit}
+            </Button>
+          </Guarded>
+          {!site.main ? (
             <Guarded unlocked={token !== null}>
               <Popconfirm
                 title={PROJECTS.sites.removeConfirm}
@@ -768,6 +920,7 @@ function SitePanel({
       ) : (
         <UrlsPanel project={project} site={site} token={token} />
       )}
+      <EditSiteModal project={project} site={site} token={token} open={editing} onClose={() => setEditing(false)} />
     </Space>
   );
 }
@@ -1038,14 +1191,15 @@ export default function ProjectPage() {
                               disabled={token === null}
                               onClick={() => setAddingSite(true)}
                             >
-                              {PROJECTS.sites.addCompetitor}
+                              {PROJECTS.sites.addWebsite}
                             </Button>
                           </Guarded>
                         }
                         items={p.sites.map((s) => ({
                           key: s.site_id,
                           label: (
-                            <Space size={6}>
+                            <Space size={6} title={s.note || undefined}>
+                              {s.role === 'client' ? <span style={CLIENT_DOT} aria-hidden /> : null}
                               {s.name}
                               {s.last_run && ACTIVE.has(s.last_run.status) ? (
                                 <Tag color="processing" bordered={false}>

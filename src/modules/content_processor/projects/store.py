@@ -32,6 +32,8 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from src.modules.content_processor.projects.models import (
+    MAX_SITE_TAGS,
+    MAX_TAG_LENGTH,
     ProjectRecord,
     ProjectUrl,
     RunState,
@@ -45,7 +47,9 @@ from src.modules.content_processor.projects.security import (
 )
 from src.modules.content_processor.projects.urls import (
     ImportResult,
-    domain_of,
+    address_of,
+    address_score,
+    addresses_overlap,
     merge_urls,
     url_domain,
 )
@@ -55,7 +59,9 @@ __all__ = [
     "ProjectStore",
     "RoutedImport",
     "SiteSpec",
+    "clean_tags",
     "long_path",
+    "owner_of",
     "slug",
 ]
 
@@ -68,10 +74,30 @@ class ProjectNotFoundError(LookupError):
 
 @dataclass(frozen=True)
 class SiteSpec:
-    """A website as a person enters it: a name and, usually, its address."""
+    """A website as a person enters it: a name, usually its address, a note and tags."""
 
     name: str
     website: str | None = None
+    note: str = ""
+    tags: tuple[str, ...] = ()
+
+
+def clean_tags(tags: list[str] | tuple[str, ...]) -> list[str]:
+    """Tags trimmed, without empty ones or repeats (ignoring case); at most 12, of 40 characters."""
+    out: list[str] = []
+    seen: set[str] = set()
+    for tag in tags:
+        text = " ".join(str(tag).split())
+        if not text or text.lower() in seen:
+            continue
+        if len(text) > MAX_TAG_LENGTH:
+            msg = f"The tag '{text[:20]}...' is longer than {MAX_TAG_LENGTH} characters."
+            raise ValueError(msg)
+        seen.add(text.lower())
+        out.append(text)
+    if len(out) > MAX_SITE_TAGS:
+        raise ValueError(f"A website can have at most {MAX_SITE_TAGS} tags.")
+    return out
 
 
 @dataclass
@@ -121,8 +147,34 @@ def _write_json(path: Path, data: object) -> None:
     os.replace(tmp, path)
 
 
-def _covers(domains: list[str], domain: str) -> bool:
-    return any(domain == d or domain.endswith("." + d) for d in domains)
+def owner_of(sites: list[SiteRecord], url: str) -> SiteRecord | None:
+    """The website whose address covers the URL most specifically, or None.
+
+    When one domain holds several websites (`client.com` and `brand.client.com`, or
+    `client.com/brand-a`), the most specific address wins.
+    """
+    best: tuple[tuple[int, int], SiteRecord] | None = None
+    for site in sites:
+        for address in site.domains:
+            score = address_score(url, address)
+            if score is not None and (best is None or score > best[0]):
+                best = (score, site)
+    return best[1] if best else None
+
+
+def _address(website: str, existing: list[SiteRecord]) -> str:
+    """A new website's address: its domain, or a section of it when the domain is taken.
+
+    A path ('client.com/brand-a') is kept only when another website of the project
+    already has that domain: that is when one domain holds several websites.
+    """
+    with_path = address_of(website, keep_path=True)
+    plain = address_of(website, keep_path=False)
+    if with_path != plain and any(
+        addresses_overlap(plain, a) for other in existing for a in other.domains
+    ):
+        return with_path
+    return plain
 
 
 class ProjectStore:
@@ -181,17 +233,20 @@ class ProjectStore:
         password: str,
         client_site: SiteSpec | None = None,
         competitors: list[SiteSpec] | None = None,
+        client_brands: list[SiteSpec] | None = None,
     ) -> ProjectRecord:
-        """A new project with its client website and any competitor websites.
+        """A new project with the client's website(s) and any competitor websites.
 
-        The password is hashed before anything is written. Website names must be
-        different, and so must their domains.
+        `client_site` is the client's main website; `client_brands` are its other
+        websites or brands. The password is hashed before anything is written.
+        Website names must be different, and so must their addresses.
         """
         if len(password) < MIN_PASSWORD_LENGTH:
             raise ValueError(f"The password must have at least {MIN_PASSWORD_LENGTH} characters.")
         now = _now()
         specs: list[tuple[SiteSpec, SiteRole]] = [
             (client_site or SiteSpec(name=client_name), "client"),
+            *((b, "client") for b in client_brands or []),
             *((c, "competitor") for c in competitors or []),
         ]
         sites: list[SiteRecord] = []
@@ -226,12 +281,26 @@ class ProjectStore:
         site_id = slug(name, limit=20)
         if any(s.site_id == site_id for s in existing):
             raise ValueError(f"Two websites are called '{name}'. Give each a different name.")
-        domains = [domain_of(spec.website)] if spec.website and spec.website.strip() else []
+        typed = spec.website.strip() if spec.website else ""
+        domains = [_address(typed, existing)] if typed else []
         for other in existing:
             clash = set(domains) & set(other.domains)
             if clash:
-                raise ValueError(f"{clash.pop()} is already the website of '{other.name}'.")
-        return SiteRecord(site_id=site_id, name=name, role=role, domains=domains, created_at=now)
+                address = clash.pop()
+                raise ValueError(
+                    f"{address} is already the website of '{other.name}'. If that domain holds "
+                    "several websites, give this one its own subdomain or section "
+                    f"(for example brand.{address} or {address}/brand)."
+                )
+        return SiteRecord(
+            site_id=site_id,
+            name=name,
+            role=role,
+            domains=domains,
+            created_at=now,
+            note=spec.note.strip(),
+            tags=clean_tags(spec.tags),
+        )
 
     def _save(self, record: ProjectRecord) -> None:
         _write_json(
@@ -335,11 +404,13 @@ class ProjectStore:
                 return site
         raise ProjectNotFoundError(site_id)
 
-    def add_site(self, project_id: str, spec: SiteSpec) -> SiteRecord:
-        """Add a competitor website to the project."""
+    def add_site(
+        self, project_id: str, spec: SiteSpec, role: SiteRole = "competitor"
+    ) -> SiteRecord:
+        """Add a competitor website, or (role `client`) another website or brand of the client."""
         with self._lock:
             record = self.get(project_id)
-            site = self._new_site(spec, "competitor", record.sites, _now())
+            site = self._new_site(spec, role, record.sites, _now())
             self._save(
                 record.model_copy(update={"sites": [*record.sites, site], "updated_at": _now()})
             )
@@ -347,17 +418,60 @@ class ProjectStore:
             return site
 
     def remove_site(self, project_id: str, site_id: str) -> None:
-        """Remove a competitor website, its URLs, runs and reports (never the client's)."""
+        """Remove a website, its URLs, runs and reports (never the client's main website)."""
         with self._lock:
             record = self.get(project_id)
-            site = self.site(project_id, site_id)
-            if site.role == "client":
-                raise ValueError("The client's website cannot be removed from its project.")
+            self.site(project_id, site_id)
+            main = record.main_site()
+            if main is not None and main.site_id == site_id:
+                raise ValueError("The client's main website cannot be removed from its project.")
             kept = [s for s in record.sites if s.site_id != site_id]
             self._save(record.model_copy(update={"sites": kept, "updated_at": _now()}))
             folder = self.site_dir(project_id, site_id)
             if folder.is_dir():
                 shutil.rmtree(folder)
+
+    def update_site(
+        self,
+        project_id: str,
+        site_id: str,
+        *,
+        name: str | None = None,
+        note: str | None = None,
+        tags: list[str] | None = None,
+        role: SiteRole | None = None,
+    ) -> SiteRecord:
+        """Rename a website, change its note or tags, or make it a client or competitor website.
+
+        The client's main website stays the client's. Its id (and so its folders and
+        knowledge space) never changes.
+        """
+        with self._lock:
+            record = self.get(project_id)
+            current = self.site(project_id, site_id)
+            changes: dict[str, object] = {}
+            if name is not None:
+                text = name.strip()
+                if not text:
+                    raise ValueError("Every website needs a name.")
+                if any(
+                    s.name.lower() == text.lower() for s in record.sites if s.site_id != site_id
+                ):
+                    raise ValueError(f"Another website is already called '{text}'.")
+                changes["name"] = text
+            if note is not None:
+                changes["note"] = note.strip()
+            if tags is not None:
+                changes["tags"] = clean_tags(tags)
+            if role is not None and role != current.role:
+                main = record.main_site()
+                if main is not None and main.site_id == site_id:
+                    raise ValueError("The client's main website is always the client's.")
+                changes["role"] = role
+            updated = SiteRecord.model_validate(current.model_dump() | changes)
+            sites = [updated if s.site_id == site_id else s for s in record.sites]
+            self._save(record.model_copy(update={"sites": sites, "updated_at": _now()}))
+            return updated
 
     def _set_domains(self, project_id: str, site_id: str, domains: list[str]) -> None:
         record = self.get(project_id)
@@ -367,11 +481,9 @@ class ProjectStore:
         ]
         self._save(record.model_copy(update={"sites": sites}))
 
-    def _owner_of(self, project_id: str, domain: str) -> SiteRecord | None:
-        for site in self.sites(project_id):
-            if _covers(site.domains, domain):
-                return site
-        return None
+    def owner_of(self, project_id: str, url: str) -> SiteRecord | None:
+        """The project's website a URL belongs to (most specific address), or None."""
+        return owner_of(self.sites(project_id), url)
 
     # -- URLs -----------------------------------------------------------------
 
@@ -399,21 +511,27 @@ class ProjectStore:
     def add_urls(self, project_id: str, site_id: str, candidates: list[str]) -> ImportResult:
         """Merge candidates into one website's list (checked, de-duplicated).
 
-        A URL of another domain is refused, naming the website it belongs to. A
-        website without a known domain takes the domains of its first URLs.
+        A URL of another website is refused, naming the website it belongs to (when
+        one domain holds several websites, the most specific address decides). A
+        website without a known address takes the domains of its first URLs.
         """
         with self._lock:
             site = self.site(project_id, site_id)
+            sites = self.sites(project_id)
             current = self.urls(project_id, site_id)
             learning = not site.domains
             mine: list[str] = []
             refused: list[tuple[str, str]] = []
             for raw in candidates:
                 domain = url_domain(raw.strip())
-                if domain is None or learning or _covers(site.domains, domain):
+                owner = owner_of(sites, raw.strip()) if domain is not None else None
+                if (
+                    domain is None
+                    or (owner is not None and owner.site_id == site_id)
+                    or (owner is None and learning)
+                ):
                     mine.append(raw)  # merge_urls reports unusable lines with their reason
                     continue
-                owner = self._owner_of(project_id, domain)
                 reason = f"belongs to {owner.name}" if owner else f"not this website ({domain})"
                 refused.append((raw.strip()[:300], reason))
             result = merge_urls((u.url for u in current), mine)
@@ -430,13 +548,14 @@ class ProjectStore:
     def add_urls_routed(self, project_id: str, candidates: list[str]) -> RoutedImport:
         """Sort a mixed list to the project's websites by domain and add each part."""
         routed = RoutedImport()
+        sites = self.sites(project_id)
         buckets: dict[str, list[str]] = {}
         for raw in candidates:
             domain = url_domain(raw.strip())
             if domain is None:
                 routed.rejected.append((raw.strip()[:300], "not a usable web address"))
                 continue
-            owner = self._owner_of(project_id, domain)
+            owner = owner_of(sites, raw.strip())
             if owner is None:
                 routed.unknown_domains[domain] = routed.unknown_domains.get(domain, 0) + 1
                 continue

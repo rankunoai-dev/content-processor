@@ -12,6 +12,9 @@ const site = (site_id: string, name: string, role: Site['role'], domain: string,
   url_count,
   last_run: null,
   namespace: `rankuno-dev.print-security-a1b2c3.${site_id}`,
+  main: role === 'client',
+  note: '',
+  tags: [],
 });
 
 const project: Project = {
@@ -122,6 +125,10 @@ describe('projects (Content Scraper)', () => {
     await fill(user, within(dialog).getByLabelText('Your name'), 'Gaurav');
     await fill(user, within(dialog).getByLabelText('Client name'), "Flynn's");
     await fill(user, within(dialog).getByLabelText("Client's website"), 'flynns.com');
+    await user.click(buttonIn(within(dialog), 'Add a website of the client'));
+    await fill(user, within(dialog).getByLabelText('Brand or website name 1'), "Flynn's Managed Print");
+    await fill(user, within(dialog).getByLabelText('Brand website 1'), 'mps.flynns.com');
+    await fill(user, within(dialog).getByLabelText('Note Brand or website name 1'), 'Managed print brand');
     await user.click(buttonIn(within(dialog), 'Add a competitor'));
     await fill(user, within(dialog).getByLabelText('Competitor name 1'), 'Xerox');
     await fill(user, within(dialog).getByLabelText('Website 1'), 'xerox.com');
@@ -141,6 +148,7 @@ describe('projects (Content Scraper)', () => {
       client_name: "Flynn's",
       password: 'correct horse 42',
       client_website: 'flynns.com',
+      client_brands: [{ name: "Flynn's Managed Print", website: 'mps.flynns.com', note: 'Managed print brand' }],
       competitors: [{ name: 'Xerox', website: 'xerox.com' }],
     });
     expect(sent[0]?.headers['X-Requested-With']).toBe('content-processor');
@@ -190,6 +198,37 @@ describe('projects (Content Scraper)', () => {
     expect(add?.headers['X-Project-Token']).toBe('tok-2');
     expect(add?.body).toEqual({ text: 'https://www.flynns.com/blog/b\nftp://x' });
   }, INTERACTION_TIMEOUT_MS);
+  it("shows each website's note and tags, and edits them with the unlock token", async () => {
+    const xerox = { ...project.sites[1]!, note: 'Main rival in the US', tags: ['US'] };
+    const shown = { ...project, sites: [project.sites[0]!, xerox] };
+    const sent = fakeServer({
+      ...readRoutes,
+      [`GET /api/projects/${project.project_id}`]: () => [200, shown],
+      [`GET /api/projects/${project.project_id}/sites/xerox/urls`]: () => [200, { total: 0, items: [] }],
+      [`POST /api/projects/${project.project_id}/sites/xerox/update`]: (body) => [200, { ...xerox, ...(body as object) }],
+    });
+    useProjectTokens.getState().remember(project.project_id, 'tok-3', '2099-01-01T00:00:00Z');
+    const user = userEvent.setup({ pointerEventsCheck: PointerEventsCheckLevel.Never });
+    renderApp(`/projects/${project.project_id}?site=xerox`);
+    expect(await screen.findByText('Main rival in the US', {}, FIRST_PAINT)).toBeInTheDocument();
+    expect(screen.getByText('US')).toBeInTheDocument();
+    await user.click(buttonIn(screen, 'Edit website'));
+    const dialog = await waitFor(() => {
+      const found = document.querySelector<HTMLElement>('.ant-modal-content');
+      if (!found) throw new Error('no dialog yet');
+      return found;
+    }, FIRST_PAINT);
+    const note = within(dialog).getByLabelText('Note');
+    await user.clear(note);
+    await fill(user, note, 'Rival in the US and Canada');
+    await user.click(within(dialog).getByText('Another website or brand of the client'));
+    await user.click(buttonIn(within(dialog), 'Save'));
+    await waitFor(() => expect(sent).toHaveLength(1));
+    expect(sent[0]?.path).toBe(`/api/projects/${project.project_id}/sites/xerox/update`);
+    expect(sent[0]?.body).toEqual({ name: 'Xerox', note: 'Rival in the US and Canada', tags: ['US'], role: 'client' });
+    expect(sent[0]?.headers['X-Project-Token']).toBe('tok-3');
+  }, INTERACTION_TIMEOUT_MS);
+
   it('searches the client and its competitors from every project by default', async () => {
     const asked: URL[] = [];
     fakeServer({

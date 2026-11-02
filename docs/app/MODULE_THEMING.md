@@ -11,7 +11,7 @@ For a project, across the client's website, its competitors in the project and i
 | Themes | Groups of pages about the same subject across all websites, named by their distinctive terms |
 | Topics | Narrower groups inside a theme (only when a theme actually splits) |
 | Pillar per website | The page that anchors the theme on each website (central, shallow, catalog offering, rich content), with the reasons; the rest are spokes |
-| Ownership | `client_owned` (client ≥ 1.5× any competitor's pages), `competitor_led` (a competitor ≥ 1.5× the client's), `contested`, `client_gap` (client has none), `client_only` |
+| Ownership | Client pages are those of all the client's websites together (its brands too, never counted as competitors). `client_owned` (client ≥ 1.5× any competitor's pages), `competitor_led` (a competitor ≥ 1.5× the client's), `contested`, `client_gap` (client has none), `client_only` |
 | Funnel stage per page | learn, compare, decide, onboard, support, from page type, address, title and calls to action |
 | Offerings | Catalog offerings whose name words are all among a theme's terms |
 

@@ -13,6 +13,7 @@ import io
 import re
 from collections.abc import Iterable
 from dataclasses import dataclass, field
+from urllib.parse import unquote, urlsplit
 
 from src.modules.content_processor.scope.normalize import InvalidInputUrl, normalize_url
 
@@ -21,12 +22,16 @@ __all__ = [
     "MAX_PROJECT_URLS",
     "ImportResult",
     "UnreadableFileError",
+    "address_of",
+    "address_score",
+    "addresses_overlap",
     "belongs_to",
     "candidates_from_file",
     "candidates_from_text",
     "domain_of",
     "host_key",
     "merge_urls",
+    "split_address",
     "url_domain",
 ]
 
@@ -222,3 +227,73 @@ def url_domain(url: str) -> str | None:
         return host_key(normalize_url(url).host)
     except InvalidInputUrl:
         return None
+
+
+# -- website addresses: a domain, or a section of one ------------------------------
+#
+# A website's address is usually a domain ("flynns.com", subdomains included). When
+# one domain holds several websites (the client's brands at "brand.client.com" and
+# "client.com", or sections such as "client.com/brand-a"), each website has its own,
+# more specific address, and a URL belongs to the most specific address that covers it.
+
+
+def split_address(address: str) -> tuple[str, str]:
+    """('client.com/brand-a') -> ('client.com', '/brand-a'); a plain domain has path ''."""
+    host, _, path = address.partition("/")
+    return host, f"/{path}" if path else ""
+
+
+def address_of(website: str, *, keep_path: bool) -> str:
+    """The address of what a person typed: a domain, or with `keep_path` a domain and section.
+
+    'https://www.client.com/Brand-A/' -> 'client.com' (or 'client.com/brand-a' with keep_path).
+
+    Raises:
+        ValueError: The text is not a web address or a domain.
+    """
+    host = domain_of(website)
+    if not keep_path:
+        return host
+    text = website.strip()
+    if "://" not in text:
+        text = "https://" + text
+    path = _path_of(normalize_url(text).schedule_key).strip("/")
+    return f"{host}/{path}" if path else host
+
+
+def _path_of(normalized: str) -> str:
+    return unquote(urlsplit(normalized).path).lower()
+
+
+def _host_path(url_or_address: str) -> tuple[str, str] | None:
+    text = url_or_address.strip()
+    if "://" not in text:
+        text = "https://" + text
+    try:
+        parts = normalize_url(text)
+    except InvalidInputUrl:
+        return None
+    return host_key(parts.host), _path_of(parts.schedule_key).rstrip("/")
+
+
+def address_score(url: str, address: str) -> tuple[int, int] | None:
+    """How specifically an address covers a URL (higher is more specific), or None.
+
+    The host must be the address's domain or a subdomain of it; an address with a
+    section covers only the URLs under that section.
+    """
+    found = _host_path(url)
+    if found is None:
+        return None
+    host, path = found
+    a_host, a_path = split_address(address)
+    if not (host == a_host or host.endswith("." + a_host)):
+        return None
+    if a_path and not (path == a_path or path.startswith(a_path + "/")):
+        return None
+    return a_host.count(".") + 1, a_path.count("/")
+
+
+def addresses_overlap(a: str, b: str) -> bool:
+    """True when one address covers the other (equal, a subdomain, or a section of it)."""
+    return a == b or address_score(b, a) is not None or address_score(a, b) is not None

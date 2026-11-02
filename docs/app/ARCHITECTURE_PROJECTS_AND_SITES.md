@@ -19,7 +19,7 @@ Project  (name, owner, client, password)            one per engagement
 | Term | Meaning |
 |---|---|
 | **Project** | One engagement. Holds the password; everything below belongs to it. |
-| **Website** (site) | One organisation's web presence inside a project. Role `client` (exactly one) or `competitor` (any number). Has one or more **domains** (`flynns.com`, `blog.flynns.com` counts as the same site). |
+| **Website** (site) | One web presence inside a project. Role `client` (the client's main website, plus any other websites or brands of the client) or `competitor` (any number). Has one or more **addresses** (`flynns.com`, where `blog.flynns.com` counts as the same site, unless the project has a separate website at `blog.flynns.com`), a **note** and **tags** (6b). |
 | **Knowledge space** | The searchable store of one website in one project: its chunks, vectors, page vectors, labels and offering catalog. Name: `<tenant>.<project id>.<site id>`. |
 | **Scope** | A list of knowledge spaces the bot is allowed to read for one question (one website, a whole project, or several projects). |
 
@@ -79,6 +79,21 @@ question + scope ──► for each knowledge space in scope:
 - **Each website once, freshest copy**: a website scraped in several projects is searched once, in the knowledge space built most recently; a website not yet scraped in any project is named as not searched.
 - **Answers say where they come from**: each passage carries the website, the project whose scrape it came from, the page and the evidence.
 - In the app this is the default of "Search all websites" ("Client and all its competitors, from every project"); "Only this project's websites" is still available. API: `GET /api/knowledge/search?q=…&website=<domain>`, and `GET /api/knowledge/websites` lists the unique websites, the projects they appear in, their competitors and which copy is freshest.
+
+## 6b. The client's several websites, notes and tags (decided 2026-11-02)
+
+> A client often has several websites, on one domain or under several brands. Each website can carry a note that explains it, and the engine must never treat two brands of the same client as competitors of one another when theming or analysing gaps.
+
+- **The client's websites.** A project's websites are the client's (role `client`) or competitors' (role `competitor`). The first client website is the client's **main website**; any others are its **other websites or brands** (entered at creation under "The client's other websites or brands", or added later with "Add a website" → "Another website or brand of the client"). The main website cannot be removed or made a competitor; any other website can switch sides.
+- **Never competitors of one another.** Competitor relations are only client ↔ competitor. The client's websites in one project are **sister websites**; a sister relation in any project cancels a competitor relation between the same two websites in every other project (a project entered by mistake cannot set a client against its own brand).
+- **Where it applies.**
+  - **Competitive scope** (search, analyst cards): the website, its sister websites, then every website any of them competes with.
+  - **Theming ownership:** client pages are the client's websites together, against the strongest competitor.
+  - **Analyst cards:** `role_in_this_run` is `client` for the client's websites and their sisters from any project, and `same_client_as` lists them; rule 9 tells the analyst never to count one brand as competition or a gap of another.
+  - **Search results:** every passage's role is relative to the website asked about.
+- **One domain, several websites.** A website's address may be a subdomain (`brand.client.com` next to `client.com`) or a section (`client.com/brand`). A section is kept only when another website of the project already has that domain; otherwise a typed page address gives just its domain. Every URL goes to the **most specific** address that covers it (`client.com/brand/x` to the brand, `client.com/brands-old` to `client.com`). Across projects, a subdomain or section is its own website when any project lists it separately from its parent domain; otherwise it joins the parent (as `usa.canon.com` joins `canon.com`).
+- **Notes and tags.** Every website has a **note** (up to 2,000 characters: what it is, its market, its audience) and up to 12 **tags** (40 characters each, for example `brand`, `US`, `B2B`). They are entered when the website is created or with **Edit website**, are shown on the website's panel, and travel with the website: the websites list (`GET /api/knowledge/websites`: `note`, `tags`, `same_client`), the theme map (`websites[].note`, `tags`) and the analyst's `list_websites` tool. A note describes; it is not evidence about the website's pages.
+- **API.** `POST /api/projects` takes `client_note`, `client_tags`, `client_brands[]`; `POST /api/projects/{p}/sites` takes `note`, `tags`, `role`; `POST /api/projects/{p}/sites/{s}/update` changes `name`, `note`, `tags`, `role` (password token required). Sites carry `main`, `note`, `tags`.
 
 ## 7. Existing projects
 
