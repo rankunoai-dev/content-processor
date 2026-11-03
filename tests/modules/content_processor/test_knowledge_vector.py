@@ -52,6 +52,7 @@ from src.modules.content_processor.knowledge.retrieval import (
     check_statement,
     fragment_link,
     hybrid_search,
+    keyword_only_search,
     offering_scope,
     render_answer,
     render_hits,
@@ -1016,3 +1017,10 @@ def test_pgvector_store_round_trip(database_url: str) -> None:
     finally:
         store.reset()
         store.close()
+
+
+def test_keyword_only_search_when_the_meaning_model_is_down(indexed: SqliteVectorStore) -> None:
+    hits = keyword_only_search(indexed, "ICC20-1234 form", top_k=3)
+    assert hits[0].chunk.chunk_id == "c3" and hits[0].keyword_rank == 1
+    assert all(h.vector_rank is None for h in hits)
+    assert keyword_only_search(indexed, "zzzz-nothing", top_k=3) == []

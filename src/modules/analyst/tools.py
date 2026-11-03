@@ -362,12 +362,19 @@ def _search(play: Playground, args: SearchInput) -> dict[str, Any]:
         title=f'search "{args.query}"' + (f" (role {args.role})" if args.role else ""),
         text=f"{len(passages)} passages found in {', '.join(searched) or 'no website'}",
     )
-    return {
+    out: dict[str, Any] = {
         "search_ref": search_ref,
         "websites_searched": searched,
         "passages": passages,
         "skipped": skipped,
     }
+    if result.words_only:
+        out["notes"] = [
+            f"{s.site_name}: {why}; passages that say the same thing in other words may be "
+            "missing (start the local model server for search by meaning)"
+            for s, why in result.words_only
+        ]
+    return out
 
 
 def _get_page(play: Playground, args: UrlInput) -> dict[str, Any]:

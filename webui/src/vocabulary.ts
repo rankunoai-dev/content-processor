@@ -1543,6 +1543,11 @@ export const ANALYST = {
     download: 'Download (.md)',
     copy: 'Copy',
     copied: 'Copied.',
+    openClaude: 'Open in Claude.ai',
+    openClaudeHelp:
+      'Copies this context pack and opens a new chat on claude.ai in your browser (the Claude account signed in there; no API key, no cost here). Paste with Ctrl+V and send. The answer stays in claude.ai: this app does not check its citations or save it. Only use it for clients whose data may go to Claude.',
+    openedClaude: 'Context pack copied. In the new claude.ai tab, press Ctrl+V and send. The answer there is not checked or saved by this app.',
+    openClaudeCopyFailed: 'The new chat opened, but copying was refused by the browser: use Copy, then paste in claude.ai.',
     waiting: 'The result appears here when the run ends.',
     noText: 'This run has no text to show.',
     check: (v: { resolved: number; references: number; quotes_checked: number; quotes_failed: string[]; uncited_lines: string[] }) =>

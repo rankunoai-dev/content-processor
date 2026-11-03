@@ -16,7 +16,12 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 
 from src.modules.content_processor.knowledge.embedders import Embedder
-from src.modules.content_processor.knowledge.retrieval import SearchHit, hybrid_search, rrf
+from src.modules.content_processor.knowledge.retrieval import (
+    SearchHit,
+    hybrid_search,
+    keyword_only_search,
+    rrf,
+)
 from src.modules.content_processor.knowledge.vector_store import VectorStore
 
 __all__ = ["FederatedHit", "FederatedResult", "Space", "federated_search", "space_namespace"]
@@ -53,11 +58,16 @@ class FederatedHit:
 
 @dataclass
 class FederatedResult:
-    """The fused hits, which spaces were searched and which were skipped (with why)."""
+    """The fused hits, which spaces were searched and which were skipped (with why).
+
+    `words_only` lists the spaces searched by exact words alone because the meaning
+    model could not be reached (still searched, with less recall).
+    """
 
     hits: list[FederatedHit] = field(default_factory=list)
     searched: list[Space] = field(default_factory=list)
     skipped: list[tuple[Space, str]] = field(default_factory=list)
+    words_only: list[tuple[Space, str]] = field(default_factory=list)
 
     def by_site(self) -> dict[str, list[FederatedHit]]:
         """The hits grouped by website, best first: the side-by-side comparison view."""
@@ -105,8 +115,12 @@ def federated_search(
                     embedders[model] = embedder
                     hits = hybrid_search(store, embedder, query, top_k=pool)
                 except (RuntimeError, ValueError) as exc:
-                    result.skipped.append((space, f"could not be searched: {exc}"))
-                    continue
+                    try:
+                        hits = keyword_only_search(store, query, top_k=pool)
+                    except (RuntimeError, ValueError) as again:
+                        result.skipped.append((space, f"could not be searched: {again}"))
+                        continue
+                    result.words_only.append((space, f"searched by exact words only: {exc}"))
             finally:
                 store.close()
             result.searched.append(space)

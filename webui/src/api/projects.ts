@@ -121,6 +121,8 @@ export interface SearchResult {
   hits: SearchHit[];
   searched: string[];
   skipped: { space: string; site: string; reason: string }[];
+  /** Websites searched by exact words only (the meaning model was not reachable). */
+  notes?: string[];
 }
 
 export interface NewProject {

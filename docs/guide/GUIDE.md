@@ -1,6 +1,6 @@
 # Content Processor: A Plain-Language Guide
 
-Last updated: 2 November 2026 · Code version: main after the Research module (search data from a free Semrush export or a capped Semrush pull) and the Gap Analysis module (what the client is missing, ranked, tracked to closure) · Maintained by every session that adds a significant feature (see "Keeping this guide current" at the end)
+Last updated: 3 November 2026 · Code version: main after the Claude Desktop connection (a read-only MCP server: Claude Desktop reads every project and checks its own citations) and the "Open in Claude.ai" button · Maintained by every session that adds a significant feature (see "Keeping this guide current" at the end)
 
 ## 1. What this is, in one paragraph
 
@@ -338,11 +338,21 @@ Each finding says why, gives the evidence with links, how many searches a month 
 
 On the John Hancock test project (with a printing-security competitor, no research yet) the analysis took under a second: 15 findings, one missing theme (the competitor's print-security subject) and 14 offerings the client does not have, as expected for two unrelated companies.
 
+### Step 21: Working with Claude Desktop and claude.ai (no API key)
+
+Two ways to use your own Claude account with the app, without an API key or API costs:
+
+- **Claude Desktop, connected to the app.** Once set up (a few lines in Claude Desktop's settings, see `docs/app/MODULE_MCP_SERVER.md`), Claude Desktop can read every project while the app is running: the projects and their websites, page text and search, themes, monitoring alerts, search data and gap findings. You ask in plain words ("what are John Hancock's biggest gaps against Flynn's, and which pillar pages should we write next?") and Claude looks things up itself. It is **read-only**: it cannot scrape websites, pull from Semrush, change a finding's status or unlock anything; those stay buttons in the app. Every fact it gets comes with a reference, and before answering it can ask the app to **check its citations** (each reference must be real, each quote word for word), so you can see whether the answer passed.
+- **"Open in Claude.ai"**, on every free context pack of an analyst card: one click copies the pack and opens a new chat on claude.ai in your browser; you paste it and send. That answer stays in claude.ai: the app does not check or save it.
+
+Both send the project's data to Claude through your account, so they are for clients whose data may go to Claude (the data policy question is still open). Search now also works when the local meaning model is off: it falls back to exact words and says so.
+
 ## 5. Safety and cost promises
 
 - Read-only: the engine never submits forms, logs in, buys, unsubscribes or clicks anything that changes the website.
 - Polite: robots rules and requested delays are respected; a struggling site is paused, not hammered.
 - Free by default: every run starts at $0. Paid access (Bright Data) needs your explicit approval per website, with caps of $5 per run and $25 per day, a monthly cap and a kill switch.
+- The Claude Desktop connection is read-only and local: it reaches the app only on this computer, cannot scrape, spend or change anything, and no web page can use it.
 - Semrush pulls are off until an operator sets a key and a monthly unit cap; each pull is checked against the per-pull and monthly limits before the first request, and every unit is logged. Importing a Semrush export is always free.
 - How paid access works: when a website blocks every free method, the engine stops and asks. An operator can approve that one website, for a set amount (for example $5 per run), with one command; nothing else changes. Before every paid request the engine checks the kill switch, the approval and every limit (per run, per day, per month, per website and per page), and refuses rather than overspend. Every paid request is written to a spending log, and one command shows what has been spent and which websites are approved. Prices are counted on the high side, so the log never understates the bill.
 - Private networks are off-limits: the engine checks every address before contacting it, at every redirect. The basic downloader also connects only to the exact public address it checked, so a trick that swaps the address mid-way cannot redirect it into a private network (the browser and the Chrome-like downloader re-check each request instead).
@@ -403,6 +413,7 @@ On the John Hancock test project (with a printing-security competitor, no resear
 
 | Date | Significant change |
 |---|---|
+| 2026-11-03 | Claude Desktop connection: a read-only MCP server lets Claude Desktop read every project (search, pages, themes, monitoring, search data, gaps) through the running app and check its own citations before answering; no API key. "Open in Claude.ai" on context packs copies the pack and opens a new claude.ai chat. Search falls back to exact words when the local meaning model is off. |
 | 2026-11-02 | Gaps: one ranked list of what the client is missing against its competitors (themes, pillar pages, buying stages, keywords, page-two keywords, competitor momentum, offerings), each with evidence, demand and a next step; the team's decisions (accepted, done, dismissed) carry over and closed gaps are listed. Built on this computer at no cost. |
 | 2026-11-02 | Research: search data per website (keywords, positions, searches per month, ranking page), placed in themes for demand per theme, with movers between snapshots; free import of a Semrush export, or a Semrush pull that is off until a key and a monthly unit cap are set, checked against caps and logged. The three keyword analyst cards can now run. |
 | 2026-11-02 | Monitoring: each check compares the latest scrapes with the previous ones (new, removed and changed pages, rewrites, price changes, template changes), places new pages in their themes, follows theme ownership, and ranks alerts; it runs by itself after new scrapes; scheduled re-scraping is an opt-in per project. |

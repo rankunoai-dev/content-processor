@@ -241,6 +241,21 @@ describe('analyst cards', () => {
       expect(await within(viewer).findByText(/The brief and the data/)).toBeInTheDocument();
       expect(within(viewer).getByText('Gathered data: search knowledge')).toBeInTheDocument();
       expect(within(viewer).getByText('Download (.md)')).toBeInTheDocument();
+      // a context pack can be opened in claude.ai: copied first, then a new chat
+      const order: string[] = [];
+      const writeText = vi.fn(async (value: string) => {
+        order.push(`copy:${value.slice(0, 14)}`);
+      });
+      Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+      const open = vi.spyOn(window, 'open').mockImplementation((url) => {
+        order.push(`open:${String(url)}`);
+        return null;
+      });
+      await user.click(buttonIn(within(viewer), 'Open in Claude.ai'));
+      expect(order).toEqual(['copy:# Context pack', 'open:https://claude.ai/new']);
+      expect(open).toHaveBeenCalledWith('https://claude.ai/new', '_blank', 'noopener,noreferrer');
+      expect(await screen.findByText(/press Ctrl\+V and send/)).toBeInTheDocument();
+      open.mockRestore();
     },
     TIMEOUT,
   );

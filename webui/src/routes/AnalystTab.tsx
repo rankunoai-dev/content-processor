@@ -3,7 +3,7 @@
  * card, the project's card runs, and a viewer with live progress, the citation
  * check and the deliverable (or context pack).
  */
-import { CopyOutlined, DownloadOutlined, FileSearchOutlined, PlayCircleOutlined } from '@ant-design/icons';
+import { CopyOutlined, DownloadOutlined, ExportOutlined, FileSearchOutlined, PlayCircleOutlined } from '@ant-design/icons';
 import {
   Alert,
   App as AntApp,
@@ -280,6 +280,9 @@ function eventText(e: RunEvent): string | null {
   }
 }
 
+/** A new chat on claude.ai, in the browser's signed-in Claude account. */
+const CLAUDE_NEW_CHAT = 'https://claude.ai/new';
+
 function download(name: string, text: string) {
   const url = URL.createObjectURL(new Blob([text], { type: 'text/markdown;charset=utf-8' }));
   const a = document.createElement('a');
@@ -356,7 +359,27 @@ function RunDrawer({
                 title={isPack ? ANALYST.viewer.pack : ANALYST.viewer.deliverable}
                 extra={
                   text ? (
-                    <Space>
+                    <Space wrap>
+                      {isPack ? (
+                        <Tooltip title={ANALYST.viewer.openClaudeHelp}>
+                          <Button
+                            size="small"
+                            type="primary"
+                            icon={<ExportOutlined />}
+                            onClick={() => {
+                              // Copy first, while this page has focus; then open the new chat.
+                              const copying = navigator.clipboard.writeText(text);
+                              window.open(CLAUDE_NEW_CHAT, '_blank', 'noopener,noreferrer');
+                              void copying.then(
+                                () => message.success(ANALYST.viewer.openedClaude, 8),
+                                () => message.error(ANALYST.viewer.openClaudeCopyFailed, 8),
+                              );
+                            }}
+                          >
+                            {ANALYST.viewer.openClaude}
+                          </Button>
+                        </Tooltip>
+                      ) : null}
                       <Button
                         size="small"
                         icon={<CopyOutlined />}

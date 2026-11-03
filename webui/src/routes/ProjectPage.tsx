@@ -994,6 +994,9 @@ function SearchTab({ project }: { project: Project }) {
               {data.skipped.map((s) => (
                 <Alert key={s.space} type="info" showIcon message={PROJECTS.ask.skipped(s.site, s.reason)} />
               ))}
+              {(data.notes ?? []).map((n) => (
+                <Alert key={n} type="warning" showIcon message={n} />
+              ))}
               {data.hits.length === 0 ? (
                 <Empty
                   image={Empty.PRESENTED_IMAGE_SIMPLE}

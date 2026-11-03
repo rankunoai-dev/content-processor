@@ -1,9 +1,11 @@
 """The analyst API and the built web app, served from one process.
 
-Every route is GET except one: `POST /api/runs/{run}/decisions`, which appends
-a reviewer's decision to the run's decisions log (`export/decisions.py`). That
-write is accepted only as JSON carrying the `X-Requested-With: content-processor`
-header (a page on another site cannot send it without a cross-origin grant,
+Every route is GET except the project changes under `/api/projects`, the
+read-only MCP tool calls (`POST /api/mcp/call`, never from a web page) and
+`POST /api/runs/{run}/decisions`, which appends a reviewer's decision to the
+run's decisions log (`export/decisions.py`). A write is accepted only as
+JSON carrying the `X-Requested-With: content-processor` header (a page on
+another site cannot send it without a cross-origin grant,
 which this server never gives) and, when the browser sends an Origin, only
 from a local host; every other method or path is refused as read-only. The
 server binds 127.0.0.1 (see `__main__`), accepts only
@@ -72,6 +74,8 @@ WRITE_HEADER_VALUE = "content-processor"
 _DECISIONS_PATH = re.compile(r"^/api/runs/[^/]+/decisions$")
 # Every project change lives under /api/projects; each route also checks the unlock token.
 _PROJECT_WRITE_PATH = re.compile(r"^/api/projects(/[A-Za-z0-9_.-]+)*$")
+# Read-only tool calls of the local MCP server (POST only to carry the arguments).
+_MCP_CALL_PATH = re.compile(r"^/api/mcp/call$")
 
 DEFAULT_ALLOWED_HOSTS: tuple[str, ...] = ("127.0.0.1", "localhost")
 _CSP = (
@@ -297,6 +301,9 @@ def create_app(
             from src.modules.gaps.api import register_gap_routes
 
             register_gap_routes(app, projects=project_store, access=knowledge, signer=signer)
+            from src.modules.mcp_server.bridge import register_mcp_routes
+
+            register_mcp_routes(app, projects=project_store, access=knowledge)
 
     @app.get("/api/{rest:path}")
     def api_not_found(rest: str) -> JSONResponse:
@@ -342,11 +349,13 @@ def _write_refusal(request: Request, allowed_hosts: Sequence[str]) -> JSONRespon
 
     Two kinds of write exist: a reviewer decision, and the project changes of App
     module 1 (which also need the project's unlock token, checked by the route).
-    Both must come from this app (the header), as JSON, from a local page.
+    Both must come from this app (the header), as JSON, from a local page. The MCP
+    server's read-only tool calls are POSTs too; they must not come from any page at
+    all (no Origin header), only from the local MCP server process.
     """
     path = request.url.path
     if request.method != "POST" or not (
-        _DECISIONS_PATH.match(path) or _PROJECT_WRITE_PATH.match(path)
+        _DECISIONS_PATH.match(path) or _PROJECT_WRITE_PATH.match(path) or _MCP_CALL_PATH.match(path)
     ):
         return JSONResponse({"detail": "This server is read-only."}, status_code=405)
     if request.headers.get(WRITE_HEADER) != WRITE_HEADER_VALUE:
@@ -356,6 +365,8 @@ def _write_refusal(request: Request, allowed_hosts: Sequence[str]) -> JSONRespon
     if not request.headers.get("content-type", "").startswith("application/json"):
         return JSONResponse({"detail": "Changes must be sent as JSON."}, status_code=415)
     origin = request.headers.get("origin")
+    if origin and _MCP_CALL_PATH.match(path):
+        return JSONResponse({"detail": "Only the local MCP server may call this."}, status_code=403)
     if origin and urlsplit(origin).hostname not in set(allowed_hosts):
         return JSONResponse({"detail": "Changes can only be made locally."}, status_code=403)
     return None

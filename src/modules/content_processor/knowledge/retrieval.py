@@ -47,6 +47,7 @@ __all__ = [
     "check_statement",
     "fragment_link",
     "hybrid_search",
+    "keyword_only_search",
     "offering_scope",
     "render_answer",
     "render_hits",
@@ -218,6 +219,32 @@ def hybrid_search(
             )
         )
     return hits
+
+
+def keyword_only_search(
+    store: VectorStore,
+    query: str,
+    *,
+    top_k: int = 5,
+    offering: str | None = None,
+    pool: int = _POOL,
+) -> list[SearchHit]:
+    """The `top_k` best passages by exact words alone (when the meaning model is down)."""
+    scope = offering_scope(store, offering)
+    by_keyword = store.keyword_search(query, max(pool, top_k), scope)[:top_k]
+    rows = store.get_chunks([cid for cid, _score in by_keyword])
+    return [
+        SearchHit(
+            chunk=rows[cid],
+            score=round(score, 6),
+            vector_rank=None,
+            vector_score=None,
+            keyword_rank=n,
+            keyword_score=round(score, 4),
+        )
+        for n, (cid, score) in enumerate(by_keyword, start=1)
+        if cid in rows
+    ]
 
 
 # -- answers ---------------------------------------------------------------------------
