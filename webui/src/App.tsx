@@ -7,6 +7,7 @@ import { AppLayout } from './components/AppLayout';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { usePreferences } from './state/preferences';
 
+const HomePage = lazy(() => import('./routes/HomePage'));
 const RunsPage = lazy(() => import('./routes/RunsPage'));
 const OverviewPage = lazy(() => import('./routes/OverviewPage'));
 const PagesPage = lazy(() => import('./routes/PagesPage'));
@@ -52,7 +53,9 @@ export function AppRoutes() {
   return (
     <Routes>
       <Route element={<AppLayout />}>
-        <Route index element={<RunsPage />} />
+        <Route index element={<HomePage />} />
+        <Route path="runs" element={<RunsPage />} />
+        <Route path="modules/:moduleKey" element={<ProjectsPage />} />
         <Route path="projects" element={<ProjectsPage />} />
         <Route path="projects/:projectId" element={<ProjectPage />} />
         <Route path="queue" element={<QueuePage />} />

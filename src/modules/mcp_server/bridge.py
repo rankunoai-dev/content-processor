@@ -16,7 +16,6 @@ import os
 import re
 import threading
 from dataclasses import asdict
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -54,10 +53,6 @@ class CallOut(StrictModel):
 
 def _error(message: str) -> tuple[str, bool]:
     return json.dumps({"error": message}, ensure_ascii=False), True
-
-
-def _when(value: datetime | None) -> str | None:
-    return value.isoformat() if value else None
 
 
 class McpBridge:
@@ -152,39 +147,10 @@ class McpBridge:
         return json.dumps(payload, ensure_ascii=False), False
 
     def list_projects(self) -> list[dict[str, Any]]:
-        """Projects with their websites and which results exist, newest first."""
-        from src.modules.gaps.service import gap_store
-        from src.modules.monitoring.service import monitor_store
-        from src.modules.research.service import research_store
-        from src.modules.theming.service import theme_store
+        """Projects with their websites and which results exist, with dates."""
+        from src.modules.workspace.status import project_statuses
 
-        themes, checks = theme_store(self.projects), monitor_store(self.projects)
-        research, gaps = research_store(self.projects), gap_store(self.projects)
-        out: list[dict[str, Any]] = []
-        for record in self.projects.projects():
-            pid = record.project_id
-            finished = [r for r in self.projects.runs(pid) if r.status == "finished"]
-            theme_map, check = themes.latest(pid), checks.latest(pid)
-            snapshot, report = research.latest(pid), gaps.latest(pid)
-            out.append(
-                {
-                    "project_id": pid,
-                    "name": record.name,
-                    "client": record.client_name,
-                    "websites": [
-                        {"name": s.name, "role": s.role, "addresses": s.domains}
-                        for s in record.sites
-                    ],
-                    "finished_scrapes": len(finished),
-                    "last_scrape": max((_when(r.finished_at) or "" for r in finished), default=None)
-                    or None,
-                    "themes_built": _when(theme_map.built_at) if theme_map else None,
-                    "last_monitoring_check": _when(check.created_at) if check else None,
-                    "research_added": _when(snapshot.created_at) if snapshot else None,
-                    "gaps_built": _when(report.created_at) if report else None,
-                }
-            )
-        return out
+        return project_statuses(self.projects)
 
 
 def register_mcp_routes(app: FastAPI, *, projects: ProjectStore, access: KnowledgeAccess) -> None:

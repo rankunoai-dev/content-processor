@@ -6,16 +6,24 @@ import {
   RightOutlined,
   UserOutlined,
 } from '@ant-design/icons';
-import { Alert, Badge, Button, Card, Col, Divider, Empty, Form, Input, Modal, Row, Space, Tag, Typography } from 'antd';
+import { Alert, Badge, Breadcrumb, Button, Card, Col, Divider, Empty, Form, Input, Modal, Row, Space, Tag, Typography } from 'antd';
 import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { ApiError } from '../api/client';
 import { ACTIVE, projectKeys, projectsApi, useProjectTokens, useProjects, type Project } from '../api/projects';
 import { QueryState } from '../components/QueryState';
 import { StatusBar } from '../components/StatusBar';
 import { PageHeading } from '../components/bits';
-import { PROJECTS, formatDate } from '../vocabulary';
+import { useModuleStatus, type ProjectStatus } from '../api/workspace';
+import { moduleByKey, type ModuleDef } from '../modules';
+import { MODULES_TEXT, PROJECTS, formatDate } from '../vocabulary';
+
+/** A project's address, opened on a module's tab when given. */
+function projectHref(projectId: string, module?: ModuleDef): string {
+  const base = `/projects/${encodeURIComponent(projectId)}`;
+  return module ? `${base}?tab=${module.tab}` : base;
+}
 
 interface CreateForm {
   name: string;
@@ -95,7 +103,7 @@ function SiteRows({
   );
 }
 
-function CreateProject({ open, onClose }: { open: boolean; onClose: () => void }) {
+function CreateProject({ open, onClose, module }: { open: boolean; onClose: () => void; module?: ModuleDef }) {
   const [form] = Form.useForm<CreateForm>();
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -121,7 +129,7 @@ function CreateProject({ open, onClose }: { open: boolean; onClose: () => void }
       await client.invalidateQueries({ queryKey: projectKeys.all() });
       form.resetFields();
       onClose();
-      navigate(`/projects/${encodeURIComponent(created.project.project_id)}`);
+      navigate(projectHref(created.project.project_id, module));
     } catch (e) {
       setError(e instanceof ApiError ? e.message : String(e));
     } finally {
@@ -216,8 +224,8 @@ function CreateProject({ open, onClose }: { open: boolean; onClose: () => void }
   );
 }
 
-function ProjectCard({ project }: { project: Project }) {
-  const href = `/projects/${encodeURIComponent(project.project_id)}`;
+function ProjectCard({ project, module, status }: { project: Project; module?: ModuleDef; status?: ProjectStatus }) {
+  const href = projectHref(project.project_id, module);
   const run = project.last_run;
   return (
     <Card
@@ -239,6 +247,11 @@ function ProjectCard({ project }: { project: Project }) {
       }
     >
       <Space direction="vertical" size={10} style={{ width: '100%' }}>
+        {module && status ? (
+          <Typography.Text strong={module.ready(status)} type={module.ready(status) ? undefined : 'secondary'}>
+            <module.Icon /> {module.status(status)}
+          </Typography.Text>
+        ) : null}
         <Space size={16} wrap className="run-card-meta">
           <span>
             <FolderOpenOutlined /> {PROJECTS.client}: {project.client_name}
@@ -276,39 +289,66 @@ function ProjectCard({ project }: { project: Project }) {
 }
 
 export default function ProjectsPage() {
+  const { moduleKey } = useParams();
+  const module = moduleByKey(moduleKey);
   const projects = useProjects();
+  const statuses = useModuleStatus();
   const [creating, setCreating] = useState(false);
+  if (moduleKey !== undefined && module === undefined) {
+    return (
+      <Empty description={MODULES_TEXT.unknown}>
+        <Link to="/">{MODULES_TEXT.breadcrumbHome}</Link>
+      </Empty>
+    );
+  }
+  const statusOf = new Map((statuses.data ?? []).map((s) => [s.project_id, s]));
+  const newButton = (
+    <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreating(true)}>
+      {PROJECTS.newProject}
+    </Button>
+  );
   return (
     <>
+      {module ? (
+        <Breadcrumb
+          items={[{ title: <Link to="/">{MODULES_TEXT.breadcrumbHome}</Link> }, { title: module.title }]}
+          style={{ marginBottom: 8 }}
+        />
+      ) : null}
       <PageHeading
-        title={PROJECTS.title}
-        subtitle={PROJECTS.subtitle}
-        extra={
-          <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreating(true)}>
-            {PROJECTS.newProject}
-          </Button>
+        title={
+          module ? (
+            <span className="module-heading">
+              <span className="module-tile-icon" aria-hidden>
+                <module.Icon />
+              </span>
+              {module.title}
+            </span>
+          ) : (
+            PROJECTS.title
+          )
         }
+        subtitle={module ? MODULES_TEXT.moduleSubtitle(module.description) : PROJECTS.subtitle}
+        extra={newButton}
       />
       <QueryState query={projects} rows={6}>
         {(data) =>
           data.length === 0 ? (
-            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={PROJECTS.empty}>
-              <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreating(true)}>
-                {PROJECTS.newProject}
-              </Button>
+            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={module ? MODULES_TEXT.emptyModule : PROJECTS.empty}>
+              {newButton}
             </Empty>
           ) : (
             <Row gutter={[16, 16]}>
               {data.map((p) => (
                 <Col key={p.project_id} xs={24} lg={12} xxl={8}>
-                  <ProjectCard project={p} />
+                  <ProjectCard project={p} module={module} status={statusOf.get(p.project_id)} />
                 </Col>
               ))}
             </Row>
           )
         }
       </QueryState>
-      <CreateProject open={creating} onClose={() => setCreating(false)} />
+      <CreateProject open={creating} onClose={() => setCreating(false)} module={module} />
     </>
   );
 }

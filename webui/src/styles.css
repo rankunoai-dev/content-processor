@@ -8,6 +8,7 @@
   --mark: #ffe58f;
   --brand: #1f5eff;
   --quote-bg: #f6f8fc;
+  --brand-soft: #e8efff;
 }
 
 [data-theme='dark'] {
@@ -19,6 +20,7 @@
   --heading-ink: #e8eaf0;
   --mark: #7c5e00;
   --quote-bg: #1c1d22;
+  --brand-soft: #1a2747;
 }
 
 html,
@@ -884,4 +886,75 @@ mark {
   margin: 0;
   font-size: 12.5px;
   line-height: 1.5;
+}
+
+/* Home: module tiles */
+.module-tile-link {
+  display: block;
+  height: 100%;
+  color: inherit;
+}
+
+.module-tile {
+  height: 100%;
+}
+
+.module-tile .ant-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  height: 100%;
+}
+
+.module-tile-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.module-tile-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  font-size: 20px;
+  color: var(--brand);
+  background: var(--brand-soft);
+  flex: none;
+}
+
+.module-tile-title.ant-typography {
+  margin: 0;
+  font-size: 18px;
+}
+
+.module-tile-text.ant-typography {
+  flex: 1;
+  margin: 0;
+}
+
+.module-tile-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.module-status {
+  display: block;
+  margin-top: 2px;
+}
+
+.module-heading {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.module-tile-open {
+  color: var(--brand);
+  white-space: nowrap;
 }

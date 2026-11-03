@@ -304,6 +304,9 @@ def create_app(
             from src.modules.mcp_server.bridge import register_mcp_routes
 
             register_mcp_routes(app, projects=project_store, access=knowledge)
+        from src.modules.workspace.status import register_workspace_routes
+
+        register_workspace_routes(app, projects=project_store)
 
     @app.get("/api/{rest:path}")
     def api_not_found(rest: str) -> JSONResponse:

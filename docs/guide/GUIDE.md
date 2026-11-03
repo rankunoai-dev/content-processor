@@ -1,6 +1,6 @@
 # Content Processor: A Plain-Language Guide
 
-Last updated: 3 November 2026 · Code version: main after the shared scrape queue (one scrape at a time for everyone, start automatically or be emailed when it is your turn) · Maintained by every session that adds a significant feature (see "Keeping this guide current" at the end)
+Last updated: 3 November 2026 · Code version: main after the home screen with module tiles (shared projects opened from each module), the shared scrape queue (one scrape at a time for everyone, start automatically or be emailed when it is your turn), the Claude Desktop connection (a read-only MCP server) and the "Open in Claude.ai" button · Maintained by every session that adds a significant feature (see "Keeping this guide current" at the end)
 
 ## 1. What this is, in one paragraph
 
@@ -167,6 +167,12 @@ At the end of a run the engine writes a bundle of files. Every file name starts 
 | R2 overlap (Excel, CSV) | Groups of pages that share the same text (duplicate or near-duplicate content), with the shared passages quoted. |
 | R4 contradictions (Excel, CSV) | Pairs of statements across the site that may contradict each other (for example two different prices for the same plan), with both quotes and a reviewer column. Pairs whose context differs (different years, countries or products) are listed separately, not as contradictions. |
 | URL Content Explorer (web page) | An offline page to browse every address, its verdict, its gaps and its content. |
+
+### The home screen: modules as tiles
+
+The app opens on a **home screen** with one tile per module: Content Scraper, Knowledge search, Themes, Monitoring, Research, Gaps and Analyst cards. Each tile says what the module does and how many projects already have results in it. Clicking a tile opens that module: its list of projects, each with its state in that module (for example "9 themes · built 2 Nov" or "19 findings, 17 open, 2 high"), and a **New project** button. The same modules are listed in the left menu.
+
+Projects are **shared**: a project (the client's websites and its competitors) is created once, from any module, and is used by every module, so themes, monitoring, search data, gaps and analyst cards all build on the same scrapes. Opening a project from a module opens it on that module's tab; the path at the top (for example Home / Gaps / JH test) leads back. "All runs" (scrapes run from the command line) moved to its own menu entry.
 
 ### The Content Scraper app (Module 1): projects
 
@@ -420,6 +426,7 @@ Both send the project's data to Claude through your account, so they are for cli
 
 | Date | Significant change |
 |---|---|
+| 2026-11-03 | Home screen: every module as a tile (Content Scraper, Knowledge search, Themes, Monitoring, Research, Gaps, Analyst cards) with how many projects have results; each module lists the shared projects with their state in that module, creates new ones, and opens a project on that module's tab. Modules also in the left menu; All runs has its own entry. |
 | 2026-11-03 | Shared scrape queue: projects and addresses stay unlimited, but one scrape runs at a time for everyone. Each queued scrape starts automatically or emails its person when its turn comes (then runs next once started); optional email when it finishes; a Scrape queue page with places in line and estimated waits. |
 | 2026-11-03 | Claude Desktop connection: a read-only MCP server lets Claude Desktop read every project (search, pages, themes, monitoring, search data, gaps) through the running app and check its own citations before answering; no API key. "Open in Claude.ai" on context packs copies the pack and opens a new claude.ai chat. Search falls back to exact words when the local meaning model is off. |
 | 2026-11-02 | Gaps: one ranked list of what the client is missing against its competitors (themes, pillar pages, buying stages, keywords, page-two keywords, competitor momentum, offerings), each with evidence, demand and a next step; the team's decisions (accepted, done, dismissed) carry over and closed gaps are listed. Built on this computer at no cost. |

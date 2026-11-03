@@ -38,6 +38,7 @@ export const APP = {
   columns: 'Columns',
   retry: 'Try again',
   backToRuns: 'Back to all runs',
+  backHome: 'Back to the home screen',
   notFoundTitle: 'Page not found',
   notFoundText: 'This address does not match any screen.',
   crashTitle: 'This screen ran into a problem',
@@ -1825,4 +1826,69 @@ export const GAPS = {
   competitors: 'Competitors',
   saved: 'Saved.',
   none: 'No findings match.',
+};
+
+/** The home screen: every module as a tile; each module lists the shared projects. */
+export const MODULES_TEXT = {
+  nav: 'Home',
+  navModules: 'Modules',
+  title: 'Modules',
+  subtitle:
+    'Pick a module to work in. Projects are shared: a project (the client’s websites and its competitors) is created once and used in every module, so themes, monitoring, search data and gaps all build on the same scrapes.',
+  open: 'Open',
+  projectsReady: (ready: number, total: number) =>
+    total === 0 ? 'No projects yet' : `${ready} of ${total} project${total === 1 ? '' : 's'} with results`,
+  breadcrumbHome: 'Home',
+  moduleSubtitle: (description: string) =>
+    `${description} Projects are shared with every module; open one to work on it here.`,
+  emptyModule: 'No projects yet. Create one: it will be usable in this module and every other.',
+  unknown: 'There is no such module.',
+  allProjects: 'All projects',
+  modules: {
+    scraper: {
+      title: 'Content Scraper',
+      description:
+        'Scrape the client’s and competitors’ websites: verified page text, matching content, SEO inventory and downloadable reports.',
+      done: (n: number, when: string) => `${n} finished scrape${n === 1 ? '' : 's'}${when ? ` · last ${when}` : ''}`,
+      none: 'No scrape yet',
+    },
+    search: {
+      title: 'Knowledge search',
+      description: 'Search every website of a project by meaning and exact words, and ask questions answered with quotes.',
+      done: (n: number) => `${n} searchable scrape${n === 1 ? '' : 's'}`,
+      none: 'Nothing searchable yet (scrape first)',
+    },
+    themes: {
+      title: 'Themes',
+      description: 'Group pages into themes and topics, find each website’s pillar pages, who owns each theme and the funnel stages covered.',
+      done: (n: number, when: string) => `${n} theme${n === 1 ? '' : 's'} · built ${when}`,
+      none: 'Theme map not built yet',
+    },
+    monitoring: {
+      title: 'Monitoring',
+      description: 'What changed between scrapes: new and removed pages, rewrites, price changes, theme drift and ranked alerts.',
+      done: (alerts: number, high: number, when: string) =>
+        `${alerts} alert${alerts === 1 ? '' : 's'}${high ? ` (${high} high)` : ''} · checked ${when}`,
+      none: 'No check yet',
+    },
+    research: {
+      title: 'Research',
+      description: 'Search data per website: keywords, positions, searches per month and demand per theme, from a Semrush export or a capped pull.',
+      done: (n: number, when: string) => `${n.toLocaleString()} keyword${n === 1 ? '' : 's'} · added ${when}`,
+      none: 'No search data yet',
+    },
+    gaps: {
+      title: 'Gaps',
+      description: 'What the client is missing against its competitors, ranked by priority, with evidence, a next step and the team’s decisions.',
+      done: (n: number, open: number, high: number, when: string) =>
+        `${n} finding${n === 1 ? '' : 's'}, ${open} open${high ? `, ${high} high` : ''} · built ${when}`,
+      none: 'Not built yet',
+    },
+    analyst: {
+      title: 'Analyst cards',
+      description: 'Ready-made senior-analyst analyses over all modules, every statement cited; free context packs, or Claude when allowed.',
+      done: 'Ready to run cards',
+      none: 'Scrape first to run cards',
+    },
+  },
 };

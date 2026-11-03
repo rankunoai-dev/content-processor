@@ -10,7 +10,7 @@ export default function NotFoundPage() {
       subTitle={APP.notFoundText}
       extra={
         <Link to="/">
-          <Button type="primary">{APP.backToRuns}</Button>
+          <Button type="primary">{APP.backHome}</Button>
         </Link>
       }
     />

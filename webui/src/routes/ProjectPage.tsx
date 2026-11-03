@@ -70,7 +70,8 @@ import { ResearchTab } from './ResearchTab';
 import { GapsTab } from './GapsTab';
 import { StatusBar, StatusLegend } from '../components/StatusBar';
 import { PageHeading } from '../components/bits';
-import { PROJECTS, QUEUE, formatDate, reportKind, roughDuration, ANALYST, GAPS, MONITORING, RESEARCH, THEMES } from '../vocabulary';
+import { moduleByTab } from '../modules';
+import { MODULES_TEXT, PROJECTS, QUEUE, formatDate, reportKind, roughDuration, ANALYST, GAPS, MONITORING, RESEARCH, THEMES } from '../vocabulary';
 
 const STATUS_COLOR: Record<string, string> = {
   queued: 'default',
@@ -1190,7 +1191,13 @@ export default function ProjectPage() {
         return (
           <>
             <Breadcrumb
-              items={[{ title: <Link to="/projects">{PROJECTS.backToProjects}</Link> }, { title: p.name }]}
+              items={[
+                { title: <Link to="/">{MODULES_TEXT.breadcrumbHome}</Link> },
+                moduleByTab(tab)
+                  ? { title: <Link to={`/modules/${moduleByTab(tab)?.key ?? ''}`}>{moduleByTab(tab)?.title}</Link> }
+                  : { title: <Link to="/projects">{PROJECTS.backToProjects}</Link> },
+                { title: p.name },
+              ]}
               style={{ marginBottom: 8 }}
             />
             <PageHeading
