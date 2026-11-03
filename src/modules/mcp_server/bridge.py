@@ -26,7 +26,7 @@ from src.core.logger import get_logger
 from src.core.schemas import StrictModel
 from src.modules.analyst.playground import EvidenceLedger, LedgerEntry, Playground, ScopeError
 from src.modules.analyst.tools import run_tool
-from src.modules.analyst.verify import sources_section, verify_deliverable
+from src.modules.analyst.verify import readable_version, sources_section, verify_deliverable
 from src.modules.content_processor.projects.store import ProjectNotFoundError, ProjectStore
 from src.modules.content_processor.webapi.projects_api import KnowledgeAccess
 from src.modules.mcp_server.catalog import (
@@ -183,7 +183,12 @@ class McpBridge:
         payload = {
             "status": "passed" if result.passed else "needs review",
             **result.model_dump(),
+            "readable_markdown": readable_version(text, ledger),
             "sources_markdown": sources_section(text, ledger, result),
+            "how_to_present": (
+                "Show the user readable_markdown (numbered sources, no reference codes), not the "
+                "text you sent, and say in one plain line whether the check passed."
+            ),
             "how_to_fix": (
                 "Unknown citations were not returned by a tool for this project: call the tool "
                 "again or remove them. Failed quotes must be copied word for word. Cite or remove "

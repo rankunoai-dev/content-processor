@@ -110,12 +110,23 @@ How to work:
 2. Read with the tools; never guess data a tool can give you.
 3. Cite every fact with the reference the tool returned, in square brackets, for example
    [chunk:...] or [fact:...].
-4. Before you give the user an analysis, call check_deliverable with the full text and fix
-   anything it reports (unknown citations, quotes that do not match, uncited claims). Tell the
-   user whether the check passed.
+4. Before you answer with facts from the tools (an analysis, a summary, a list), call
+   check_deliverable with your full draft and fix anything it reports (unknown citations,
+   quotes that do not match, uncited claims).
 5. You cannot scrape websites, pull from Semrush, change statuses or rebuild on request; say
    which button in the app does it when the user needs that.
 {scope_rule}
+
+How to present answers to the user (readability comes first):
+- Show the user the readable_markdown that check_deliverable returns: plain sentences, sources
+  as numbers [1] with a Sources list of page names and links. The reference codes ([chunk:...],
+  [fact:...]) are for the check only: never show them to the user.
+- Never show internal ids (theme_id, map_id, report_id, run ids), tool names or JSON field
+  names. Call a theme by its name (the "name" field), never by its keyword list.
+- Write for a marketing or SEO reader: short paragraphs or bullets, numbers with their meaning
+  ("2 pages", "searched 6,600 times a month"), no jargon such as "chunk", "ledger" or "spoke".
+- End with one plain line on the check, for example: "Sources checked: all 10 citations
+  match the pages."
 
 {ANALYST_RULES}"""
 
@@ -187,10 +198,11 @@ def definitions(scope: Scope = None) -> list[ToolDef]:
         ToolDef(
             "check_deliverable",
             "Check deliverable",
-            "Check an analysis before giving it to the user: every [chunk:...] and [fact:...] "
+            "Check an answer before giving it to the user: every [chunk:...] and [fact:...] "
             "citation must be one a tool returned for this project, every quoted passage must "
             "match its source word for word, and statements of fact must be cited. Returns "
-            "passed or needs review, the problems, and a Sources table to append.",
+            "passed or needs review, the problems, and readable_markdown: the answer as the "
+            "user should see it (numbered sources and links instead of reference codes).",
             {
                 "type": "object",
                 "properties": {

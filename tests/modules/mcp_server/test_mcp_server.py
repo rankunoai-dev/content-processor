@@ -287,3 +287,76 @@ def test_print_config_for_one_module_and_for_every_module(
     for bad in (["--modules", "nope"], ["--every-module", "--modules", "themes", "--print-config"]):
         with pytest.raises(SystemExit):
             mcp_main.main(bad)
+
+
+# -- readable answers -------------------------------------------------------------------------
+
+
+def test_readable_version_numbers_sources_by_page() -> None:
+    from src.modules.analyst.playground import EvidenceLedger
+    from src.modules.analyst.verify import readable_version
+
+    ledger = EvidenceLedger()
+    a = ledger.chunk(
+        "c-a",
+        website="johnhancock.com",
+        url="https://jh.com/esign",
+        project="p",
+        headings=["How to use e-signature", "FAQ"],
+        text="x",
+        block_ids=[],
+        evidence_ids=[],
+    )
+    b = ledger.chunk(
+        "c-b",
+        website="johnhancock.com",
+        url="https://jh.com/esign",
+        project="p",
+        headings=["How to use e-signature"],
+        text="y",
+        block_ids=[],
+        evidence_ids=[],
+    )
+    c = ledger.fact(
+        "t1",
+        kind="theme",
+        website="johnhancock.com",
+        title="theme: The Longevity Opportunity",
+    )
+    text = f"Forms can be signed online [{a}]. It is secure [{b}] [{c}].\n\nAgain [{a}][{c}]."
+    out = readable_version(text, ledger)
+    assert "chunk:" not in out and "fact:" not in out
+    assert "Forms can be signed online [1]." in out
+    assert "It is secure [1, 2]." in out and "Again [1, 2]." in out
+    assert "1. [How to use e-signature (johnhancock.com)](https://jh.com/esign)" in out
+    assert "2. The Longevity Opportunity (johnhancock.com)" in out
+    assert readable_version("No citations here.", ledger) == "No citations here.\n"
+
+
+def test_check_deliverable_returns_the_readable_answer(themed: World, tmp_path: Path) -> None:
+    client = TestClient(_app(themed, tmp_path), base_url="http://127.0.0.1")
+    found, _ = _call(client, "search_knowledge", project_id=themed.project_id, query="term life")
+    ref = found["data"]["passages"][0]["ref"]
+    checked, _ = _call(
+        client,
+        "check_deliverable",
+        project_id=themed.project_id,
+        text=f"Term life is sold [{ref}].",
+    )
+    assert checked["readable_markdown"].startswith("Term life is sold [1].")
+    assert (
+        "**Sources**" in checked["readable_markdown"]
+        and "chunk:" not in checked["readable_markdown"]
+    )
+    assert "readable_markdown" in checked["how_to_present"]
+    theme, _ = _call(client, "get_theme_map", project_id=themed.project_id)
+    first = theme["data"]["themes"][0]
+    assert first["name"] and first["keywords"] and "label" not in first
+
+
+def test_instructions_ask_for_readable_answers() -> None:
+    from src.modules.mcp_server.catalog import instructions
+
+    text = instructions(None)
+    assert "never show them to the user" in text and "Never show internal ids" in text
+    assert "Call a theme by its name" in text

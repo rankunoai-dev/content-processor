@@ -376,5 +376,30 @@ def test_card_tool_reuses_or_builds_the_map(themed: World) -> None:
     fresh = json.loads(run_tool(play, "get_theme_map", {"rebuild": True})[0])["data"]
     assert fresh["map_id"] != first
     assert theme_store(themed.store).latest(themed.project_id) is not None
-    pet = next(t for t in data["themes"] if any("pet" in term for term in t["terms"]))
+    pet = next(t for t in data["themes"] if any("pet" in term for term in t["keywords"]))
     assert pet["ownership"] == "client_gap" and pet["per_website"]["rival.com"]["pages"] == 3
+
+
+def test_themes_are_named_after_their_main_page() -> None:
+    from src.modules.theming.build import _readable_name
+    from src.modules.theming.models import Pillar, SiteCoverage
+
+    def site(website: str, pages: int, title: str | None) -> SiteCoverage:
+        pillar = Pillar(url=f"https://{website}/p", title=title, score=1.0) if title else None
+        return SiteCoverage(website=website, pages=pages, words=100, share=0.5, pillar=pillar)
+
+    roles = {"example.com": "client", "rival.com": "competitor"}
+    client_first = [
+        site("rival.com", 9, "Pet cover plans | Rival"),
+        site("example.com", 2, "The Longevity Opportunity | John Hancock"),
+    ]
+    assert _readable_name(client_first, roles) == "The Longevity Opportunity"
+    assert _readable_name([site("rival.com", 3, "Pet insurance – Rival Insurance")], roles) == (
+        "Pet insurance"
+    )
+    assert _readable_name([site("rival.com", 3, "How to use e-signature - Rival")], roles) == (
+        "How to use e-signature"
+    )
+    long = "Word " * 30
+    assert _readable_name([site("rival.com", 3, long)], roles).endswith("…")  # type: ignore[union-attr]
+    assert _readable_name([site("rival.com", 3, None)], roles) is None

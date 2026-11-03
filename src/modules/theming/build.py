@@ -30,7 +30,7 @@ import hashlib
 import math
 import re
 from collections import Counter
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
@@ -520,6 +520,34 @@ def _label(terms: list[str]) -> str:
     return ", ".join(picked).capitalize() if picked else "Unnamed theme"
 
 
+_TITLE_SEPARATORS = re.compile(r"\s+[|–—]\s+|\s+-\s+(?=[^-]*$)")
+_MAX_NAME = 70
+
+
+def _readable_name(coverage: list[SiteCoverage], roles: Mapping[str, str]) -> str | None:
+    """The theme's name a person would use: the title of its main page.
+
+    The client's pillar comes first (its biggest website), then a competitor's. The
+    site name after "|", "–" or a last " - " is dropped and long titles are cut at a
+    word. None when no pillar has a usable title (the term label is used instead).
+    """
+    ranked = sorted(
+        (c for c in coverage if c.pillar is not None and c.pillar.title),
+        key=lambda c: (roles.get(c.website) != "client", -c.pages),
+    )
+    for c in ranked:
+        title = " ".join((c.pillar.title or "").split()) if c.pillar else ""
+        parts = [part for part in _TITLE_SEPARATORS.split(title) if part.strip()]
+        name = parts[0].strip() if parts else ""
+        if len(name.split()) < 2 and len(parts) > 1:
+            name = title  # the first part alone is too short to name anything
+        if len(name) > _MAX_NAME:
+            name = name[:_MAX_NAME].rsplit(" ", 1)[0].rstrip(",;:") + "…"
+        if len(name) >= 3:
+            return name
+    return None
+
+
 # -- funnel, pillars, ownership ------------------------------------------------------------------
 
 _FUNNEL_RULES: list[tuple[FunnelStage, re.Pattern[str]]] = [
@@ -748,7 +776,7 @@ def build_theme_map(
         themes.append(
             Theme(
                 theme_id=theme_id,
-                label=_label(terms),
+                label=_readable_name(coverage, roles) or _label(terms),
                 terms=terms,
                 pages=len(members),
                 coverage=coverage,

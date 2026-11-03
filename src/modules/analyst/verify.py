@@ -21,10 +21,10 @@ from __future__ import annotations
 import re
 
 from src.modules.analyst.models import Verification
-from src.modules.analyst.playground import EvidenceLedger
+from src.modules.analyst.playground import EvidenceLedger, LedgerEntry
 from src.modules.content_processor.knowledge.assist import quote_in
 
-__all__ = ["MAX_UNCITED", "REF", "sources_section", "verify_deliverable"]
+__all__ = ["MAX_UNCITED", "REF", "readable_version", "sources_section", "verify_deliverable"]
 
 REF = re.compile(r"\[((?:chunk|fact):[A-Za-z0-9_.:\-]+)\]")
 MAX_UNCITED = 3
@@ -131,4 +131,48 @@ def sources_section(text: str, ledger: EvidenceLedger, check: Verification) -> s
         )
     if not cited:
         lines.append("| - | - | - | no citations | - |")
+    return "\n".join(lines) + "\n"
+
+
+_REF_RUN = re.compile(r"(?:[ \t]*\[(?:chunk|fact):[A-Za-z0-9_.:\-]+\])+")
+_KIND_PREFIX = re.compile(r"^[a-z_ ]{2,20}:\s+")
+
+
+def _source_name(entry: LedgerEntry | None, ref: str) -> str:
+    if entry is None:
+        return f"unknown source ({ref})"
+    if entry.kind == "chunk":
+        heading = entry.title.split(" > ")[0].strip() if entry.title else ""
+        return f"{heading} ({entry.website})" if heading else entry.website
+    title = _KIND_PREFIX.sub("", entry.title).strip() or entry.kind
+    return f"{title} ({entry.website})" if entry.website else title
+
+
+def readable_version(text: str, ledger: EvidenceLedger) -> str:
+    """The deliverable for people: citation codes become numbers, with a Sources list.
+
+    Passages of the same page share one number; neighbouring citations merge into
+    one bracket ("[1, 2]"). Numbers follow the order of first citation.
+    """
+    numbers: dict[str, int] = {}
+    sources: list[tuple[int, str, str | None]] = []
+
+    def number(ref: str) -> int:
+        entry = ledger.entries.get(ref)
+        key = (entry.url or ref) if entry is not None else ref
+        if key not in numbers:
+            numbers[key] = len(numbers) + 1
+            sources.append((numbers[key], _source_name(entry, ref), entry.url if entry else None))
+        return numbers[key]
+
+    def replace(match: re.Match[str]) -> str:
+        cited = sorted(dict.fromkeys(number(ref) for ref in REF.findall(match.group(0))))
+        return " [" + ", ".join(str(n) for n in cited) + "]"
+
+    body = _REF_RUN.sub(replace, text).rstrip()
+    if not sources:
+        return body + "\n"
+    lines = [body, "", "**Sources**", ""]
+    for n, name, url in sources:
+        lines.append(f"{n}. [{name}]({url})" if url else f"{n}. {name}")
     return "\n".join(lines) + "\n"

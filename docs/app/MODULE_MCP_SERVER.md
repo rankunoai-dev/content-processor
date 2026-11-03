@@ -28,6 +28,10 @@ The server sends Claude the analyst rules (evidence only, exact quotes, untruste
 
 **Search without the local model.** When Ollama is not reachable, search now falls back to exact words (instead of returning nothing) and says so in a note; the app's search tab shows the same note.
 
+## Readable answers
+
+`check_deliverable` also returns `readable_markdown`: the answer as the user should see it, with every `[chunk:...]`/`[fact:...]` replaced by a number (passages of one page share a number, neighbouring citations merge into `[1, 2]`) and a **Sources** list of page names and links (a theme links its main page). The instructions tell Claude to show only that version, never reference codes, internal ids, tool names or JSON fields, to name themes by `name`, and to end with one plain line on the check. `get_theme_map` returns each theme's `name` (the cleaned title of its main page, the client's first; keyword label when no title) and `keywords`.
+
 ## Module scope: one module per chat, without the others
 
 A connection can be limited to some modules, so a chat that should stay within one module never sees the others:

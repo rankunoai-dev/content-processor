@@ -780,10 +780,12 @@ def _theme_map(play: Playground, args: ThemeInput) -> dict[str, Any]:
         theme_map, _files = build_project_themes(play.store, play.access, project_id)
     themes = []
     for t in theme_map.themes:
+        pillar = next((c.pillar.url for c in t.coverage if c.pillar is not None), None)
         ref = play.ledger.fact(
             f"{theme_map.map_id}\x1f{t.theme_id}",
             kind="theme",
             website=",".join(c.website for c in t.coverage if c.pages),
+            url=pillar,
             project=project_id,
             title=f"theme: {t.label}",
             text=f"{t.ownership}: {t.ownership_reason}",
@@ -792,8 +794,8 @@ def _theme_map(play: Playground, args: ThemeInput) -> dict[str, Any]:
             {
                 "ref": ref,
                 "theme_id": t.theme_id,
-                "label": t.label,
-                "terms": t.terms,
+                "name": t.label,
+                "keywords": t.terms[:8],
                 "pages": t.pages,
                 "ownership": t.ownership,
                 "why": t.ownership_reason,
