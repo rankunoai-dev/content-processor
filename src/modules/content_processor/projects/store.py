@@ -140,11 +140,28 @@ def _now() -> datetime:
     return datetime.now(UTC)
 
 
+_REPLACE_TRIES = 25
+
+
 def _write_json(path: Path, data: object) -> None:
+    """Write through a temporary file and swap it in.
+
+    On Windows the swap is refused for a moment while another process has the target
+    open (a scan by the antivirus, a reader in a worker process): it is retried for up
+    to about two seconds instead of failing the whole run.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + f".{os.getpid()}.{threading.get_ident()}.tmp")
     tmp.write_text(json.dumps(data, indent=1, default=str), encoding="utf-8")
-    os.replace(tmp, path)
+    for attempt in range(_REPLACE_TRIES):
+        try:
+            os.replace(tmp, path)
+            return
+        except PermissionError:
+            if attempt == _REPLACE_TRIES - 1:
+                tmp.unlink(missing_ok=True)
+                raise
+            time.sleep(0.02 * (attempt + 1))
 
 
 def owner_of(sites: list[SiteRecord], url: str) -> SiteRecord | None:

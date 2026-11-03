@@ -816,3 +816,11 @@ git worktree add ../content-processor-lane4 -b lane/L4-verify
 - **Live check:** a Themes-only connector started from its printed config against this branch's app (port 8791, JH test): Claude sees list_projects, get_offering_catalog, get_theme_map, check_deliverable; list_projects has only theme fields; theme map 9 themes; get_gap_findings refused "unknown tool ... in this connection (Themes)".
 - **Tests:** `test_mcp_server.py` +4 (scoped catalog and instructions, app refuses other modules and filters status, scoped server over the protocol, config for one / every module).
 - **Gate:** `scripts/verify.ps1 -Fix` ALL GATES PASSED, 1,192 passed, 12 skipped, coverage 93.86%, 7 min 26 s (no web change on this branch).
+
+## [2026-11-03] Fix: scrapes failed on Windows (relative evidence folder, refused file swap)
+
+- **Branch / worktree:** `fix/evidence-relative-root` at `../content-processor-evfix` (on `main` `e71e6c5`).
+- **Found by:** the user's 5-page John Hancock test project. Run 1: all 5 pages FAILED after download with `relative path can't be expressed as a file URI` (`.env` has `CP_EVIDENCE_ROOT=./evidence`; `LocalEvidenceStore._uri` calls `Path.as_uri()`, which needs an absolute path). Run 2 (app restarted with an absolute `CP_EVIDENCE_ROOT` as a workaround): stopped on `[WinError 5] Access is denied` replacing `state.json` (`os.replace` refused while another process, typically the antivirus or a worker, had the file open). Run 3: 5 of 5 verified.
+- **Fix:** `LocalEvidenceStore` makes its root absolute once, at creation; `projects/store._write_json` retries a refused `os.replace` up to 25 times (about 2 s in all), then removes its temporary file and raises.
+- **Tests:** `tests/modules/content_processor/test_windows_file_races.py` 2 (relative root gives `file:///` URIs and survives a later change of folder; refused swaps retried, then raised with the old file intact and no temporary file left).
+- **Gate:** `scripts/verify.ps1 -Fix` ALL GATES PASSED, 1,194 passed, 12 skipped, coverage 93.86%, 2 min 33 s.

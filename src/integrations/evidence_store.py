@@ -195,9 +195,14 @@ class LocalEvidenceStore:
     """Filesystem store under `<root>/<tenant>/` (`raw/` objects, `chunks/` shared parts)."""
 
     def __init__(self, root: Path, tenant_id: str) -> None:
-        """Create the tenant prefix on first use."""
-        self._base = Path(root) / tenant_id / "raw"
-        self._chunks = Path(root) / tenant_id / "chunks"
+        """Create the tenant prefix on first use.
+
+        A relative root (`CP_EVIDENCE_ROOT=./evidence`) is made absolute here, once:
+        evidence URIs are `file://` links, which need an absolute path.
+        """
+        root = Path(root).absolute()
+        self._base = root / tenant_id / "raw"
+        self._chunks = root / tenant_id / "chunks"
         self._base.mkdir(parents=True, exist_ok=True)
 
     def _path(self, sha256: str) -> Path:
