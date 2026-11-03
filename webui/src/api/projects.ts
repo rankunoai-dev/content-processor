@@ -10,7 +10,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { create } from 'zustand';
 import { ApiError } from './client';
 
-export type RunStatus = 'queued' | 'running' | 'finished' | 'failed' | 'cancelled' | 'interrupted';
+/** ready: its turn came in the shared queue and it waits for its person to start it. */
+export type RunStatus = 'queued' | 'ready' | 'running' | 'finished' | 'failed' | 'cancelled' | 'interrupted';
 export type KnowledgeStatus = '' | 'building' | 'ready' | 'failed' | 'skipped';
 
 export interface RunState {
@@ -34,6 +35,42 @@ export interface RunState {
   reports_ready: boolean;
   knowledge_status: KnowledgeStatus;
   knowledge_message: string;
+  /** auto: starts by itself when its turn comes; notify: email, then wait to be started. */
+  on_turn: 'auto' | 'notify';
+  email_when_done: boolean;
+  /** The email address, partly hidden ('g***@rankuno.com'). */
+  notify_to: string;
+  /** Started after its turn came: runs before the waiting line. */
+  jump: boolean;
+  turn_at: string | null;
+}
+
+/** How a scrape waits for its turn: one scrape runs at a time on the whole app. */
+export interface StartOptions {
+  on_turn: 'auto' | 'notify';
+  email: string | null;
+  email_when_done: boolean;
+}
+
+export interface QueueItem {
+  run: RunState;
+  project_name: string;
+  site_name: string;
+  /** Place in the waiting line (1 runs next); 0 when running or waiting for its person. */
+  position: number;
+  /** Rough wait before it starts, in seconds. */
+  wait_s: number;
+}
+
+export interface SharedQueue {
+  running: QueueItem[];
+  waiting: QueueItem[];
+  ready: QueueItem[];
+  seconds_per_url: number;
+  /** False: emails are saved on the server, not sent (no mail server set up). */
+  email_sends: boolean;
+  /** A scrape whose turn came is cancelled when not started within these hours. */
+  ready_hours: number;
 }
 
 export interface Site {
@@ -154,7 +191,7 @@ export interface SiteChange {
   role?: 'client' | 'competitor';
 }
 
-export const ACTIVE: ReadonlySet<RunStatus> = new Set(['queued', 'running']);
+export const ACTIVE: ReadonlySet<RunStatus> = new Set(['queued', 'ready', 'running']);
 
 // -- unlock tokens (memory only: closing the tab locks every project again) --------
 
@@ -290,9 +327,14 @@ export const projectsApi = {
     ),
 
   runs: (id: string, signal?: AbortSignal) => get<RunState[]>(`${projectPath(id)}/runs`, signal),
-  startAll: (id: string, token: string | null) => post<RunState[]>(`${projectPath(id)}/runs`, {}, token),
-  start: (id: string, site: string, token: string | null) =>
-    post<RunState>(`${sitePath(id, site)}/runs`, {}, token),
+  startAll: (id: string, options: StartOptions, token: string | null) =>
+    post<RunState[]>(`${projectPath(id)}/runs`, options, token),
+  start: (id: string, site: string, options: StartOptions, token: string | null) =>
+    post<RunState>(`${sitePath(id, site)}/runs`, options, token),
+  /** Start a scrape whose turn came: it runs next, before the waiting line. */
+  startReady: (id: string, site: string, run: string, token: string | null) =>
+    post<RunState>(`${runPath(id, site, run)}/start`, {}, token),
+  queue: (signal?: AbortSignal) => get<SharedQueue>('/api/queue', signal),
   cancel: (id: string, site: string, run: string, token: string | null) =>
     post<RunState>(`${runPath(id, site, run)}/cancel`, {}, token),
   reports: (id: string, site: string, run: string, signal?: AbortSignal) =>
@@ -325,6 +367,15 @@ export const projectKeys = {
 };
 
 const POLL_MS = 3000;
+
+/** The shared queue of scrapes across every project; refreshed every few seconds. */
+export function useSharedQueue() {
+  return useQuery({
+    queryKey: ['queue'] as const,
+    queryFn: ({ signal }) => projectsApi.queue(signal),
+    refetchInterval: POLL_MS,
+  });
+}
 
 export function useProjects() {
   return useQuery({

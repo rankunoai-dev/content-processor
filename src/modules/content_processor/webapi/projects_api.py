@@ -37,13 +37,14 @@ from src.modules.content_processor.projects.models import (
     MAX_NOTE_LENGTH,
     MAX_SITE_TAGS,
     RUN_ACTIVE,
+    OnTurn,
     ProjectRecord,
     ProjectUrl,
     RunState,
     SiteRecord,
     SiteRole,
 )
-from src.modules.content_processor.projects.runner import ScrapeRunner
+from src.modules.content_processor.projects.runner import QueueEntry, ScrapeRunner
 from src.modules.content_processor.projects.security import (
     MIN_PASSWORD_LENGTH,
     AttemptLimiter,
@@ -154,6 +155,38 @@ class ProjectCreate(StrictModel):
         description="the client's other websites or brands (never its competitors)",
     )
     competitors: list[SiteIn] = Field(default_factory=list, max_length=50)
+
+
+class StartIn(StrictModel):
+    """How a scrape waits for its turn in the shared queue (one scrape runs at a time)."""
+
+    on_turn: OnTurn = Field(
+        default="auto",
+        description="auto: start by itself when its turn comes; notify: email me then and wait",
+    )
+    email: str | None = Field(default=None, max_length=254)
+    email_when_done: bool = False
+
+
+class QueueItem(StrictModel):
+    """One scrape of the shared queue."""
+
+    run: RunState
+    project_name: str
+    site_name: str
+    position: int = Field(description="place in the waiting line (1 runs next); 0 otherwise")
+    wait_s: float = Field(description="rough wait before it starts, in seconds")
+
+
+class QueueOut(StrictModel):
+    """The shared queue: what runs now, what waits (in order) and what waits for its person."""
+
+    running: list[QueueItem]
+    waiting: list[QueueItem]
+    ready: list[QueueItem]
+    seconds_per_url: float
+    email_sends: bool = Field(description="False: emails are saved to the outbox, not sent")
+    ready_hours: float = Field(description="a scrape whose turn came is cancelled after this")
 
 
 class Unlock(StrictModel):
@@ -582,11 +615,42 @@ def register_project_routes(
         project(project_id)
         return store.runs(project_id)
 
+    @app.get("/api/queue")
+    def shared_queue() -> QueueOut:
+        running, waiting, ready = runner.queue()
+
+        def item(e: QueueEntry) -> QueueItem:
+            return QueueItem(
+                run=e.state,
+                project_name=e.project_name,
+                site_name=e.site_name,
+                position=e.position,
+                wait_s=round(e.wait_s),
+            )
+
+        return QueueOut(
+            running=[item(e) for e in running],
+            waiting=[item(e) for e in waiting],
+            ready=[item(e) for e in ready],
+            seconds_per_url=round(runner.seconds_per_url(), 1),
+            email_sends=runner.email_sends,
+            ready_hours=runner.ready_hours,
+        )
+
     @app.post("/api/projects/{project_id}/runs")
-    def start_all(project_id: str, token: TokenHeader = None) -> list[RunState]:
+    def start_all(
+        project_id: str, body: StartIn | None = None, token: TokenHeader = None
+    ) -> list[RunState]:
         record = require_token(project_id, token)
+        how = body or StartIn()
         try:
-            return runner.submit_all(project_id, started_by=record.owner_name)
+            return runner.submit_all(
+                project_id,
+                started_by=record.owner_name,
+                on_turn=how.on_turn,
+                email=how.email,
+                email_when_done=how.email_when_done,
+            )
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from None
 
@@ -596,11 +660,32 @@ def register_project_routes(
         return store.runs(project_id, site_id)
 
     @app.post("/api/projects/{project_id}/sites/{site_id}/runs")
-    def start_run(project_id: str, site_id: str, token: TokenHeader = None) -> RunState:
+    def start_run(
+        project_id: str, site_id: str, body: StartIn | None = None, token: TokenHeader = None
+    ) -> RunState:
         record = require_token(project_id, token)
         site(project_id, site_id)
+        how = body or StartIn()
         try:
-            return runner.submit(project_id, site_id, started_by=record.owner_name)
+            return runner.submit(
+                project_id,
+                site_id,
+                started_by=record.owner_name,
+                on_turn=how.on_turn,
+                email=how.email,
+                email_when_done=how.email_when_done,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from None
+
+    @app.post("/api/projects/{project_id}/sites/{site_id}/runs/{run_id}/start")
+    def start_ready(
+        project_id: str, site_id: str, run_id: str, token: TokenHeader = None
+    ) -> RunState:
+        require_token(project_id, token)
+        run_state(project_id, site_id, run_id)
+        try:
+            return runner.start_ready(project_id, site_id, run_id)
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from None
 

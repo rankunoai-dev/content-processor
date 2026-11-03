@@ -6,6 +6,7 @@ import {
   ExclamationCircleOutlined,
   FileSearchOutlined,
   FolderOpenOutlined,
+  HourglassOutlined,
   MoonOutlined,
   SettingOutlined,
   SunOutlined,
@@ -17,7 +18,7 @@ import { Suspense, useEffect, useMemo, useState } from 'react';
 import { Link, Outlet, useLocation, useMatch, useNavigate } from 'react-router-dom';
 import { useOverview, useRuns } from '../api/queries';
 import { usePreferences } from '../state/preferences';
-import { APP, PROJECTS, RUNS } from '../vocabulary';
+import { APP, PROJECTS, QUEUE, RUNS } from '../vocabulary';
 import { ErrorBoundary } from './ErrorBoundary';
 import { RouteFallback } from './RouteFallback';
 
@@ -126,6 +127,7 @@ export function AppLayout() {
 
   const selected = useMemo(() => {
     if (location.pathname.startsWith('/projects')) return 'projects';
+    if (location.pathname.startsWith('/queue')) return 'queue';
     if (!runId) return 'runs';
     const section = location.pathname.split('/')[3];
     return section ?? 'overview';
@@ -138,6 +140,7 @@ export function AppLayout() {
       icon: <FolderOpenOutlined />,
       label: <Link to="/projects">{PROJECTS.nav}</Link>,
     },
+    { key: 'queue', icon: <HourglassOutlined />, label: <Link to="/queue">{QUEUE.nav}</Link> },
     { key: 'runs', icon: <AppstoreOutlined />, label: <Link to="/">{APP.nav.runs}</Link> },
     ...(runId
       ? [

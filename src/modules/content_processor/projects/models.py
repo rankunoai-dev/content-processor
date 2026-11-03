@@ -21,6 +21,7 @@ __all__ = [
     "MAX_NOTE_LENGTH",
     "MAX_SITE_TAGS",
     "MAX_TAG_LENGTH",
+    "OnTurn",
     "KnowledgeStatus",
     "ProjectRecord",
     "ProjectUrl",
@@ -30,8 +31,10 @@ __all__ = [
     "SiteRole",
 ]
 
-RunStatus = Literal["queued", "running", "finished", "failed", "cancelled", "interrupted"]
-RUN_ACTIVE: frozenset[str] = frozenset({"queued", "running"})
+RunStatus = Literal["queued", "ready", "running", "finished", "failed", "cancelled", "interrupted"]
+# `ready`: its turn came and it waits for the person who asked to be emailed to start it.
+RUN_ACTIVE: frozenset[str] = frozenset({"queued", "ready", "running"})
+OnTurn = Literal["auto", "notify"]
 SiteRole = Literal["client", "competitor"]
 KnowledgeStatus = Literal["", "building", "ready", "failed", "skipped"]
 MAX_SITE_TAGS = 12
@@ -109,3 +112,15 @@ class RunState(StrictModel):
     reports_ready: bool = False
     knowledge_status: KnowledgeStatus = ""
     knowledge_message: str = ""
+    # -- the shared queue (one scrape at a time on the whole instance) ----------
+    on_turn: OnTurn = Field(
+        default="auto",
+        description="auto: starts by itself when its turn comes; notify: an email is sent "
+        "and it waits (status ready) until started",
+    )
+    email_when_done: bool = False
+    notify_to: str = Field(default="", description="the email address, partly hidden")
+    jump: bool = Field(
+        default=False, description="started after its turn came: runs before the waiting line"
+    )
+    turn_at: datetime | None = Field(default=None, description="when its turn came (ready)")

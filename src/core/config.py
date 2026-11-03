@@ -133,6 +133,24 @@ class Settings(BaseSettings):
     cp_semrush_database: str = "us"
     cp_semrush_keyword_limit: int = Field(default=200, ge=1, le=10000)
 
+    # -- Content Scraper: the shared scrape queue and its emails ------------
+    # One scrape runs at a time on the instance; the others wait in one queue.
+    # Without an SMTP host, emails are written to <app data>/outbox/ instead of sent.
+    cp_smtp_host: str | None = None
+    cp_smtp_port: int = Field(default=587, ge=1, le=65535)
+    cp_smtp_user: str | None = None
+    cp_smtp_password: SecretStr | None = None
+    cp_smtp_from: str | None = Field(default=None, description="sender address of queue emails")
+    cp_smtp_starttls: bool = True
+    cp_app_base_url: str = Field(
+        default="http://127.0.0.1:8780", description="where the app is opened, for email links"
+    )
+    cp_queue_ready_hours: float = Field(
+        default=72.0,
+        gt=0.0,
+        description="how long a scrape whose turn came waits to be started before it is cancelled",
+    )
+
     # -- Content processor: Bright Data (T4 proxies / T5 unlocker) ---------
     # Caps are enforced in code before any request leaves (playbook §10, layer 2).
     brightdata_enabled: bool = Field(default=False, description="Kill switch for T4/T5.")

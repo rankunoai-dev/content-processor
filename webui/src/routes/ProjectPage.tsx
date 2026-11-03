@@ -52,22 +52,25 @@ import {
   useProjectToken,
   useProjectTokens,
   useRunReports,
+  useSharedQueue,
   useSiteUrls,
   type ImportResult,
   type Project,
   type RoutedImport,
   type RunState,
   type Site,
+  type StartOptions,
 } from '../api/projects';
 import { QueryState } from '../components/QueryState';
 import { AnalystTab } from './AnalystTab';
 import { ThemesTab } from './ThemesTab';
+import { StartDialog } from './StartDialog';
 import { MonitoringTab } from './MonitoringTab';
 import { ResearchTab } from './ResearchTab';
 import { GapsTab } from './GapsTab';
 import { StatusBar, StatusLegend } from '../components/StatusBar';
 import { PageHeading } from '../components/bits';
-import { PROJECTS, formatDate, reportKind, ANALYST, GAPS, MONITORING, RESEARCH, THEMES } from '../vocabulary';
+import { PROJECTS, QUEUE, formatDate, reportKind, roughDuration, ANALYST, GAPS, MONITORING, RESEARCH, THEMES } from '../vocabulary';
 
 const STATUS_COLOR: Record<string, string> = {
   queued: 'default',
@@ -76,6 +79,7 @@ const STATUS_COLOR: Record<string, string> = {
   failed: 'error',
   cancelled: 'warning',
   interrupted: 'warning',
+  ready: 'gold',
 };
 
 /** '30 Oct 2026, 12:31': enough to tell the scrapes of one website apart. */
@@ -635,6 +639,9 @@ function ActiveRun({ project, run, token }: { project: Project; run: RunState; t
   const id = project.project_id;
   const { message } = AntApp.useApp();
   const cancel = useProjectChange(id, () => projectsApi.cancel(id, run.site_id, run.run_id, token));
+  const startReady = useProjectChange(id, () => projectsApi.startReady(id, run.site_id, run.run_id, token));
+  const queue = useSharedQueue();
+  const inLine = queue.data?.waiting.find((w) => w.run.run_id === run.run_id);
   const pct = run.url_count ? Math.round((100 * run.pages_done) / run.url_count) : 0;
   return (
     <Card
@@ -645,6 +652,20 @@ function ActiveRun({ project, run, token }: { project: Project; run: RunState; t
         </Space>
       }
       extra={
+        <Space>
+          {run.status === 'ready' ? (
+            <Guarded unlocked={token !== null}>
+              <Button
+                type="primary"
+                icon={<PlayCircleOutlined />}
+                disabled={token === null}
+                loading={startReady.isPending}
+                onClick={() => startReady.mutate(undefined, { onError: (e) => void message.error(e.message) })}
+              >
+                {QUEUE.startReady}
+              </Button>
+            </Guarded>
+          ) : null}
         <Guarded unlocked={token !== null}>
           <Popconfirm
             title={PROJECTS.cancelConfirm}
@@ -656,9 +677,16 @@ function ActiveRun({ project, run, token }: { project: Project; run: RunState; t
             </Button>
           </Popconfirm>
         </Guarded>
+        </Space>
       }
     >
       <Space direction="vertical" style={{ width: '100%' }}>
+        {run.status === 'ready' ? (
+          <Alert type="warning" showIcon message={QUEUE.yourTurn} description={QUEUE.yourTurnText} />
+        ) : null}
+        {run.status === 'queued' && inLine ? (
+          <Alert type="info" showIcon message={QUEUE.inLine(inLine.position, roughDuration(inLine.wait_s))} />
+        ) : null}
         <Progress percent={pct} status="active" aria-label={PROJECTS.progress(run.pages_done, run.url_count)} />
         <Typography.Text>
           {PROJECTS.progress(run.pages_done, run.url_count)} · {PROJECTS.batches(run.batches_done, run.batches_total)}
@@ -698,7 +726,8 @@ function ScrapePanel({
 }) {
   const id = project.project_id;
   const { message } = AntApp.useApp();
-  const start = useProjectChange(id, () => projectsApi.start(id, site.site_id, token));
+  const start = useProjectChange(id, (options: StartOptions) => projectsApi.start(id, site.site_id, options, token));
+  const [choosing, setChoosing] = useState(false);
   const active = runs.find((r) => ACTIVE.has(r.status));
   const canStart = token !== null && site.url_count > 0 && !active;
   return (
@@ -715,11 +744,24 @@ function ScrapePanel({
                 icon={<PlayCircleOutlined />}
                 disabled={!canStart}
                 loading={start.isPending}
-                onClick={() => start.mutate(undefined, { onError: (e) => void message.error(e.message) })}
+                onClick={() => setChoosing(true)}
               >
                 {`${PROJECTS.start}: ${site.name}`}
               </Button>
             </Guarded>
+            <StartDialog
+              what={site.name}
+              urlCount={site.url_count}
+              open={choosing}
+              busy={start.isPending}
+              onClose={() => setChoosing(false)}
+              onStart={(options) =>
+                start.mutate(options, {
+                  onSuccess: () => setChoosing(false),
+                  onError: (e) => void message.error(e.message),
+                })
+              }
+            />
             <Typography.Text type="secondary">
               {site.url_count > 0 ? PROJECTS.startHelp(site.url_count) : PROJECTS.noUrls}
             </Typography.Text>
@@ -1106,7 +1148,8 @@ export default function ProjectPage() {
   const [addingSite, setAddingSite] = useState(false);
   const [params, setParams] = useSearchParams();
   const tab = params.get('tab') ?? 'sites';
-  const startAll = useProjectChange(projectId, () => projectsApi.startAll(projectId, token));
+  const startAll = useProjectChange(projectId, (options: StartOptions) => projectsApi.startAll(projectId, options, token));
+  const [choosingAll, setChoosingAll] = useState(false);
   const go = (next: Record<string, string | null>) => {
     const merged = new URLSearchParams(params);
     for (const [k, v] of Object.entries(next)) {
@@ -1176,14 +1219,25 @@ export default function ProjectPage() {
                               icon={<PlayCircleOutlined />}
                               disabled={token === null || p.url_count === 0}
                               loading={startAll.isPending}
-                              onClick={() =>
-                                startAll.mutate(undefined, { onError: (e) => void message.error(e.message) })
-                              }
+                              onClick={() => setChoosingAll(true)}
                             >
                               {PROJECTS.startAll}
                             </Button>
                           </Tooltip>
                         </Guarded>
+                        <StartDialog
+                          what={PROJECTS.startAll.toLowerCase().replace('scrape ', '')}
+                          urlCount={p.url_count}
+                          open={choosingAll}
+                          busy={startAll.isPending}
+                          onClose={() => setChoosingAll(false)}
+                          onStart={(options) =>
+                            startAll.mutate(options, {
+                              onSuccess: () => setChoosingAll(false),
+                              onError: (e) => void message.error(e.message),
+                            })
+                          }
+                        />
                       </Space>
                       <Tabs
                         type="card"

@@ -1,6 +1,6 @@
 # Content Processor: A Plain-Language Guide
 
-Last updated: 3 November 2026 · Code version: main after the Claude Desktop connection (a read-only MCP server: Claude Desktop reads every project and checks its own citations) and the "Open in Claude.ai" button · Maintained by every session that adds a significant feature (see "Keeping this guide current" at the end)
+Last updated: 3 November 2026 · Code version: main after the shared scrape queue (one scrape at a time for everyone, start automatically or be emailed when it is your turn) · Maintained by every session that adds a significant feature (see "Keeping this guide current" at the end)
 
 ## 1. What this is, in one paragraph
 
@@ -182,6 +182,13 @@ The engine is becoming one app with several modules. Module 1, the Content Scrap
 **The client's several websites (brands).** Many clients have more than one website: separate brands, regional sites, or several sites on one domain. A project can hold all of them as **the client's websites**, next to the competitors. The first is the client's main website; the others are entered under "The client's other websites or brands", or added later with "Add a website". The client's websites are always on the same side: the engine never compares two of them as competitors, whether it is grouping pages into themes, deciding who owns a theme, looking for gaps, searching, or preparing an analyst card, and this holds across all projects, even one that was entered the wrong way round. When one domain holds several websites, each gets its own subdomain or section (for example `brand.client.com` or `client.com/brand`), and every address goes to the most specific website.
 
 **Notes and tags on every website.** Each website can carry a short note saying what it is (for example "B2B brand for hospitals, US only") and a few tags (such as "brand", "US", "B2B"). They are shown on the website's page, can be changed at any time with "Edit website", and are passed on to the theme map and the analyst so both know what each website is. A note describes the website; it is never treated as a fact found on its pages.
+
+**One scrape at a time: the shared queue.** Anyone can create projects and add as many addresses as they like, but the app scrapes **one website at a time for everyone**, so one person's large website cannot slow everybody down or overload the machine. Every other scrape waits in one queue, in the order it was started. When you press Start, the app shows how many scrapes are ahead and roughly how long the wait is, and asks what should happen when your turn comes:
+
+- **Start automatically**: it starts by itself as soon as the scrape before it ends.
+- **Email me, and I start it**: you get an email when it is your turn and the queue moves on meanwhile; when you press Start (on the website's page) it runs next, before everyone waiting. If you do not start it within 72 hours it is cancelled and can be queued again.
+
+Either way you can also ask for an email when the scrape finishes. The **Scrape queue** page (left menu) shows what is being scraped now, who is waiting in which order, each one's estimated wait (worked out from how long recent scrapes took per address), and whose turn has come. Email addresses are shown only partly (`g***@company.com`). Emails are sent through the organisation's mail server once it is set up (`CP_SMTP_*` settings); until then each message is saved on the server for the administrator.
 
 **Searching across websites.** After a scrape, each website's pages are prepared for search in their own store. The "Search all websites" tab finds the passages that answer a question and says which website (and which project's scrape) each came from; the best passage of each website can be shown side by side. By default it covers the client's website and **every website it competes with in any project**: websites are recognised as the same across projects by their domain, each is searched once in its most recent scrape, and a project that lists the client as someone else's competitor counts too.
 
@@ -413,6 +420,7 @@ Both send the project's data to Claude through your account, so they are for cli
 
 | Date | Significant change |
 |---|---|
+| 2026-11-03 | Shared scrape queue: projects and addresses stay unlimited, but one scrape runs at a time for everyone. Each queued scrape starts automatically or emails its person when its turn comes (then runs next once started); optional email when it finishes; a Scrape queue page with places in line and estimated waits. |
 | 2026-11-03 | Claude Desktop connection: a read-only MCP server lets Claude Desktop read every project (search, pages, themes, monitoring, search data, gaps) through the running app and check its own citations before answering; no API key. "Open in Claude.ai" on context packs copies the pack and opens a new claude.ai chat. Search falls back to exact words when the local meaning model is off. |
 | 2026-11-02 | Gaps: one ranked list of what the client is missing against its competitors (themes, pillar pages, buying stages, keywords, page-two keywords, competitor momentum, offerings), each with evidence, demand and a next step; the team's decisions (accepted, done, dismissed) carry over and closed gaps are listed. Built on this computer at no cost. |
 | 2026-11-02 | Research: search data per website (keywords, positions, searches per month, ranking page), placed in themes for demand per theme, with movers between snapshots; free import of a Semrush export, or a Semrush pull that is off until a key and a monthly unit cap are set, checked against caps and logged. The three keyword analyst cards can now run. |

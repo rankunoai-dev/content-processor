@@ -14,6 +14,7 @@ from pathlib import Path
 import uvicorn
 
 from src.core.config import get_settings
+from src.modules.content_processor.projects.notify import Notifier, smtp_mailer
 from src.modules.content_processor.projects.runner import ScrapeRunner
 from src.modules.content_processor.projects.security import TokenSigner
 from src.modules.content_processor.projects.store import ProjectStore
@@ -47,6 +48,28 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--no-projects", action="store_true", help="serve run results only, without projects"
     )
     return parser.parse_args(argv)
+
+
+def queue_notifier(app_data: Path) -> Notifier:
+    """Queue emails through the configured SMTP server, or into `<app data>/outbox/`."""
+    settings = get_settings()
+    mailer = None
+    if settings.cp_smtp_host and settings.cp_smtp_from:
+        mailer = smtp_mailer(
+            settings.cp_smtp_host,
+            settings.cp_smtp_port,
+            user=settings.cp_smtp_user,
+            password=settings.cp_smtp_password.get_secret_value()
+            if settings.cp_smtp_password
+            else None,
+            starttls=settings.cp_smtp_starttls,
+        )
+    return Notifier(
+        outbox=app_data / "outbox",
+        sender=settings.cp_smtp_from or "content-scraper@localhost",
+        base_url=settings.cp_app_base_url,
+        mailer=mailer,
+    )
 
 
 def knowledge_access() -> KnowledgeAccess:
@@ -97,7 +120,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     if not args.no_projects:
         data = Path(args.app_data) if args.app_data else get_settings().cp_app_data_root
         store = ProjectStore(data)
-        runner = ScrapeRunner(store)
+        runner = ScrapeRunner(
+            store, notifier=queue_notifier(data), ready_hours=get_settings().cp_queue_ready_hours
+        )
         runner.start()
         projects = (store, runner, TokenSigner.from_file(data / "secret.key"))
     access = knowledge_access()

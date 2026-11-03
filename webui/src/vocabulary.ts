@@ -1276,6 +1276,68 @@ export function formatDuration(seconds: number | null | undefined): string {
 }
 
 /** App module 1: the Content Scraper (projects, URL list, scraping, reports). */
+/** A rough duration: 'under a minute', '25 min', '3 h 20 min'. */
+export function roughDuration(seconds: number): string {
+  if (seconds < 60) return 'under a minute';
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes} min`;
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return m ? `${h} h ${m} min` : `${h} h`;
+}
+
+export const QUEUE = {
+  nav: 'Scrape queue',
+  title: 'Scrape queue',
+  subtitle:
+    'One scrape runs at a time for everyone; the others wait here in the order they were started. Projects and addresses are not limited.',
+  running: 'Scraping now',
+  waiting: 'Waiting in line',
+  ready: 'Their turn came: waiting to be started',
+  nothingRunning: 'Nothing is being scraped right now.',
+  nobodyWaiting: 'Nobody is waiting.',
+  project: 'Project',
+  website: 'Website',
+  startedBy: 'Started by',
+  position: 'Place',
+  addresses: 'Addresses',
+  wait: 'Starts in about',
+  whenTurn: 'When its turn comes',
+  auto: 'Starts by itself',
+  notify: (to: string) => `Emails ${to}, then waits`,
+  doneMail: (to: string) => `Emails ${to} when done`,
+  progress: (done: number, total: number) => `${done.toLocaleString()} of ${total.toLocaleString()} pages`,
+  turnSince: 'Turn came',
+  estimate: (spu: number) =>
+    `Waits are estimated from recent scrapes: about ${spu.toFixed(0)} seconds per address.`,
+  open: 'Open',
+  // the start dialog
+  dialogTitle: (what: string) => `Start scraping: ${what}`,
+  freeNow: 'Nothing else is being scraped: it starts right away.',
+  ahead: (n: number, wait: string) =>
+    `${n} ${n === 1 ? 'scrape is' : 'scrapes are'} ahead in the queue (about ${wait}). One scrape runs at a time for everyone.`,
+  onTurn: 'When its turn comes',
+  onTurnAuto: 'Start automatically',
+  onTurnAutoHelp: 'It starts by itself as soon as the scrape before it ends.',
+  onTurnNotify: 'Email me, and I start it',
+  onTurnNotifyHelp: (hours: number) =>
+    `You get an email when it is your turn; the queue goes on meanwhile. When you press Start it runs next. Not started within ${hours} hours, it is cancelled.`,
+  email: 'Your email',
+  emailPlaceholder: 'name@company.com',
+  emailRequired: 'Give an email address to be told by email.',
+  emailWhenDone: 'Also email me when it finishes',
+  emailNotSent:
+    'Email is not set up on this server yet: messages are saved on the server for the administrator instead of being sent.',
+  queueIt: 'Add to the queue',
+  startNow: 'Start now',
+  // a run of this website
+  inLine: (position: number, wait: string) =>
+    position === 1 ? `Next in line (in about ${wait}).` : `Number ${position} in line (in about ${wait}).`,
+  yourTurn: 'Its turn has come.',
+  yourTurnText: 'Press Start to scrape it now: it runs before the scrapes waiting in line.',
+  startReady: 'Start',
+};
+
 export const PROJECTS = {
   nav: 'Projects',
   module: 'Content Scraper',
@@ -1343,6 +1405,7 @@ export const PROJECTS = {
   history: 'Earlier scrapes',
   status: {
     queued: 'Waiting',
+    ready: 'Your turn',
     running: 'Scraping',
     finished: 'Finished',
     failed: 'Failed',

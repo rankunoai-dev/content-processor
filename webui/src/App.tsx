@@ -18,6 +18,7 @@ const DownloadsPage = lazy(() => import('./routes/DownloadsPage'));
 const NotFoundPage = lazy(() => import('./routes/NotFoundPage'));
 const ProjectsPage = lazy(() => import('./routes/ProjectsPage'));
 const ProjectPage = lazy(() => import('./routes/ProjectPage'));
+const QueuePage = lazy(() => import('./routes/QueuePage'));
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const mode = usePreferences((s) => s.theme);
@@ -54,6 +55,7 @@ export function AppRoutes() {
         <Route index element={<RunsPage />} />
         <Route path="projects" element={<ProjectsPage />} />
         <Route path="projects/:projectId" element={<ProjectPage />} />
+        <Route path="queue" element={<QueuePage />} />
         <Route path="runs/:runId" element={<OverviewPage />} />
         <Route path="runs/:runId/pages" element={<PagesPage />} />
         <Route path="runs/:runId/pages/:pageKey" element={<PageDetailPage />} />
