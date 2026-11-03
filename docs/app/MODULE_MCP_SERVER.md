@@ -16,7 +16,7 @@ Claude Desktop --stdio--> python -m src.modules.mcp_server --HTTP 127.0.0.1--> w
 - `POST /api/mcp/call` accepts only the app's header, JSON, and **no Origin** (no web page, not even the app's own, can call it). The app binds 127.0.0.1 only.
 - The tools are read-only: no scrape, no Semrush pull, no status change, no unlock. Some build a missing local result on first use (theme map, gap report, monitoring check, SEO inventory); that runs inside the app, on this computer, at $0.
 
-## Tools (18)
+## Tools (18 in the full connector)
 
 | Tool | What |
 |---|---|
@@ -27,6 +27,26 @@ Claude Desktop --stdio--> python -m src.modules.mcp_server --HTTP 127.0.0.1--> w
 The server sends Claude the analyst rules (evidence only, exact quotes, untrusted content, no invented numbers) and asks it to call `check_deliverable` before answering. References are kept per project in `app_data/mcp/ledgers/<project>.json`, so a check still works after Claude Desktop or the app restarts.
 
 **Search without the local model.** When Ollama is not reachable, search now falls back to exact words (instead of returning nothing) and says so in a note; the app's search tab shows the same note.
+
+## Module scope: one module per chat, without the others
+
+A connection can be limited to some modules, so a chat that should stay within one module never sees the others:
+
+| Module key | Tools |
+|---|---|
+| `content` | list_websites, search_knowledge, get_page, get_page_facts, list_pages, get_seo_issues, find_similar_pages |
+| `themes` | get_offering_catalog, get_theme_map |
+| `monitoring` | get_changes, get_monitoring_alerts |
+| `research` | get_keyword_rankings, get_serp_overview, get_keyword_metrics, get_search_demand |
+| `gaps` | get_gap_findings |
+
+`list_projects` and `check_deliverable` are in every connection.
+
+- **One connector per module.** `python -m src.modules.mcp_server --print-config --every-module` prints the full connector plus `content-processor-content`, `-themes`, `-monitoring`, `-research` and `-gaps` (each started with `--modules <key>`). In a Claude Desktop chat, switch on only the connector you want: the other modules' tools never enter that conversation.
+- **What a scoped connection does:** lists only its modules' tools; tells Claude it is limited to them and must say which module a question needs instead of looking elsewhere; `list_projects` shows only those modules' state; and the web app refuses any other module's tool on it (`"this connection is limited to Themes; get_gap_findings belongs to Gaps"`), so the limit holds even if a tool were called directly.
+- **The full connector** asks Claude to respect "only use Themes" in a chat: every tool description starts with its module (`[Themes] ...`), and the instructions say to call only that module's tools then. That is an instruction, not enforced; for a strict limit use a module connector.
+- **Why not a switch Claude turns on in a chat:** Claude Desktop runs one connector process for all chats, so a switch set in one chat would apply to every other chat too.
+- A module's own results may name what they were built from (a gap finding names its theme); that is the module's output, not a look-up in another module.
 
 ## Setup (Windows)
 

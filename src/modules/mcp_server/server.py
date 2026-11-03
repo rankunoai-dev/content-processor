@@ -14,9 +14,15 @@ from mcp.server.lowlevel import Server
 from mcp.server.stdio import stdio_server
 
 from src.core.logger import get_logger
-from src.modules.mcp_server.catalog import INSTRUCTIONS, ToolDef, definitions
+from src.modules.mcp_server.catalog import (
+    Scope,
+    ToolDef,
+    definitions,
+    instructions,
+    scope_label,
+)
 
-__all__ = ["DEFAULT_APP_URL", "SERVER_NAME", "build_server", "serve"]
+__all__ = ["DEFAULT_APP_URL", "SERVER_NAME", "build_server", "serve", "server_name"]
 
 _log = get_logger(__name__)
 
@@ -55,10 +61,18 @@ def _result(text: str, is_error: bool) -> types.CallToolResult:
     )
 
 
-def build_server(client: httpx.AsyncClient, app_url: str = DEFAULT_APP_URL) -> Server[Any]:
-    """The MCP server, sending calls through `client` (based at the web app)."""
-    tools = definitions()
+def server_name(scope: Scope = None) -> str:
+    """content-processor, or content-processor-themes for a connection limited to Themes."""
+    return SERVER_NAME if scope is None else f"{SERVER_NAME}-{'-'.join(sorted(scope))}"
+
+
+def build_server(
+    client: httpx.AsyncClient, app_url: str = DEFAULT_APP_URL, scope: Scope = None
+) -> Server[Any]:
+    """The MCP server for `scope`, sending calls through `client` (based at the web app)."""
+    tools = definitions(scope)
     names = {d.name for d in tools}
+    sent_scope = sorted(scope) if scope is not None else None
 
     async def on_list_tools(
         _ctx: Any, _params: types.PaginatedRequestParams | None
@@ -67,10 +81,16 @@ def build_server(client: httpx.AsyncClient, app_url: str = DEFAULT_APP_URL) -> S
 
     async def on_call_tool(_ctx: Any, params: types.CallToolRequestParams) -> types.CallToolResult:
         if params.name not in names:
-            return _result(f'{{"error": "unknown tool {params.name}"}}', True)
+            where = "" if scope is None else f" in this connection ({scope_label(scope)})"
+            return _result(f'{{"error": "unknown tool {params.name}{where}"}}', True)
         try:
             response = await client.post(
-                "/api/mcp/call", json={"tool": params.name, "arguments": params.arguments or {}}
+                "/api/mcp/call",
+                json={
+                    "tool": params.name,
+                    "arguments": params.arguments or {},
+                    "scope": sent_scope,
+                },
             )
         except httpx.ConnectError:
             return _result(_start_hint(app_url), True)
@@ -86,19 +106,22 @@ def build_server(client: httpx.AsyncClient, app_url: str = DEFAULT_APP_URL) -> S
         body = response.json()
         return _result(str(body["text"]), bool(body["is_error"]))
 
+    title = "Content Processor (read-only)"
+    if scope is not None:
+        title = f"Content Processor: {scope_label(scope)} only (read-only)"
     return Server(
-        SERVER_NAME,
+        server_name(scope),
         version="1",
-        title="Content Processor (read-only)",
-        instructions=INSTRUCTIONS,
+        title=title,
+        instructions=instructions(scope),
         on_list_tools=on_list_tools,
         on_call_tool=on_call_tool,
     )
 
 
-async def serve(app_url: str = DEFAULT_APP_URL) -> None:
+async def serve(app_url: str = DEFAULT_APP_URL, scope: Scope = None) -> None:
     """Serve over stdin and stdout until Claude Desktop closes the connection."""
     async with httpx.AsyncClient(base_url=app_url, headers=_HEADERS, timeout=_TIMEOUT) as client:
-        server = build_server(client, app_url)
+        server = build_server(client, app_url, scope)
         async with stdio_server() as (read_stream, write_stream):
             await server.run(read_stream, write_stream, server.create_initialization_options())

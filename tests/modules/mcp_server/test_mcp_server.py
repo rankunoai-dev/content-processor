@@ -187,3 +187,103 @@ def test_search_falls_back_to_exact_words_when_the_model_is_down(
     assert any("exact words only" in n for n in found["notes"])
     page = client.get("/api/knowledge/search", params={"q": "term life insurance"}).json()
     assert page["hits"] and any("exact words only" in n for n in page["notes"])
+
+
+# -- module scope: a connection limited to some modules --------------------------------------
+
+
+def test_a_scoped_catalog_lists_only_that_module() -> None:
+    from src.modules.mcp_server.catalog import instructions, parse_scope
+
+    themes = parse_scope("themes")
+    names = [d.name for d in definitions(themes)]
+    assert names == ["list_projects", "get_offering_catalog", "get_theme_map", "check_deliverable"]
+    assert all(d.description.startswith("[Themes]") for d in definitions(themes)[1:-1])
+    assert "limited to: Themes" in instructions(themes) and "Module focus" not in instructions(
+        themes
+    )
+    assert "Module focus" in instructions(None) and "[Themes]" in instructions(None)
+    two = parse_scope(" Gaps , research ")
+    assert two == frozenset({"gaps", "research"})
+    assert {d.module for d in definitions(two)} == {None, "gaps", "research"}
+    assert parse_scope("") is None and parse_scope(None) is None
+    with pytest.raises(ValueError, match="unknown module"):
+        parse_scope("themes,keywords")
+
+
+def test_the_app_refuses_other_modules_on_a_scoped_connection(
+    themed: World, tmp_path: Path
+) -> None:
+    client = TestClient(_app(themed, tmp_path), base_url="http://127.0.0.1")
+
+    def call(tool: str, scope: list[str] | None, **arguments: Any) -> tuple[dict[str, Any], bool]:
+        body = {"tool": tool, "arguments": arguments, "scope": scope}
+        out = client.post("/api/mcp/call", json=body, headers=WRITE).json()
+        return json.loads(out["text"]), bool(out["is_error"])
+
+    pid = themed.project_id
+    refused, is_error = call("search_knowledge", ["themes"], project_id=pid, query="term life")
+    assert is_error and "limited to Themes" in refused["error"]
+    assert "belongs to Content" in refused["error"]
+    theme, is_error = call("get_theme_map", ["themes"], project_id=pid)
+    assert not is_error and theme["tool"] == "get_theme_map"
+    listed, _ = call("list_projects", ["themes"])
+    mine = next(p for p in listed["projects"] if p["project_id"] == pid)
+    assert set(mine) == {"project_id", "name", "client", "websites", "themes_built", "themes"}
+    full, _ = call("list_projects", None)
+    assert "finished_scrapes" in next(p for p in full["projects"] if p["project_id"] == pid)
+    assert "unknown module" in call("list_projects", ["keywords"])[0]["error"]
+    tools = client.get("/api/mcp/tools", params={"modules": "gaps"}).json()
+    assert [t["name"] for t in tools] == ["list_projects", "get_gap_findings", "check_deliverable"]
+    assert client.get("/api/mcp/tools", params={"modules": "nope"}).status_code == 422
+
+
+def test_a_scoped_server_over_the_protocol(themed: World, tmp_path: Path) -> None:
+    from src.modules.mcp_server.catalog import parse_scope
+    from src.modules.mcp_server.server import server_name
+
+    app = _app(themed, tmp_path)
+    scope = parse_scope("monitoring")
+
+    async def scenario() -> tuple[list[str], str, bool, str]:
+        async with (
+            httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1", headers=WRITE
+            ) as http,
+            Client(build_server(http, scope=scope)) as client,
+        ):
+            tools = await client.list_tools()
+            other = await client.call_tool("get_theme_map", {"project_id": themed.project_id})
+            own = await client.call_tool("get_changes", {"project_id": themed.project_id})
+        other_text = other.content[0].text if hasattr(other.content[0], "text") else ""
+        own_text = own.content[0].text if hasattr(own.content[0], "text") else ""
+        return [t.name for t in tools.tools], other_text, bool(other.is_error), own_text
+
+    names, other_text, other_error, own_text = anyio.run(scenario)
+    assert names == ["list_projects", "get_changes", "get_monitoring_alerts", "check_deliverable"]
+    assert other_error and "in this connection (Monitoring)" in other_text
+    assert "limited to" not in own_text
+    assert server_name(scope) == "content-processor-monitoring"
+
+
+def test_print_config_for_one_module_and_for_every_module(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    assert mcp_main.main(["--print-config", "--modules", "themes"]) == 0
+    one = json.loads(capsys.readouterr().out)["mcpServers"]
+    assert list(one) == ["content-processor-themes"]
+    assert one["content-processor-themes"]["args"][-2:] == ["--modules", "themes"]
+    assert mcp_main.main(["--print-config", "--every-module"]) == 0
+    every = json.loads(capsys.readouterr().out)["mcpServers"]
+    assert list(every) == [
+        "content-processor",
+        "content-processor-content",
+        "content-processor-themes",
+        "content-processor-monitoring",
+        "content-processor-research",
+        "content-processor-gaps",
+    ]
+    assert "--modules" not in every["content-processor"]["args"]
+    for bad in (["--modules", "nope"], ["--every-module", "--modules", "themes", "--print-config"]):
+        with pytest.raises(SystemExit):
+            mcp_main.main(bad)

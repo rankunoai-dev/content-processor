@@ -1,6 +1,6 @@
 # Content Processor: A Plain-Language Guide
 
-Last updated: 3 November 2026 · Code version: main after the home screen with module tiles (shared projects opened from each module), the shared scrape queue (one scrape at a time for everyone, start automatically or be emailed when it is your turn), the Claude Desktop connection (a read-only MCP server) and the "Open in Claude.ai" button · Maintained by every session that adds a significant feature (see "Keeping this guide current" at the end)
+Last updated: 3 November 2026 · Code version: main after Claude Desktop connectors per module, the home screen with module tiles (shared projects opened from each module), the shared scrape queue (one scrape at a time for everyone, start automatically or be emailed when it is your turn), the Claude Desktop connection (a read-only MCP server) and the "Open in Claude.ai" button · Maintained by every session that adds a significant feature (see "Keeping this guide current" at the end)
 
 ## 1. What this is, in one paragraph
 
@@ -358,6 +358,8 @@ Two ways to use your own Claude account with the app, without an API key or API 
 - **Claude Desktop, connected to the app.** Once set up (a few lines in Claude Desktop's settings, see `docs/app/MODULE_MCP_SERVER.md`), Claude Desktop can read every project while the app is running: the projects and their websites, page text and search, themes, monitoring alerts, search data and gap findings. You ask in plain words ("what are John Hancock's biggest gaps against Flynn's, and which pillar pages should we write next?") and Claude looks things up itself. It is **read-only**: it cannot scrape websites, pull from Semrush, change a finding's status or unlock anything; those stay buttons in the app. Every fact it gets comes with a reference, and before answering it can ask the app to **check its citations** (each reference must be real, each quote word for word), so you can see whether the answer passed.
 - **"Open in Claude.ai"**, on every free context pack of an analyst card: one click copies the pack and opens a new chat on claude.ai in your browser; you paste it and send. That answer stays in claude.ai: the app does not check or save it.
 
+**Staying in one module.** If a chat should use only one module (for example Themes) and nothing from the others, add the module connectors as well (one line in the setup prints them all) and switch on only that module's connector in the chat: Claude then cannot see or call the other modules, and the app refuses them even if it tried. With the full connector, saying "only use Themes" is also respected, as an instruction.
+
 Both send the project's data to Claude through your account, so they are for clients whose data may go to Claude (the data policy question is still open). Search now also works when the local meaning model is off: it falls back to exact words and says so.
 
 ## 5. Safety and cost promises
@@ -426,6 +428,7 @@ Both send the project's data to Claude through your account, so they are for cli
 
 | Date | Significant change |
 |---|---|
+| 2026-11-03 | Claude Desktop, one module at a time: a connector per module (content, themes, monitoring, research, gaps) shows Claude only that module's tools and status, and the app refuses other modules on it; with the full connector, "only use this module" is respected as an instruction. |
 | 2026-11-03 | Home screen: every module as a tile (Content Scraper, Knowledge search, Themes, Monitoring, Research, Gaps, Analyst cards) with how many projects have results; each module lists the shared projects with their state in that module, creates new ones, and opens a project on that module's tab. Modules also in the left menu; All runs has its own entry. |
 | 2026-11-03 | Shared scrape queue: projects and addresses stay unlimited, but one scrape runs at a time for everyone. Each queued scrape starts automatically or emails its person when its turn comes (then runs next once started); optional email when it finishes; a Scrape queue page with places in line and estimated waits. |
 | 2026-11-03 | Claude Desktop connection: a read-only MCP server lets Claude Desktop read every project (search, pages, themes, monitoring, search data, gaps) through the running app and check its own citations before answering; no API key. "Open in Claude.ai" on context packs copies the pack and opens a new claude.ai chat. Search falls back to exact words when the local meaning model is off. |

@@ -19,7 +19,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from pydantic import Field
 
 from src.core.logger import get_logger
@@ -29,7 +29,15 @@ from src.modules.analyst.tools import run_tool
 from src.modules.analyst.verify import sources_section, verify_deliverable
 from src.modules.content_processor.projects.store import ProjectNotFoundError, ProjectStore
 from src.modules.content_processor.webapi.projects_api import KnowledgeAccess
-from src.modules.mcp_server.catalog import MAX_DELIVERABLE_CHARS, definitions
+from src.modules.mcp_server.catalog import (
+    MAX_DELIVERABLE_CHARS,
+    SCOPES,
+    Scope,
+    definitions,
+    parse_scope,
+    scope_label,
+    scope_of,
+)
 
 __all__ = ["CallIn", "CallOut", "McpBridge", "register_mcp_routes"]
 
@@ -42,6 +50,9 @@ class CallIn(StrictModel):
 
     tool: str = Field(min_length=1, max_length=80)
     arguments: dict[str, Any] = Field(default_factory=dict)
+    scope: list[str] | None = Field(
+        default=None, max_length=10, description="Modules this connection may use; None: all"
+    )
 
 
 class CallOut(StrictModel):
@@ -53,6 +64,27 @@ class CallOut(StrictModel):
 
 def _error(message: str) -> tuple[str, bool]:
     return json.dumps({"error": message}, ensure_ascii=False), True
+
+
+# What list_projects shows per module (the rest of each project's status is left out).
+_STATUS_FIELDS: dict[str, tuple[str, ...]] = {
+    "content": ("finished_scrapes", "last_scrape", "searchable_scrapes"),
+    "themes": ("themes_built", "themes"),
+    "monitoring": ("last_monitoring_check", "alerts", "high_alerts"),
+    "research": ("research_added", "keywords"),
+    "gaps": ("gaps_built", "findings", "open_findings", "high_findings"),
+}
+_COMMON_FIELDS = ("project_id", "name", "client", "websites")
+
+
+def _scope(keys: list[str] | None) -> Scope:
+    if keys is None:
+        return None
+    unknown = sorted(set(keys) - SCOPES.keys())
+    if unknown:
+        msg = f"unknown module(s) {', '.join(unknown)}"
+        raise ValueError(msg)
+    return frozenset(keys)
 
 
 class McpBridge:
@@ -95,12 +127,26 @@ class McpBridge:
 
     # -- tools -------------------------------------------------------------------------
 
-    def call(self, tool: str, arguments: dict[str, Any]) -> tuple[str, bool]:
-        """Run one tool; returns (JSON text, is_error). Never raises."""
+    def call(
+        self, tool: str, arguments: dict[str, Any], scope: list[str] | None = None
+    ) -> tuple[str, bool]:
+        """Run one tool within the connection's modules; returns (JSON text, is_error)."""
+        try:
+            allowed = _scope(scope)
+        except ValueError as exc:
+            return _error(str(exc))
         if tool not in self._names:
             return _error(f"unknown tool {tool!r}; the tools are: {', '.join(sorted(self._names))}")
+        module = scope_of(tool)
+        if allowed is not None and module is not None and module not in allowed:
+            return _error(
+                f"this connection is limited to {scope_label(allowed)}; {tool} belongs to "
+                f"{scope_label(frozenset({module}))}. Do not use another module here: tell the "
+                "user which module the question needs."
+            )
         if tool == "list_projects":
-            return json.dumps({"projects": self.list_projects()}, ensure_ascii=False), False
+            listed = self.list_projects(allowed)
+            return json.dumps({"projects": listed}, ensure_ascii=False), False
         args = dict(arguments)
         project_id = str(args.pop("project_id", "") or "")
         if not _PROJECT_ID.match(project_id):
@@ -146,11 +192,17 @@ class McpBridge:
         }
         return json.dumps(payload, ensure_ascii=False), False
 
-    def list_projects(self) -> list[dict[str, Any]]:
-        """Projects with their websites and which results exist, with dates."""
+    def list_projects(self, scope: Scope = None) -> list[dict[str, Any]]:
+        """Projects with their websites and which results exist, with dates (for `scope`)."""
         from src.modules.workspace.status import project_statuses
 
-        return project_statuses(self.projects)
+        statuses = project_statuses(self.projects)
+        if scope is None:
+            return statuses
+        keep = set(_COMMON_FIELDS)
+        for key in scope:
+            keep |= set(_STATUS_FIELDS[key])
+        return [{k: v for k, v in s.items() if k in keep} for s in statuses]
 
 
 def register_mcp_routes(app: FastAPI, *, projects: ProjectStore, access: KnowledgeAccess) -> None:
@@ -158,10 +210,14 @@ def register_mcp_routes(app: FastAPI, *, projects: ProjectStore, access: Knowled
     bridge = McpBridge(projects, access)
 
     @app.get("/api/mcp/tools")
-    def tools() -> list[dict[str, Any]]:
-        return [asdict(d) for d in definitions()]
+    def tools(modules: str | None = None) -> list[dict[str, Any]]:
+        try:
+            scope = parse_scope(modules)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from None
+        return [asdict(d) for d in definitions(scope)]
 
     @app.post("/api/mcp/call")
     def call(body: CallIn) -> CallOut:
-        text, is_error = bridge.call(body.tool, body.arguments)
+        text, is_error = bridge.call(body.tool, body.arguments, body.scope)
         return CallOut(text=text, is_error=is_error)
