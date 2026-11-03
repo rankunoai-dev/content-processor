@@ -44,6 +44,14 @@ from src.modules.content_processor.projects.models import (
     SiteRecord,
     SiteRole,
 )
+from src.modules.content_processor.projects.project_reports import (
+    ProjectReport,
+    build_project_reports,
+    project_report_files,
+    project_reports,
+    report_sources,
+    zip_project_report,
+)
 from src.modules.content_processor.projects.runner import QueueEntry, ScrapeRunner
 from src.modules.content_processor.projects.security import (
     MIN_PASSWORD_LENGTH,
@@ -272,6 +280,80 @@ class ReportFile(StrictModel):
     name: str
     size: int
     modified_at: datetime
+
+
+class ProjectReportsIn(StrictModel):
+    """What to put in a project report."""
+
+    include_competitors: bool = False
+
+
+class ReportSourceOut(StrictModel):
+    """A website and the scrape a project report reads for it."""
+
+    site_id: str
+    site_name: str
+    role: str
+    main: bool
+    run_id: str | None
+    finished_at: datetime | None
+    pages: int
+    reason: str
+
+
+class ProjectReportOut(StrictModel):
+    """One built project report."""
+
+    stamp: str
+    built_at: datetime
+    include_competitors: bool
+    pages: int
+    contradictions: int
+    contradictions_high: int
+    differs_by_condition: int
+    time_bound: int
+    duplicate_pairs: int
+    duplicate_pairs_across_websites: int
+    websites: list[ReportSourceOut]
+    files: list[ReportFile]
+
+
+class ProjectReportsOut(StrictModel):
+    """What a new project report would use, and the reports built so far (newest first)."""
+
+    sources: list[ReportSourceOut]
+    reports: list[ProjectReportOut]
+
+
+def _report_out(report: ProjectReport, files: dict[str, Path]) -> ProjectReportOut:
+    m = report.manifest
+    topics = m.get("contradictions", {})
+    dup = m.get("duplication", {})
+    return ProjectReportOut(
+        stamp=report.stamp,
+        built_at=datetime.fromisoformat(m["built_at"]),
+        include_competitors=bool(m.get("include_competitors")),
+        pages=int(m.get("pages", 0)),
+        contradictions=int(topics.get("contradictions", 0)),
+        contradictions_high=int(topics.get("contradictions_high", 0)),
+        differs_by_condition=int(topics.get("differs_by_condition", 0)),
+        time_bound=int(topics.get("time_bound", 0)),
+        duplicate_pairs=int(dup.get("pairs", 0)),
+        duplicate_pairs_across_websites=int(dup.get("pairs_across_websites", 0)),
+        websites=[
+            ReportSourceOut.model_validate(w)
+            for w in m.get("websites", [])
+            if w.get("role") == "client" or m.get("include_competitors")
+        ],
+        files=[
+            ReportFile(
+                name=name,
+                size=path.stat().st_size,
+                modified_at=datetime.fromtimestamp(path.stat().st_mtime, UTC),
+            )
+            for name, path in files.items()
+        ],
+    )
 
 
 class SpaceOut(StrictModel):
@@ -732,6 +814,57 @@ def register_project_routes(
         path = store.report_files(project_id, site_id, run_id).get(file_name)
         if path is None:
             raise HTTPException(status_code=404, detail="That file is not in this run's reports.")
+        return FileResponse(path, filename=file_name, content_disposition_type="attachment")
+
+    # -- project reports (all of the client's websites) ------------------------
+
+    def reports_out(project_id: str) -> ProjectReportsOut:
+        record = project(project_id)
+        return ProjectReportsOut(
+            sources=[
+                ReportSourceOut.model_validate(s.as_dict()) for s in report_sources(store, record)
+            ],
+            reports=[
+                _report_out(r, project_report_files(store, project_id, r.stamp))
+                for r in project_reports(store, project_id)
+            ],
+        )
+
+    @app.get("/api/projects/{project_id}/reports")
+    def list_project_reports(project_id: str) -> ProjectReportsOut:
+        return reports_out(project_id)
+
+    @app.post("/api/projects/{project_id}/reports")
+    def build_reports(
+        project_id: str, body: ProjectReportsIn | None = None, token: TokenHeader = None
+    ) -> ProjectReportsOut:
+        record = require_token(project_id, token)
+        how = body or ProjectReportsIn()
+        try:
+            build_project_reports(
+                store,
+                project_id,
+                include_competitors=how.include_competitors,
+                built_by=record.owner_name,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from None
+        return reports_out(project_id)
+
+    @app.get("/api/projects/{project_id}/reports/{stamp}/downloads.zip")
+    def download_project_reports(project_id: str, stamp: str) -> FileResponse:
+        project(project_id)
+        archive = zip_project_report(store, project_id, stamp)
+        if archive is None:
+            raise HTTPException(status_code=404, detail="There is no such project report.")
+        return FileResponse(archive, filename=archive.name, content_disposition_type="attachment")
+
+    @app.get("/api/projects/{project_id}/reports/{stamp}/downloads/{file_name}")
+    def download_project_report(project_id: str, stamp: str, file_name: str) -> FileResponse:
+        project(project_id)
+        path = project_report_files(store, project_id, stamp).get(file_name)
+        if path is None:
+            raise HTTPException(status_code=404, detail="That file is not in this project report.")
         return FileResponse(path, filename=file_name, content_disposition_type="attachment")
 
     # -- knowledge (the bot) --------------------------------------------------

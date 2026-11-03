@@ -130,6 +130,39 @@ export interface ProjectUrl {
   added_at: string;
 }
 
+/** A website and the scrape a project report reads for it. */
+export interface ReportSource {
+  site_id: string;
+  site_name: string;
+  role: string;
+  main: boolean;
+  run_id: string | null;
+  finished_at: string | null;
+  pages: number;
+  reason: string;
+}
+
+/** One built project report (all of the client's websites). */
+export interface ProjectReport {
+  stamp: string;
+  built_at: string;
+  include_competitors: boolean;
+  pages: number;
+  contradictions: number;
+  contradictions_high: number;
+  differs_by_condition: number;
+  time_bound: number;
+  duplicate_pairs: number;
+  duplicate_pairs_across_websites: number;
+  websites: ReportSource[];
+  files: ReportFile[];
+}
+
+export interface ProjectReports {
+  sources: ReportSource[];
+  reports: ProjectReport[];
+}
+
 export interface ReportFile {
   name: string;
   size: number;
@@ -343,6 +376,14 @@ export const projectsApi = {
     `${runPath(id, site, run)}/downloads/${enc(file)}`,
   zipUrl: (id: string, site: string, run: string) => `${runPath(id, site, run)}/downloads.zip`,
 
+  /** Duplication and contradictions across all of the client's websites. */
+  projectReports: (id: string, signal?: AbortSignal) => get<ProjectReports>(`${projectPath(id)}/reports`, signal),
+  buildProjectReports: (id: string, includeCompetitors: boolean, token: string | null) =>
+    post<ProjectReports>(`${projectPath(id)}/reports`, { include_competitors: includeCompetitors }, token),
+  projectReportUrl: (id: string, stamp: string, file: string) =>
+    `${projectPath(id)}/reports/${enc(stamp)}/downloads/${enc(file)}`,
+  projectZipUrl: (id: string, stamp: string) => `${projectPath(id)}/reports/${enc(stamp)}/downloads.zip`,
+
   /** Search the given spaces, or (with `website`) that website and its competitors from every project. */
   search: (q: string, spaces: string[], perSite: number | null, website: string | null, signal?: AbortSignal) => {
     const params = new URLSearchParams({ q, top_k: '12' });
@@ -362,6 +403,7 @@ export const projectKeys = {
     ['projects', id, 'urls', site, q, offset, limit] as const,
   runs: (id: string) => ['projects', id, 'runs'] as const,
   reports: (id: string, site: string, run: string) => ['projects', id, 'reports', site, run] as const,
+  projectReports: (id: string) => ['projects', id, 'project-reports'] as const,
   search: (q: string, spaces: string[], perSite: number | null, website: string | null) =>
     ['knowledge', 'search', q, spaces, perSite, website] as const,
 };
@@ -419,6 +461,13 @@ export function useRunReports(id: string, site: string, run: string | null) {
     queryKey: projectKeys.reports(id, site, run ?? ''),
     queryFn: ({ signal }) => projectsApi.reports(id, site, run ?? '', signal),
     enabled: run !== null,
+  });
+}
+
+export function useProjectReports(id: string) {
+  return useQuery({
+    queryKey: projectKeys.projectReports(id),
+    queryFn: ({ signal }) => projectsApi.projectReports(id, signal),
   });
 }
 

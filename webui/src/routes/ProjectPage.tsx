@@ -68,10 +68,11 @@ import { StartDialog } from './StartDialog';
 import { MonitoringTab } from './MonitoringTab';
 import { ResearchTab } from './ResearchTab';
 import { GapsTab } from './GapsTab';
+import { ProjectReportsTab } from './ProjectReportsTab';
 import { StatusBar, StatusLegend } from '../components/StatusBar';
 import { PageHeading } from '../components/bits';
 import { moduleByTab } from '../modules';
-import { MODULES_TEXT, PROJECTS, QUEUE, formatDate, reportKind, roughDuration, ANALYST, GAPS, MONITORING, RESEARCH, THEMES } from '../vocabulary';
+import { MODULES_TEXT, PROJECTS, PROJECT_REPORTS, QUEUE, formatDate, reportKind, roughDuration, ANALYST, GAPS, MONITORING, RESEARCH, THEMES } from '../vocabulary';
 
 const STATUS_COLOR: Record<string, string> = {
   queued: 'default',
@@ -1291,6 +1292,11 @@ export default function ProjectPage() {
                       />
                     </Space>
                   ),
+                },
+                {
+                  key: 'project-reports',
+                  label: PROJECT_REPORTS.tab,
+                  children: <ProjectReportsTab project={p} token={token} />,
                 },
                 { key: 'search', label: PROJECTS.ask.tab, children: <SearchTab project={p} /> },
                 { key: 'themes', label: THEMES.tab, children: <ThemesTab project={p} token={token} /> },

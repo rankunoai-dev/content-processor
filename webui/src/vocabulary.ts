@@ -1287,6 +1287,63 @@ export function roughDuration(seconds: number): string {
   return m ? `${h} h ${m} min` : `${h} h`;
 }
 
+/** The project's "Project reports" tab: duplication and contradictions across the client's websites. */
+export const PROJECT_REPORTS = {
+  tab: 'Project reports',
+  title: 'Duplication and contradictions across the client’s websites',
+  intro:
+    'One report for the whole project, from the latest finished scrape of each of the client’s websites (the main website and its brands). Nothing is scraped again, and no AI model is used.',
+  websites: 'Websites this report reads',
+  noScrape: 'No finished scrape yet',
+  pages: (n: number) => `${n.toLocaleString()} page${n === 1 ? '' : 's'}`,
+  scrapeOf: (when: string) => `Scrape of ${when}`,
+  mainSite: 'Main website',
+  brand: 'Brand',
+  competitor: 'Competitor',
+  competitorNote: 'Read only when you tick “Include competitors”: each on its own sheets, never mixed into the client’s contradictions.',
+  includeCompetitors: 'Include competitors (separate workbook)',
+  build: 'Build project report',
+  building: 'Building the report…',
+  needScrape: 'Scrape at least one of the client’s websites first.',
+  built: 'Project report built.',
+  latest: 'Latest report',
+  older: 'Earlier reports',
+  builtOn: (when: string) => `Built ${when}`,
+  downloadAll: 'Download all (zip)',
+  none: 'No project report yet. Build one when the client’s websites have been scraped.',
+  counts: {
+    contradictions: 'Topics stated differently',
+    high: 'of them High severity',
+    condition: 'Differ by condition',
+    timeBound: 'Time-bound figures',
+    duplicates: 'Duplicate page pairs',
+    across: 'across websites',
+  },
+  files: {
+    contradictions_by_topic_xlsx: 'Contradictions by topic (Excel): Topic, Version A and B, where each appears, severity, recommended action, approved answer',
+    contradictions_by_topic_csv: 'Contradictions by topic (CSV, main sheet only)',
+    contradictions_by_topic_jsonl: 'Contradictions by topic, every version and place (JSONL, for tools)',
+    duplication_xlsx: 'Duplication (Excel): near-duplicate pages and groups, and page pairs sharing half their text or more, with the websites they are on',
+    competitors_xlsx: 'Competitors (Excel): each competitor’s own contradictions and duplicate pages',
+    manifest_json: 'What was used and the counts (JSON)',
+  } as Record<string, string>,
+  about: 'Report',
+  file: 'File',
+  size: 'Size',
+  download: 'Download',
+  whatsIn:
+    'Contradictions: the same topic stated with different values (times, amounts, percentages, ages, phone numbers, emails). Versions that differ by state, audience, product code or brand, and figures from news and press pages, are on their own sheets.',
+};
+
+/** Which project-report file this is, by the end of its name. */
+export function projectReportKind(name: string): string {
+  for (const [key, text] of Object.entries(PROJECT_REPORTS.files)) {
+    const ending = key.replace(/_(xlsx|csv|jsonl|json)$/, '.$1');
+    if (name === ending || name.endsWith(`_${ending}`)) return text;
+  }
+  return name;
+}
+
 export const QUEUE = {
   nav: 'Scrape queue',
   title: 'Scrape queue',
