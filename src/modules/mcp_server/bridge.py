@@ -157,6 +157,8 @@ class McpBridge:
             return _error(f"there is no project {project_id!r}; call list_projects for the ids")
         if tool == "check_deliverable":
             return self.check(project_id, args)
+        if tool == "present_answer":
+            return self.present(project_id, args)
         try:
             play = Playground(self.projects, self.access, [project_id])
             text, is_error = run_tool(play, tool, args)
@@ -168,6 +170,36 @@ class McpBridge:
         if not is_error:
             self._remember(project_id, play.ledger)
         return text, is_error
+
+    def present(self, project_id: str, args: dict[str, Any]) -> tuple[str, bool]:
+        """Check a structured answer and render it with its type's template."""
+        from pydantic import ValidationError
+
+        from src.modules.mcp_server.templates import PresentInput, render_answer
+
+        try:
+            answer = PresentInput.model_validate(args)
+        except ValidationError as exc:
+            problems = "; ".join(
+                f"{'.'.join(str(p) for p in e['loc']) or 'input'}: {e['msg']}" for e in exc.errors()
+            )
+            return _error(f"invalid answer: {problems}")
+        name = self.projects.get(project_id).name
+        markdown, check = render_answer(answer, self.ledger(project_id), name)
+        payload = {
+            "status": "passed" if check.passed else "needs review",
+            "rendered_markdown": markdown,
+            "unknown_refs": check.unknown_refs,
+            "quotes_failed": check.quotes_failed,
+            "uncited_lines": check.uncited_lines,
+            "how_to_present": (
+                "Show rendered_markdown to the user exactly as it is."
+                if check.passed
+                else "Fix the unknown references, failed quotes and uncited lines, then call "
+                "present_answer again; show rendered_markdown once it passes."
+            ),
+        }
+        return json.dumps(payload, ensure_ascii=False), False
 
     def check(self, project_id: str, args: dict[str, Any]) -> tuple[str, bool]:
         """Verify a deliverable against everything shown for this project."""

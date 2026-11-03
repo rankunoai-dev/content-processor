@@ -843,3 +843,12 @@ git worktree add ../content-processor-lane4 -b lane/L4-verify
 - **Live check (copy of the user's project, this branch on port 8792):** themes "The Longevity Opportunity with Dr. Joe Coughlin" and "Online submission form (change of beneficiary form client)"; a cited draft passed the check and came back as plain sentences with [1]-[3] and linked sources.
 - **Tests:** `test_mcp_server.py` +3 (numbering and merging, bridge returns the readable answer and theme name/keywords, presentation rules), `test_theming.py` +1 (names from page titles), theme tool test uses `keywords`.
 - **Gate:** `scripts/verify.ps1 -Fix` ALL GATES PASSED, 1,208 passed, 12 skipped, coverage 93.86%, 4 min 53 s.
+
+## [2026-11-03] Answer templates and ready-made requests in Claude Desktop
+
+- **Branch / worktree:** `feat/answer-templates` at `../content-processor-templates` (on `main` `47a8c8e`).
+- **Why:** the user wants answers in Claude Desktop to appear in attractive, consistent formats per response type.
+- **What landed:** `mcp_server/templates.py` (`PresentInput`: type, title, summary, sections, table, items with priority and metric, next steps, limits; `render_answer`: verification on the content only, then a per-type Markdown layout with icon heading, "In short" quote, priority groups / what works and what to fix / table-first layouts, next steps, limits, sources-checked line, numbered linked sources via `readable_version`). `present_answer` tool in every connector (bridge `present`); instructions now route every factual answer through it and pick the type by the question. Seven MCP prompts (`PROMPTS`, `prompts_for(scope)`) served by `on_list_prompts` / `on_get_prompt`.
+- **Live check (copy of the user's 5-page project, this branch on port 8793):** a theme overview (table of the two themes with pages, funnel stage and sources) and a page review of the e-signature page (what works, what to fix, next steps) both passed their checks; samples in the scratchpad `template_samples.md`.
+- **Tests:** `test_mcp_server.py` +4 (layouts per type, needs review and table validation, present_answer through the app, prompts per connector over the protocol); tool lists updated for `present_answer`.
+- **Gate:** `scripts/verify.ps1 -Fix` ALL GATES PASSED, 1,212 passed, 12 skipped, coverage 93.87%. A first run failed one `test_run_queue.py` test (shared scrape queue, not touched here); it is intermittent (a different queue test failed on a rerun, then 2 clean runs): flagged for that lane.

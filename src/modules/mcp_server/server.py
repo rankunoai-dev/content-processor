@@ -15,10 +15,12 @@ from mcp.server.stdio import stdio_server
 
 from src.core.logger import get_logger
 from src.modules.mcp_server.catalog import (
+    PromptDef,
     Scope,
     ToolDef,
     definitions,
     instructions,
+    prompts_for,
     scope_label,
 )
 
@@ -55,6 +57,17 @@ def _tool(d: ToolDef) -> types.Tool:
     )
 
 
+def _prompt(p: PromptDef) -> types.Prompt:
+    return types.Prompt(
+        name=p.name,
+        title=p.title,
+        description=p.description,
+        arguments=[
+            types.PromptArgument(name=n, description=d, required=r) for n, d, r in p.arguments
+        ],
+    )
+
+
 def _result(text: str, is_error: bool) -> types.CallToolResult:
     return types.CallToolResult(
         content=[types.TextContent(type="text", text=text)], is_error=is_error
@@ -73,6 +86,31 @@ def build_server(
     tools = definitions(scope)
     names = {d.name for d in tools}
     sent_scope = sorted(scope) if scope is not None else None
+    prompts = {p.name: p for p in prompts_for(scope)}
+
+    async def on_list_prompts(
+        _ctx: Any, _params: types.PaginatedRequestParams | None
+    ) -> types.ListPromptsResult:
+        return types.ListPromptsResult(prompts=[_prompt(p) for p in prompts.values()])
+
+    async def on_get_prompt(
+        _ctx: Any, params: types.GetPromptRequestParams
+    ) -> types.GetPromptResult:
+        found = prompts.get(params.name)
+        if found is None:
+            msg = f"unknown prompt {params.name}"
+            raise ValueError(msg)
+        given = params.arguments or {}
+        values = {n: (given.get(n) or "").strip() for n, _d, _r in found.arguments}
+        if not values.get("project"):
+            values["project"] = "(ask me which one if there is more than one; list_projects)"
+        text = found.template.format(**values)
+        return types.GetPromptResult(
+            description=found.description,
+            messages=[
+                types.PromptMessage(role="user", content=types.TextContent(type="text", text=text))
+            ],
+        )
 
     async def on_list_tools(
         _ctx: Any, _params: types.PaginatedRequestParams | None
@@ -116,6 +154,8 @@ def build_server(
         instructions=instructions(scope),
         on_list_tools=on_list_tools,
         on_call_tool=on_call_tool,
+        on_list_prompts=on_list_prompts,
+        on_get_prompt=on_get_prompt,
     )
 
 

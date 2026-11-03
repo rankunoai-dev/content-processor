@@ -16,7 +16,7 @@ Claude Desktop --stdio--> python -m src.modules.mcp_server --HTTP 127.0.0.1--> w
 - `POST /api/mcp/call` accepts only the app's header, JSON, and **no Origin** (no web page, not even the app's own, can call it). The app binds 127.0.0.1 only.
 - The tools are read-only: no scrape, no Semrush pull, no status change, no unlock. Some build a missing local result on first use (theme map, gap report, monitoring check, SEO inventory); that runs inside the app, on this computer, at $0.
 
-## Tools (18 in the full connector)
+## Tools (19 in the full connector)
 
 | Tool | What |
 |---|---|
@@ -31,6 +31,12 @@ The server sends Claude the analyst rules (evidence only, exact quotes, untruste
 ## Readable answers
 
 `check_deliverable` also returns `readable_markdown`: the answer as the user should see it, with every `[chunk:...]`/`[fact:...]` replaced by a number (passages of one page share a number, neighbouring citations merge into `[1, 2]`) and a **Sources** list of page names and links (a theme links its main page). The instructions tell Claude to show only that version, never reference codes, internal ids, tool names or JSON fields, to name themes by `name`, and to end with one plain line on the check. `get_theme_map` returns each theme's `name` (the cleaned title of its main page, the client's first; keyword label when no title) and `keywords`.
+
+## Answer templates and ready-made requests
+
+`present_answer` (in every connector) takes a structured answer: `type` (answer, overview, findings, comparison, page_review, changes, keywords), `title`, `summary`, and optional `sections`, `table` (columns and rows), `items` (title, detail, priority high/medium/low, metric), `next_steps`, `limits`, every fact with its reference. The app checks the facts (`verify_deliverable` on the content alone, without the template) and renders Markdown (`templates.render_answer`): `## <icon> <title>`, project, type and date line, an "In short" quote, the type's layout (findings grouped by priority; page review split into what works and what to fix; overview, comparison and keywords lead with the table; changes as a list with priority icons), next steps, limits, a "Sources checked" or "Needs review" line, and numbered linked sources. Claude is told to show `rendered_markdown` exactly as returned and to fix and resend when it needs review.
+
+Prompts (Claude Desktop's prompt menu, per connector scope): Ask the pages, Page review (content); Theme overview, Compare with competitors (themes); What changed (monitoring); Keyword report (research); Gap report (gaps). Each takes the project (optional) and its own argument, and asks for the matching tool calls and answer type.
 
 ## Module scope: one module per chat, without the others
 

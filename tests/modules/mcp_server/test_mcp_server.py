@@ -52,7 +52,8 @@ def test_catalog_lists_every_built_tool_read_only_with_a_project() -> None:
     defs = definitions()
     names = [d.name for d in defs]
     built = [n for n, s in TOOLS.items() if s.built]
-    assert names == ["list_projects", *built, "check_deliverable"] and len(built) == 16
+    assert names == ["list_projects", *built, "present_answer", "check_deliverable"]
+    assert len(built) == 16
     for d in defs[1:]:
         assert d.input_schema["required"][0] == "project_id"
         assert d.input_schema["additionalProperties"] is False
@@ -134,7 +135,7 @@ def test_mcp_protocol_end_to_end(themed: World, tmp_path: Path) -> None:
         return [t.name for t in tools.tools], json.loads(text), wrong_text, bool(wrong.is_error)
 
     names, theme, wrong_text, wrong_error = anyio.run(scenario)
-    assert names[0] == "list_projects" and "check_deliverable" in names and len(names) == 18
+    assert names[0] == "list_projects" and "check_deliverable" in names and len(names) == 19
     assert theme["tool"] == "get_theme_map" and theme["data"]
     assert wrong_error and "unknown tool" in wrong_text
 
@@ -197,8 +198,14 @@ def test_a_scoped_catalog_lists_only_that_module() -> None:
 
     themes = parse_scope("themes")
     names = [d.name for d in definitions(themes)]
-    assert names == ["list_projects", "get_offering_catalog", "get_theme_map", "check_deliverable"]
-    assert all(d.description.startswith("[Themes]") for d in definitions(themes)[1:-1])
+    assert names == [
+        "list_projects",
+        "get_offering_catalog",
+        "get_theme_map",
+        "present_answer",
+        "check_deliverable",
+    ]
+    assert all(d.description.startswith("[Themes]") for d in definitions(themes)[1:-2])
     assert "limited to: Themes" in instructions(themes) and "Module focus" not in instructions(
         themes
     )
@@ -234,7 +241,12 @@ def test_the_app_refuses_other_modules_on_a_scoped_connection(
     assert "finished_scrapes" in next(p for p in full["projects"] if p["project_id"] == pid)
     assert "unknown module" in call("list_projects", ["keywords"])[0]["error"]
     tools = client.get("/api/mcp/tools", params={"modules": "gaps"}).json()
-    assert [t["name"] for t in tools] == ["list_projects", "get_gap_findings", "check_deliverable"]
+    assert [t["name"] for t in tools] == [
+        "list_projects",
+        "get_gap_findings",
+        "present_answer",
+        "check_deliverable",
+    ]
     assert client.get("/api/mcp/tools", params={"modules": "nope"}).status_code == 422
 
 
@@ -260,7 +272,13 @@ def test_a_scoped_server_over_the_protocol(themed: World, tmp_path: Path) -> Non
         return [t.name for t in tools.tools], other_text, bool(other.is_error), own_text
 
     names, other_text, other_error, own_text = anyio.run(scenario)
-    assert names == ["list_projects", "get_changes", "get_monitoring_alerts", "check_deliverable"]
+    assert names == [
+        "list_projects",
+        "get_changes",
+        "get_monitoring_alerts",
+        "present_answer",
+        "check_deliverable",
+    ]
     assert other_error and "in this connection (Monitoring)" in other_text
     assert "limited to" not in own_text
     assert server_name(scope) == "content-processor-monitoring"
@@ -358,5 +376,168 @@ def test_instructions_ask_for_readable_answers() -> None:
     from src.modules.mcp_server.catalog import instructions
 
     text = instructions(None)
-    assert "never show them to the user" in text and "Never show internal ids" in text
+    assert "never show them" in text and "Never show internal ids" in text
+    assert "present_answer" in text and "rendered_markdown exactly as returned" in text
     assert "Call a theme by its name" in text
+
+
+# -- answer templates and prompts ---------------------------------------------------------------
+
+
+def _ledger_with_two_pages() -> tuple[Any, str, str]:
+    from src.modules.analyst.playground import EvidenceLedger
+
+    ledger = EvidenceLedger()
+    a = ledger.chunk(
+        "c-a",
+        website="example.com",
+        url="https://example.com/term",
+        project="p",
+        headings=["Term life"],
+        text="Term life covers you for a set number of years.",
+        block_ids=[],
+        evidence_ids=[],
+    )
+    b = ledger.fact(
+        "g1",
+        kind="gap",
+        website="rival.com",
+        url="https://rival.com/pet",
+        title="No client content on Pet insurance",
+    )
+    return ledger, a, b
+
+
+def test_each_answer_type_has_its_own_layout() -> None:
+    from datetime import UTC, datetime
+
+    from src.modules.mcp_server.templates import Item, PresentInput, TableIn, render_answer
+
+    ledger, a, b = _ledger_with_two_pages()
+    when = datetime(2026, 11, 3, tzinfo=UTC)
+    findings = PresentInput(
+        type="findings",
+        title="What the client is missing",
+        summary=f"One theme is missing [{b}].",
+        items=[
+            Item(
+                title="Pet insurance",
+                detail=f"Rival has 3 pages [{b}].",
+                priority="high",
+                metric="6,600 / month",
+            ),
+            Item(
+                title="Term life wording",
+                detail=f"Covers a set number of years [{a}].",
+                priority="low",
+            ),
+        ],
+        next_steps=["Plan a pillar page on pet insurance"],
+        limits="No search data for the competitor.",
+    )
+    out, check = render_answer(findings, ledger, "Life cover", when)
+    assert check.passed
+    assert out.startswith("## 🎯 What the client is missing\n*Life cover · Findings · 3 Nov 2026*")
+    assert "> **In short:** One theme is missing [1]." in out
+    assert out.index("### 🔴 High priority") < out.index("### 🔵 Low priority")
+    assert "1. **Pet insurance** · 6,600 / month" in out and "### 👉 Next steps" in out
+    assert "✅ **Sources checked** · 3 of 3 citations point to the pages" in out
+    assert "*Limits: No search data for the competitor.*" in out
+    assert "chunk:" not in out and "fact:" not in out and "**Sources**" in out
+
+    review = PresentInput(
+        type="page_review",
+        title="Term life page",
+        summary=f"A clear product page [{a}].",
+        table=TableIn(columns=["Fact", "Value"], rows=[["Title", f"Term life [{a}]"]]),
+        items=[
+            Item(title="Clear promise", detail=f"States the term [{a}]."),
+            Item(title="No FAQ", detail=f"Competitors answer questions [{b}].", priority="medium"),
+        ],
+    )
+    out, _ = render_answer(review, ledger, "Life cover", when)
+    assert (
+        out.index("| Fact | Value |")
+        < out.index("### ✅ What works")
+        < out.index("### ⚠️ What to fix")
+    )
+    assert "- 🟠 **No FAQ**" in out
+
+    for kind, icon in (
+        ("overview", "🧭"),
+        ("comparison", "⚖️"),
+        ("changes", "🔔"),
+        ("keywords", "🔎"),
+        ("answer", "💡"),
+    ):
+        answer = PresentInput(type=kind, title="Something", summary=f"A fact [{a}].")
+        assert render_answer(answer, ledger, "P", when)[0].startswith(f"## {icon} Something")
+
+
+def test_an_answer_with_a_made_up_source_needs_review() -> None:
+    from src.modules.mcp_server.templates import PresentInput, TableIn, render_answer
+
+    ledger, a, _b = _ledger_with_two_pages()
+    answer = PresentInput(
+        type="answer", title="Invented", summary="It has 40 new pages [fact:change-000000000000]."
+    )
+    out, check = render_answer(answer, ledger, "P")
+    assert not check.passed and check.unknown_refs == ["fact:change-000000000000"]
+    assert "⚠️ **Needs review**" in out
+    with pytest.raises(ValueError, match="row 1 has 1 cells"):
+        TableIn(columns=["A", "B"], rows=[["only one"]])
+
+
+def test_present_answer_through_the_app(themed: World, tmp_path: Path) -> None:
+    client = TestClient(_app(themed, tmp_path), base_url="http://127.0.0.1")
+    found, _ = _call(client, "search_knowledge", project_id=themed.project_id, query="term life")
+    ref = found["data"]["passages"][0]["ref"]
+    answer = {
+        "type": "answer",
+        "title": "Term life in short",
+        "summary": f"Term life is sold online [{ref}].",
+        "sections": [{"heading": "Details", "body": f"See the term page [{ref}]."}],
+    }
+    shown, is_error = _call(client, "present_answer", project_id=themed.project_id, **answer)
+    assert not is_error and shown["status"] == "passed"
+    assert shown["rendered_markdown"].startswith("## 💡 Term life in short")
+    assert "exactly as it is" in shown["how_to_present"]
+    bad, is_error = _call(
+        client, "present_answer", project_id=themed.project_id, type="poem", title="x", summary="y"
+    )
+    assert is_error and "invalid answer" in bad["error"]
+
+
+def test_prompts_in_the_menu_follow_the_connection(themed: World, tmp_path: Path) -> None:
+    from src.modules.mcp_server.catalog import parse_scope
+
+    app = _app(themed, tmp_path)
+
+    async def scenario(scope: Any) -> tuple[list[str], str]:
+        async with (
+            httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1", headers=WRITE
+            ) as http,
+            Client(build_server(http, scope=scope)) as client,
+        ):
+            listed = await client.list_prompts()
+            first = listed.prompts[0]
+            args = {a.name: "x" for a in first.arguments or []}
+            args["project"] = "Life cover"
+            got = await client.get_prompt(first.name, args)
+        content = got.messages[0].content
+        return [p.name for p in listed.prompts], content.text if hasattr(content, "text") else ""
+
+    every, text = anyio.run(scenario, None)
+    assert every == [
+        "ask-the-pages",
+        "page-review",
+        "theme-overview",
+        "compare-websites",
+        "what-changed",
+        "keyword-report",
+        "gap-report",
+    ]
+    assert "Life cover" in text and "present_answer" in text
+    gaps_only, text = anyio.run(scenario, parse_scope("gaps"))
+    assert gaps_only == ["gap-report"] and "type findings" in text
