@@ -44,6 +44,12 @@ export interface GapReport {
   findings: Finding[];
   resolved: string[];
   stats: Record<string, number>;
+  settings?: GapSettings;
+}
+
+export interface GapSettings {
+  min_volume: number;
+  competitor_top: number;
 }
 
 export interface StatusEntry {
@@ -67,9 +73,32 @@ export const gapsApi = {
       token,
     ),
   workbookUrl: (projectId: string) => `${path(projectId)}/workbook`,
+  settings: (projectId: string, signal?: AbortSignal) =>
+    moduleRequest<GapSettings>(`${path(projectId)}/settings`, { signal }),
+  setSettings: (projectId: string, body: GapSettings, token: string | null) =>
+    moduleRequest<GapSettings>(`${path(projectId)}/settings`, { method: 'POST', body: JSON.stringify(body) }, token),
 };
 
-export const gapKeys = { latest: (projectId: string) => ['gaps', projectId] as const };
+export const gapKeys = {
+  latest: (projectId: string) => ['gaps', projectId] as const,
+  settings: (projectId: string) => ['gaps', projectId, 'settings'] as const,
+};
+
+export function useGapSettings(projectId: string) {
+  return useQuery({
+    queryKey: gapKeys.settings(projectId),
+    queryFn: ({ signal }) => gapsApi.settings(projectId, signal),
+  });
+}
+
+export function useSetGapSettings(projectId: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (args: { body: GapSettings; token: string | null }) =>
+      gapsApi.setSettings(projectId, args.body, args.token),
+    onSuccess: (saved) => client.setQueryData(gapKeys.settings(projectId), saved),
+  });
+}
 
 export function useGaps(projectId: string) {
   return useQuery({ queryKey: gapKeys.latest(projectId), queryFn: ({ signal }) => gapsApi.latest(projectId, signal) });

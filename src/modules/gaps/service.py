@@ -62,6 +62,7 @@ def build_project_gaps(
         check=check,
         catalogs=_catalogs(play),
         suggested=competitor_book(projects, project_id).suggestions,
+        settings=gap_store(projects).settings(project_id),
     )
     store = gap_store(projects)
     statuses = store.statuses(project_id)
@@ -89,6 +90,7 @@ def build_project_gaps(
         research_snapshot_id=research.snapshot_id if research else None,
         monitor_check_id=check.check_id if check else None,
         missing_inputs=missing,
+        settings=store.settings(project_id),
         findings=findings,
         resolved=resolved,
         stats={

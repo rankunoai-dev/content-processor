@@ -365,3 +365,35 @@ describe('gaps tab', () => {
     TIMEOUT,
   );
 });
+
+describe('gap settings', () => {
+  it(
+    'shows how keyword gaps are counted and saves a change once unlocked',
+    async () => {
+      const sent = fakeServer({
+        ...base,
+        'GET /api/projects/p1/gaps': () => [200, { ...report, settings: { min_volume: 0, competitor_top: 10 } }],
+        'GET /api/projects/p1/gaps/settings': () => [200, { min_volume: 0, competitor_top: 10 }],
+        'POST /api/projects/p1/gaps/settings': (body) => [200, body],
+      });
+      const user = userEvent.setup({ pointerEventsCheck: PointerEventsCheckLevel.Never });
+      renderApp('/projects/p1?tab=gaps');
+      expect(await screen.findByText('How keyword gaps are counted', {}, FIRST_PAINT)).toBeInTheDocument();
+      expect(await screen.findByText(/Counted: keywords with 0\+ searches/)).toBeInTheDocument();
+      const card = screen.getByText('How keyword gaps are counted').closest('.ant-card') as HTMLElement;
+      const save = () => within(card).getByText('Save').closest('button') as HTMLElement;
+      expect(save()).toBeDisabled();
+      act(() => useProjectTokens.getState().remember('p1', 'tok-1', '2099-01-01T00:00:00Z'));
+      await waitFor(() => expect(save()).not.toBeDisabled());
+      const volume = within(card).getByLabelText('Minimum searches a month');
+      await user.clear(volume);
+      await user.type(volume, '500');
+      await user.click(save());
+      await waitFor(() => expect(sent).toHaveLength(1));
+      expect(sent[0]?.path).toBe('/api/projects/p1/gaps/settings');
+      expect(sent[0]?.body).toEqual({ min_volume: 500, competitor_top: 10 });
+      expect(sent[0]?.headers['X-Project-Token']).toBe('tok-1');
+    },
+    TIMEOUT,
+  );
+});

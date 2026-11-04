@@ -22,6 +22,7 @@ __all__ = [
     "FindingKind",
     "FindingStatus",
     "GapReport",
+    "GapSettings",
     "StatusEntry",
 ]
 
@@ -37,6 +38,8 @@ FindingKind = Literal[
     "competitor_momentum",
     "offering_gap",
     "unwatched_competitor",
+    "keyword_behind",
+    "keyword_unverified",
 ]
 FindingStatus = Literal["open", "accepted", "done", "dismissed"]
 
@@ -57,6 +60,17 @@ class StatusEntry(StrictModel):
     status: FindingStatus
     note: str = Field(default="", max_length=2000)
     updated_at: datetime
+
+
+class GapSettings(StrictModel):
+    """How keyword gaps are counted (per project)."""
+
+    min_volume: int = Field(
+        default=0, ge=0, le=1_000_000, description="Leave out keywords searched less a month"
+    )
+    competitor_top: int = Field(
+        default=10, ge=1, le=20, description="A competitor counts when it ranks this high"
+    )
 
 
 class Finding(StrictModel):
@@ -94,3 +108,4 @@ class GapReport(StrictModel):
         default_factory=list, description="Titles of findings open last time and gone now"
     )
     stats: dict[str, int] = Field(default_factory=dict)
+    settings: GapSettings = Field(default_factory=lambda: GapSettings())

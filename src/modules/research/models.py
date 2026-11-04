@@ -69,6 +69,30 @@ class WebsiteResearch(StrictModel):
     overview: DomainOverview | None = None
     keywords: list[KeywordRow] = Field(default_factory=list)
     note: str = ""
+    keyword_limit: int | None = Field(
+        default=None, description="Lines asked for in a pull (the list stops there)"
+    )
+
+    @property
+    def complete(self) -> bool:
+        """Whether the list holds every keyword the website ranks for in the top 100.
+
+        A pull stops at its line limit, and Semrush's overview says how many keywords the
+        website has: when either shows the list was cut, a keyword missing from it may
+        still rank for the website. An imported export counts as the full list.
+        """
+        if self.overview is not None and self.overview.organic_keywords > len(self.keywords):
+            return False
+        return not (self.keyword_limit and len(self.keywords) >= self.keyword_limit)
+
+    @property
+    def coverage(self) -> str:
+        """In plain words, how much of the website's ranking keywords the list holds."""
+        if self.complete:
+            return f"all {len(self.keywords):,} ranking keywords"
+        total = self.overview.organic_keywords if self.overview else None
+        of = f" of about {total:,}" if total else ""
+        return f"the top {len(self.keywords):,}{of} ranking keywords (by traffic)"
 
 
 class SerpRow(StrictModel):

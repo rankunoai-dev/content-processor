@@ -1,6 +1,6 @@
 # Content Processor: A Plain-Language Guide
 
-Last updated: 4 November 2026 · Code version: main after smart recrawl and richer change alerts, downloads in every module (Excel, CSV and Word, and everything in one zip), suggested competitors (asked for at project creation, found in the search data), the full page-by-page report in project reports, project reports (duplication and contradictions by topic across all of the client's websites), Claude Desktop connectors per module, the home screen with module tiles, the shared scrape queue, the Claude Desktop connection (a read-only MCP server) and the "Open in Claude.ai" button · Maintained by every session that adds a significant feature (see "Keeping this guide current" at the end)
+Last updated: 4 November 2026 · Code version: main after keyword gaps by the client's position, smart recrawl and richer change alerts, downloads in every module (Excel, CSV and Word, and everything in one zip), suggested competitors (asked for at project creation, found in the search data), the full page-by-page report in project reports, project reports (duplication and contradictions by topic across all of the client's websites), Claude Desktop connectors per module, the home screen with module tiles, the shared scrape queue, the Claude Desktop connection (a read-only MCP server) and the "Open in Claude.ai" button · Maintained by every session that adds a significant feature (see "Keeping this guide current" at the end)
 
 ## 1. What this is, in one paragraph
 
@@ -361,7 +361,13 @@ A workbook of every snapshot can be downloaded. Three analyst cards that needed 
 The **Gaps** tab brings the other modules together and lists what the client is missing compared with its competitors, ranked by priority:
 
 - themes competitors cover and the client does not, themes where a competitor leads, themes without a pillar page on the client's side, and buying stages (learn, compare, decide, onboard, support) missing in a theme;
-- with research: keywords where a competitor is on the first page and the client is nowhere near, and the client's keywords on page two that could reach page one with some work;
+- with research, keyword by keyword, for every keyword a competitor ranks for near the top (top 10 by default) and enough people search (any number by default; both can be set in the tab), sorted by where the **client** stands:
+  - **complete deficit**: the client does not rank in the top 100 at all. Only said when the client's search data is complete. A Semrush pull stops at a set number of keywords, and when the client has more than that the engine cannot be sure;
+  - **probable gap**: not in the client's data, but that data was cut short. The finding says how much the data holds ("the top 200 of about 3,400 ranking keywords") and how to confirm;
+  - **page far behind**: the client ranks 21 to 100, so it has a page to improve rather than one to write;
+  - **page two**: the client ranks 11 to 20, the quickest wins. A deficit or far-behind finding mentions how many page-two keywords the same theme has.
+
+  Each is grouped by theme and summed up the way an analyst would say it, for example "Complete deficit in Supply chain ESG: 180 keyword(s), 45,000 searches a month. coupa.com ranks for 120 of them with 25 page(s); rival.com for 60. The client does not rank in the top 100 for any of them." Every keyword is listed with the competitor's position, its searches and the client's position;
 - with monitoring: competitors putting effort into a theme (adding pages);
 - with the offering catalogs: products or services competitors offer that the client's catalog does not show (menu items such as "Read more" or "About us" are ignored).
 
@@ -460,6 +466,7 @@ A project's **Downloads** tab lists every report at once (project overview with 
 
 | Date | Significant change |
 |---|---|
+| 2026-11-04 | Keyword gaps by the client's position: complete deficit (not in the top 100, only when the client's data is complete), probable gap (the client's data was cut at the pull limit, with how much it holds), page far behind (21-100) and page two (11-20), each summed up per theme and competitor ("coupa.com ranks for 120 of them with 25 pages"); minimum searches and competitor rank can be set per project. |
 | 2026-11-04 | Smart recrawl and richer change alerts: scheduled re-scrapes follow a plan (core pages every pass; other pages monthly or when the sitemap shows a change; the rest carried forward with no request), with a preview and "recrawl now" in Monitoring and the plan kept and downloadable. Each changed page now shows words before and after, headings added and removed, new and dropped heading terms, and new tables, pricing blocks, FAQs and forms; competitors get alerts for big expansions, heading shifts and new tables or pricing. |
 | 2026-11-04 | Downloads everywhere: a Download button in every module (Excel, CSV or Word) and a Downloads tab per project listing every report (overview, themes, monitoring, search data, suggested competitors, gaps, analyst runs) with what each needs first, plus everything in one zip; analyst card results also as Word. Made from the latest results, at no cost. |
 | 2026-11-04 | Competitors: creating a project asks who the client competes with (once more if none is named). The engine keeps the competitors the search data reveals (Semrush organic competitors in every pull, a free Semrush competitors export, the top 10 of pulled keywords) as suggestions with their figures; add one to the project or dismiss it in the Research tab. Close competitors not in the project appear in the gap analysis, and Claude can read the suggestions. |

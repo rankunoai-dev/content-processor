@@ -21,8 +21,9 @@ import { useState } from 'react';
 import { useBuildGaps, useGaps, useSetStatus, type Finding, type FindingStatus, type GapReport } from '../api/gaps';
 import type { Project } from '../api/projects';
 import { DownloadMenu } from '../components/DownloadMenu';
+import { GapSettingsCard } from './GapSettingsCard';
 import { QueryState } from '../components/QueryState';
-import { GAPS } from '../vocabulary';
+import { GAP_SETTINGS, GAPS } from '../vocabulary';
 
 const STATUSES: FindingStatus[] = ['open', 'accepted', 'done', 'dismissed'];
 
@@ -167,6 +168,7 @@ export function GapsTab({ project, token }: { project: Project; token: string | 
               {r !== null ? (
                 <Typography.Text type="secondary">
                   {GAPS.builtAt(new Date(r.created_at).toLocaleString(), r.findings.length, r.stats.high ?? 0)}
+                  {r.settings ? ` ${GAP_SETTINGS.applied(r.settings.min_volume, r.settings.competitor_top)}` : ''}
                 </Typography.Text>
               ) : null}
             </Space>
@@ -175,6 +177,7 @@ export function GapsTab({ project, token }: { project: Project; token: string | 
           </Space>
         )}
       </QueryState>
+      <GapSettingsCard projectId={project.project_id} token={token} />
     </Space>
   );
 }

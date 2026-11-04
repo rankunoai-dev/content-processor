@@ -24,12 +24,13 @@ import hashlib
 import math
 import re
 from collections import Counter, defaultdict
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
 
-from src.modules.gaps.models import EvidenceItem, Finding, FindingKind
+from src.modules.gaps.models import EvidenceItem, Finding, FindingKind, GapSettings
 from src.modules.monitoring.models import MonitorCheck
 from src.modules.research.competitors import CompetitorSuggestion
-from src.modules.research.models import ResearchSnapshot
+from src.modules.research.models import ResearchSnapshot, WebsiteResearch
 from src.modules.theming.models import Theme, ThemeMap
 
 __all__ = ["build_findings", "finding_id", "priority"]
@@ -42,6 +43,8 @@ _BASE: dict[FindingKind, int] = {
     "competitor_momentum": 35,
     "striking_distance": 30,
     "unwatched_competitor": 30,
+    "keyword_behind": 35,
+    "keyword_unverified": 30,
     "pillar_gap": 25,
     "funnel_gap": 15,
 }
@@ -227,66 +230,201 @@ def _theme_findings(
     return out
 
 
+def _client_positions(
+    snapshot: ResearchSnapshot, roles: Mapping[str, str]
+) -> tuple[dict[str, tuple[int, str | None]], list[WebsiteResearch]]:
+    """The client's best position (and ranking page) per keyword, and its websites."""
+    best: dict[str, tuple[int, str | None]] = {}
+    sites = [s for s in snapshot.websites if roles.get(s.website, s.role) == "client"]
+    for site in sites:
+        for r in site.keywords:
+            k = r.keyword.casefold()
+            if k not in best or r.position < best[k][0]:
+                best[k] = (r.position, r.url)
+    return best, sites
+
+
+@dataclass
+class _Row:
+    keyword: str
+    volume: int
+    website: str
+    position: int
+    url: str | None
+    client_position: int | None = None
+    client_url: str | None = None
+
+
+def _best_rows(rows: list[_Row]) -> list[_Row]:
+    """One row per keyword (the best-ranking competitor), highest volume first."""
+    best: dict[str, _Row] = {}
+    for row in rows:
+        k = row.keyword.casefold()
+        if k not in best or row.position < best[k].position:
+            best[k] = row
+    return sorted(best.values(), key=lambda r: (-r.volume, r.keyword))
+
+
+def _by_competitor(rows: list[_Row], every: list[_Row]) -> str:
+    """'coupa.com ranks for 120 of them with 25 pages; rival.com for 60 with 8 pages'."""
+    wanted = {r.keyword.casefold() for r in rows}
+    per: dict[str, tuple[set[str], set[str]]] = defaultdict(lambda: (set(), set()))
+    for r in every:
+        if r.keyword.casefold() in wanted:
+            per[r.website][0].add(r.keyword.casefold())
+            if r.url:
+                per[r.website][1].add(r.url)
+    ordered = sorted(per.items(), key=lambda kv: (-len(kv[1][0]), kv[0]))
+    parts = []
+    for i, (site, (words, pages)) in enumerate(ordered[:4]):
+        lead = f"{site} ranks for {len(words)} of them" if i == 0 else f"{site} for {len(words)}"
+        parts.append(lead + (f" with {len(pages)} page(s)" if pages else ""))
+    return "; ".join(parts)
+
+
+def _evidence(rows: list[_Row], client_text: Callable[[_Row], str]) -> list[EvidenceItem]:
+    return [
+        EvidenceItem(
+            kind="keyword",
+            label=f"{r.keyword} (#{r.position} {r.website}, {r.volume:,}/mo; {client_text(r)})",
+            website=r.website,
+            url=r.url,
+            value=r.volume,
+        )
+        for r in rows
+    ]
+
+
 def _keyword_findings(
-    snapshot: ResearchSnapshot, theme_map: ThemeMap, roles: Mapping[str, str]
+    snapshot: ResearchSnapshot,
+    theme_map: ThemeMap,
+    roles: Mapping[str, str],
+    settings: GapSettings | None = None,
 ) -> list[Finding]:
+    """Keyword opportunities by the client's position, theme by theme.
+
+    For every keyword a competitor ranks in its top `competitor_top` for (with at least
+    `min_volume` searches a month), the client's own position decides the kind:
+
+    - not in the client's list and that list is complete -> **complete deficit**: the
+      client does not rank in the top 100;
+    - not in the client's list but the list was cut (pull limit) -> **probable gap**:
+      it may still rank beyond the keywords pulled;
+    - the client ranks 21-100 -> **behind**: a page exists and needs optimizing;
+    - the client ranks 11-20 -> **page two** (quick win; also listed from the client's
+      own keywords).
+    """
+    s = settings or GapSettings()
     labels = {t.theme_id: t for t in theme_map.themes}
-    client_pos: dict[str, int] = {}
-    for site in snapshot.websites:
-        if roles.get(site.website, site.role) == "client":
-            for r in site.keywords:
-                k = r.keyword.casefold()
-                client_pos[k] = min(client_pos.get(k, 101), r.position)
-    gaps: dict[str | None, list[tuple[str, int, str, int, str | None]]] = defaultdict(list)
+    client, client_sites = _client_positions(snapshot, roles)
+    complete = bool(client_sites) and all(site.complete for site in client_sites)
+    coverage = "; ".join(f"{site.website}: {site.coverage}" for site in client_sites)
+    every: dict[str | None, list[_Row]] = defaultdict(list)
     for site in snapshot.websites:
         if roles.get(site.website, site.role) != "competitor":
             continue
         for r in site.keywords:
-            k = r.keyword.casefold()
-            if r.position <= _TOP10 and client_pos.get(k, 101) > _FAR:
-                gaps[r.theme_id].append((r.keyword, r.volume, site.website, r.position, r.url))
+            if r.position > s.competitor_top or r.volume < s.min_volume:
+                continue
+            found = client.get(r.keyword.casefold())
+            every[r.theme_id].append(
+                _Row(
+                    r.keyword,
+                    r.volume,
+                    site.website,
+                    r.position,
+                    r.url,
+                    found[0] if found else None,
+                    found[1] if found else None,
+                )  # fmt: skip
+            )
+    near: dict[str | None, list[tuple[str, int, int, str | None]]] = defaultdict(list)
+    for site in client_sites:
+        for r in site.keywords:
+            if _TOP10 < r.position <= _FAR and r.volume >= s.min_volume:
+                near[r.theme_id].append((r.keyword, r.volume, r.position, r.url))
     out: list[Finding] = []
-    for theme_id, rows in gaps.items():
-        best: dict[str, tuple[str, int, str, int, str | None]] = {}
-        for row in rows:
-            k = row[0].casefold()
-            if k not in best or row[3] < best[k][3]:
-                best[k] = row
-        ranked = sorted(best.values(), key=lambda r: -r[1])
-        volume = sum(r[1] for r in ranked)
+    for theme_id, rows in every.items():
         theme = labels.get(theme_id) if theme_id else None
         name = theme.label if theme else "keywords outside the themes"
-        out.append(
-            _finding(
-                "keyword_gap",
-                f"{theme_id}",
-                theme=theme,
-                title=f"{len(ranked)} competitor keyword(s) the client misses in {name}",
-                detail=f"Competitors rank in the top 10 for these; the client does not rank in the "
-                f"top 20. About {volume:,} searches a month together.",
-                action="Map each keyword to an existing client page or a new one; start with the "
-                "highest-volume keywords and the competitor pages ranking for them.",
-                competitors=[r[2] for r in ranked],
-                competitor_pages=len({r[4] for r in ranked}),
-                demand=volume,
-                evidence=[
-                    EvidenceItem(
-                        kind="keyword",
-                        label=f"{r[0]} (#{r[3]} {r[2]}, {r[1]:,}/mo)",
-                        website=r[2],
-                        url=r[4],
-                        value=r[1],
-                    )
-                    for r in ranked
-                ],
-            )
+        quick = len({k for k, *_ in near.get(theme_id, [])})
+        quick_line = (
+            f" {quick} other keyword(s) of this theme are on page two for the client: the "
+            "quickest wins (see Page two)."
+            if quick
+            else ""
         )
-    near: dict[str | None, list[tuple[str, int, int, str | None]]] = defaultdict(list)
-    for site in snapshot.websites:
-        if roles.get(site.website, site.role) == "client":
-            for r in site.keywords:
-                if _TOP10 < r.position <= _FAR and r.volume:
-                    near[r.theme_id].append((r.keyword, r.volume, r.position, r.url))
+        missing = _best_rows([r for r in rows if r.client_position is None])
+        behind = _best_rows(
+            [r for r in rows if r.client_position is not None and r.client_position > _FAR]
+        )
+        if missing and complete:
+            volume = sum(r.volume for r in missing)
+            out.append(
+                _finding(
+                    "keyword_gap",
+                    f"{theme_id}",
+                    theme=theme,
+                    title=f"Complete deficit in {name}: {len(missing)} keyword(s), "
+                    f"{volume:,} searches a month",
+                    detail=f"{_by_competitor(missing, rows)}. The client does not rank in the "
+                    f"top 100 for any of them (its search data holds {coverage})." + quick_line,
+                    action="Plan new pages for these: start with the highest-volume keywords "
+                    "and study the competitor pages that rank for them.",
+                    competitors=[r.website for r in missing],
+                    competitor_pages=len({r.url for r in missing if r.url}),
+                    demand=volume,
+                    evidence=_evidence(missing, lambda _r: "client not in the top 100"),
+                )
+            )
+        elif missing:
+            volume = sum(r.volume for r in missing)
+            why = (
+                f"the client's search data holds only {coverage}"
+                if client_sites
+                else "there is no search data for the client yet"
+            )
+            out.append(
+                _finding(
+                    "keyword_unverified",
+                    f"{theme_id}",
+                    theme=theme,
+                    title=f"Probable gap in {name}: {len(missing)} keyword(s), "
+                    f"{volume:,} searches a month",
+                    detail=f"{_by_competitor(missing, rows)}. They are not in the client's "
+                    f"rankings, but {why}, so the client may still rank lower for some."
+                    + quick_line,
+                    action="Confirm with the client's full Semrush export or a pull with a "
+                    "higher keyword limit, then plan pages for the real gaps.",
+                    competitors=[r.website for r in missing],
+                    competitor_pages=len({r.url for r in missing if r.url}),
+                    demand=volume,
+                    evidence=_evidence(missing, lambda _r: "client not in the data pulled"),
+                )
+            )
+        if behind:
+            volume = sum(r.volume for r in behind)
+            out.append(
+                _finding(
+                    "keyword_behind",
+                    f"{theme_id}",
+                    theme=theme,
+                    title=f"{len(behind)} keyword(s) where the client is far behind in {name}",
+                    detail=f"{_by_competitor(behind, rows)}. The client ranks between 21 and "
+                    f"100 for them, so it has pages to improve rather than pages to write. "
+                    f"About {volume:,} searches a month together." + quick_line,
+                    action="Optimize the client's ranking page for each keyword: answer the "
+                    "query directly, cover what the competitor page covers, add internal links "
+                    "from the pillar.",
+                    competitors=[r.website for r in behind],
+                    competitor_pages=len({r.url for r in behind if r.url}),
+                    demand=volume,
+                    evidence=_evidence(
+                        behind,
+                        lambda r: f"client #{r.client_position} {r.client_url or ''}".strip(),
+                    ),
+                )
+            )
     for theme_id, near_rows in near.items():
         near_rows.sort(key=lambda r: -r[1])
         volume = sum(r[1] for r in near_rows)
@@ -473,12 +611,13 @@ def build_findings(
     check: MonitorCheck | None = None,
     catalogs: Mapping[str, list[tuple[str, str | None]]] | None = None,
     suggested: Sequence[CompetitorSuggestion] = (),
+    settings: GapSettings | None = None,
 ) -> list[Finding]:
     """Every finding, highest priority first."""
     demand = _theme_demand(research)
     findings = _theme_findings(theme_map, roles, demand)
     if research is not None:
-        findings += _keyword_findings(research, theme_map, roles)
+        findings += _keyword_findings(research, theme_map, roles, settings)
     if check is not None:
         findings += _momentum_findings(check, theme_map, roles, demand)
     if catalogs:

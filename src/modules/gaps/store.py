@@ -14,7 +14,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from src.modules.content_processor.export.tabular import Cell, Table, write_xlsx
-from src.modules.gaps.models import FindingStatus, GapReport, StatusEntry
+from src.modules.gaps.models import FindingStatus, GapReport, GapSettings, StatusEntry
 
 __all__ = ["GapStore", "gap_tables", "write_gap_workbook"]
 
@@ -95,6 +95,23 @@ class GapStore:
         )
         self.save(updated)
         return entry
+
+    def settings(self, project_id: str) -> GapSettings:
+        """How the project's keyword gaps are counted (defaults when never set)."""
+        path = self.folder(project_id) / "settings.json"
+        if not path.exists():
+            return GapSettings()
+        return GapSettings.model_validate_json(path.read_text(encoding="utf-8"))
+
+    def set_settings(self, project_id: str, settings: GapSettings) -> GapSettings:
+        """Save the settings (used from the next build)."""
+        folder = self.folder(project_id)
+        folder.mkdir(parents=True, exist_ok=True)
+        with self._lock:
+            tmp = folder / "settings.json.tmp"
+            tmp.write_text(settings.model_dump_json(indent=1), encoding="utf-8")
+            tmp.replace(folder / "settings.json")
+        return settings
 
     def workbook(self, report: GapReport) -> Path:
         """Where a report's workbook is written."""

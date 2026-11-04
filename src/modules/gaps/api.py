@@ -4,6 +4,8 @@ GET  /api/projects/{project}/gaps                          the latest report
 POST /api/projects/{project}/gaps                          build a new one (unlock token)
 POST /api/projects/{project}/gaps/findings/{id}/status     record a decision (unlock token)
 GET  /api/projects/{project}/gaps/workbook                 the latest report's workbook
+GET  /api/projects/{project}/gaps/settings                 how keyword gaps are counted
+POST /api/projects/{project}/gaps/settings                 change it (unlock token)
 """
 
 from __future__ import annotations
@@ -18,7 +20,7 @@ from src.core.schemas import StrictModel
 from src.modules.content_processor.projects.security import TokenSigner
 from src.modules.content_processor.projects.store import ProjectNotFoundError, ProjectStore
 from src.modules.content_processor.webapi.projects_api import KnowledgeAccess
-from src.modules.gaps.models import FindingStatus, GapReport, StatusEntry
+from src.modules.gaps.models import FindingStatus, GapReport, GapSettings, StatusEntry
 from src.modules.gaps.service import build_project_gaps, gap_store
 
 __all__ = ["StatusIn", "register_gap_routes"]
@@ -75,6 +77,16 @@ def register_gap_routes(
             return store.set_status(project_id, finding_id, body.status, body.note)
         except KeyError:
             raise HTTPException(status_code=404, detail="There is no such finding.") from None
+
+    @app.get("/api/projects/{project_id}/gaps/settings")
+    def get_settings(project_id: str) -> GapSettings:
+        project(project_id)
+        return store.settings(project_id)
+
+    @app.post("/api/projects/{project_id}/gaps/settings")
+    def set_settings(project_id: str, body: GapSettings, token: TokenHeader = None) -> GapSettings:
+        unlocked(project_id, token)
+        return store.set_settings(project_id, body)
 
     @app.get("/api/projects/{project_id}/gaps/workbook")
     def workbook(project_id: str) -> FileResponse:

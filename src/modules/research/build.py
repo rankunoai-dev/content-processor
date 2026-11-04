@@ -132,6 +132,7 @@ def pull_snapshot(
                 overview=overview,
                 keywords=rows,
                 note="" if rows else "Semrush has no ranking keywords for this domain",
+                keyword_limit=keyword_limit,
             )
         )
     keywords: list[KeywordMetrics] = []

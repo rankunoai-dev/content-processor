@@ -138,7 +138,10 @@ class GapInput(StrictModel):
     kind: str | None = Field(
         default=None,
         description="Only this kind: theme_gap, theme_behind, pillar_gap, funnel_gap, "
-        "keyword_gap, striking_distance, competitor_momentum, offering_gap",
+        "keyword_gap (complete deficit: the client is not in the top 100, its data complete), "
+        "keyword_unverified (probable gap: the client's data was cut short), keyword_behind "
+        "(the client ranks 21-100), striking_distance (11-20), competitor_momentum, "
+        "offering_gap, unwatched_competitor",
     )
     limit: int = Field(default=40, ge=1, le=200)
     rebuild: bool = Field(default=False, description="Build the gap analysis again first")
@@ -1146,8 +1149,10 @@ TOOLS: dict[str, ToolSpec] = {
             "get_gap_findings",
             "gap",
             "The project's gap findings, highest priority first: themes the client misses or "
-            "trails in, missing pillar pages and funnel stages, competitor keywords the client "
-            "misses, page-two keywords, competitor momentum and offerings; each with evidence, "
+            "trails in, missing pillar pages and funnel stages, competitor keywords by the "
+            "client's position (complete deficit, probable gap, far behind, page two), "
+            "competitor momentum, offerings and competitors not in the project; each with "
+            "evidence, "
             "a recommended action and its status (dismissed findings are left out).",
             GapInput,
             _gaps,

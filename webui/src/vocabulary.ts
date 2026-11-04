@@ -1871,6 +1871,19 @@ export const EXPORTS = {
   word: 'Word',
 };
 
+export const GAP_SETTINGS = {
+  title: 'How keyword gaps are counted',
+  help: "A keyword counts when a competitor ranks in its top results for it and enough people search it. Complete deficit: the client does not rank in the top 100 (only said when the client's search data is complete). Probable gap: the client's data was cut at the pull's keyword limit, so it may rank lower. Page far behind: the client ranks 21-100. Page two: the client ranks 11-20. Used from the next build.",
+  minVolume: 'Minimum searches a month',
+  minVolumeHelp: '0 keeps every keyword.',
+  competitorTop: 'A competitor ranks in the',
+  top: (n: number) => `top ${n}`,
+  save: 'Save',
+  saved: 'Saved. Build the analysis again to apply it.',
+  applied: (min: number, top: number) =>
+    `Counted: keywords with ${min.toLocaleString()}+ searches a month where a competitor ranks in the top ${top}.`,
+};
+
 export const COMPETITORS = {
   title: 'Suggested competitors',
   help: 'Websites the search data shows competing with the client: from Semrush (a pull, or an Organic Competitors export) and from the top 10 results of the keywords you pull. They are kept as context for the gap analysis and Claude. Nothing is scraped or paid for until you add one to the project.',
@@ -1979,7 +1992,9 @@ export const GAPS = {
     theme_behind: 'Behind in theme',
     pillar_gap: 'Missing pillar page',
     funnel_gap: 'Missing funnel stage',
-    keyword_gap: 'Keyword gap',
+    keyword_gap: 'Complete deficit',
+    keyword_unverified: 'Probable keyword gap',
+    keyword_behind: 'Page far behind',
     striking_distance: 'Page two',
     competitor_momentum: 'Competitor momentum',
     offering_gap: 'Missing offering',
