@@ -8,6 +8,7 @@
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { create } from 'zustand';
+import { createJSONStorage, persist } from 'zustand/middleware';
 import { ApiError } from './client';
 
 /** ready: its turn came in the shared queue and it waits for its person to start it. */
@@ -226,7 +227,11 @@ export interface SiteChange {
 
 export const ACTIVE: ReadonlySet<RunStatus> = new Set(['queued', 'ready', 'running']);
 
-// -- unlock tokens (memory only: closing the tab locks every project again) --------
+// -- unlock tokens --------------------------------------------------------------
+// Kept in this browser tab's session storage: a reload or an app restart keeps the
+// project unlocked until its token expires (8 hours); closing the tab locks every
+// project again, and other tabs never see it. Falls back to memory when the browser
+// refuses storage.
 
 interface TokenState {
   tokens: Record<string, { token: string; expiresAt: number }>;
@@ -234,19 +239,59 @@ interface TokenState {
   forget: (projectId: string) => void;
 }
 
-export const useProjectTokens = create<TokenState>((set) => ({
-  tokens: {},
-  remember: (projectId, token, expiresAt) =>
-    set((s) => ({
-      tokens: { ...s.tokens, [projectId]: { token, expiresAt: Date.parse(expiresAt) } },
-    })),
-  forget: (projectId) =>
-    set((s) => {
-      const tokens = { ...s.tokens };
-      delete tokens[projectId];
-      return { tokens };
+function tabStorage(): Storage {
+  try {
+    const probe = '__unlock_probe__';
+    window.sessionStorage.setItem(probe, '1');
+    window.sessionStorage.removeItem(probe);
+    return window.sessionStorage;
+  } catch {
+    const memory = new Map<string, string>();
+    return {
+      get length() {
+        return memory.size;
+      },
+      clear: () => memory.clear(),
+      getItem: (k) => memory.get(k) ?? null,
+      key: (i) => [...memory.keys()][i] ?? null,
+      removeItem: (k) => void memory.delete(k),
+      setItem: (k, v) => void memory.set(k, v),
+    };
+  }
+}
+
+/** Only the tokens that have not expired. */
+function unexpired(tokens: TokenState['tokens']): TokenState['tokens'] {
+  const now = Date.now();
+  return Object.fromEntries(Object.entries(tokens).filter(([, t]) => t.expiresAt > now));
+}
+
+export const useProjectTokens = create<TokenState>()(
+  persist(
+    (set) => ({
+      tokens: {},
+      remember: (projectId, token, expiresAt) =>
+        set((s) => ({
+          tokens: unexpired({ ...s.tokens, [projectId]: { token, expiresAt: Date.parse(expiresAt) } }),
+        })),
+      forget: (projectId) =>
+        set((s) => {
+          const tokens = { ...s.tokens };
+          delete tokens[projectId];
+          return { tokens };
+        }),
     }),
-}));
+    {
+      name: 'capture-results-unlocked',
+      storage: createJSONStorage(tabStorage),
+      partialize: (s) => ({ tokens: unexpired(s.tokens) }),
+      merge: (stored, current) => ({
+        ...current,
+        tokens: unexpired((stored as Partial<TokenState> | undefined)?.tokens ?? {}),
+      }),
+    },
+  ),
+);
 
 /** The project's token while it is valid, else null. */
 export function useProjectToken(projectId: string): string | null {

@@ -852,3 +852,11 @@ git worktree add ../content-processor-lane4 -b lane/L4-verify
 - **Live check (copy of the user's 5-page project, this branch on port 8793):** a theme overview (table of the two themes with pages, funnel stage and sources) and a page review of the e-signature page (what works, what to fix, next steps) both passed their checks; samples in the scratchpad `template_samples.md`.
 - **Tests:** `test_mcp_server.py` +4 (layouts per type, needs review and table validation, present_answer through the app, prompts per connector over the protocol); tool lists updated for `present_answer`.
 - **Gate:** `scripts/verify.ps1 -Fix` ALL GATES PASSED, 1,212 passed, 12 skipped, coverage 93.87%. A first run failed one `test_run_queue.py` test (shared scrape queue, not touched here); it is intermittent (a different queue test failed on a rerun, then 2 clean runs): flagged for that lane.
+
+## [2026-11-03] Fix: an unlocked project locked itself again on every reload
+
+- **Branch / worktree:** `fix/remember-unlock` at `../content-processor-unlock` (on `main` `71ea38a`).
+- **Found by:** the user, repeatedly asked for the project password ("the password is not getting stored"). The unlock dialog says changes stay allowed in the tab for 8 hours, but the token lived only in memory, so a page reload (or reopening the page after an app restart) locked the project again. The "not right" error in their screenshot was a different, 13-character entry; the stored password (17 characters) unlocks through the same route.
+- **Fix:** `useProjectTokens` is persisted in the tab's `sessionStorage` (key `capture-results-unlocked`, memory fallback when storage is refused): kept across reloads until the token expires, dropped when the tab closes, never shared with other tabs; expired tokens are removed on save and on load.
+- **Checks:** web `unlock.test.ts` 1 (saved without expired tokens, read back after a reload, forget removes it); Chromium against the user's project: unlock, reload still unlocked, new tab locked. Web suite 68 passed, `tsc -b`, `eslint`, `vite build`.
+- **Gate:** `scripts/verify.ps1 -Fix` ALL GATES PASSED, 1,212 passed, 12 skipped, coverage 93.87%.
