@@ -145,6 +145,10 @@ describe('home: modules as tiles over shared projects', () => {
       }
       const create = within(dialog).getByText('Create project').closest('button') as HTMLElement;
       await user.click(create);
+      // no competitor named: the form asks once, and nothing is sent yet
+      expect(await within(dialog).findByText('No competitors yet', {}, FIRST_PAINT)).toBeInTheDocument();
+      expect(posted).toHaveLength(0);
+      await user.click(within(dialog).getByText('Create without competitors').closest('button') as HTMLElement);
       await waitFor(() => expect(posted).toHaveLength(1), FIRST_PAINT);
       await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/projects/p1?tab=gaps'), FIRST_PAINT);
     },

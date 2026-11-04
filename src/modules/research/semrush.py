@@ -44,6 +44,7 @@ UNITS_PER_LINE: Final[dict[str, int]] = {
     "phrase_this": 10,
     "phrase_organic": 10,
     "phrase_kdi": 50,
+    "domain_organic_organic": 40,
 }
 _UNKNOWN_UNITS = 50
 _LOCK = threading.Lock()
@@ -244,6 +245,17 @@ class SemrushClient:
             {"phrase": phrase, "database": database, "export_columns": "Dn,Ur"},
             limit,
             phrase,
+        )
+
+    def organic_competitors(
+        self, domain: str, database: str, limit: int = 20
+    ) -> list[dict[str, str]]:
+        """The domain's competitors in organic search, closest first (up to `limit` lines)."""
+        return self._call(
+            "domain_organic_organic",
+            {"domain": domain, "database": database, "export_columns": "Dn,Cr,Np,Or,Ot"},
+            limit,
+            domain,
         )
 
     def close(self) -> None:

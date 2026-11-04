@@ -9,7 +9,7 @@ import { moduleRequest, orNull } from './research';
 export type FindingStatus = 'open' | 'accepted' | 'done' | 'dismissed';
 
 export interface Evidence {
-  kind: 'page' | 'pillar' | 'keyword' | 'theme' | 'offering' | 'change' | 'count';
+  kind: 'page' | 'pillar' | 'keyword' | 'theme' | 'offering' | 'change' | 'count' | 'competitor';
   label: string;
   website: string | null;
   url: string | null;

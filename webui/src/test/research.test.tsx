@@ -3,7 +3,7 @@ import userEvent, { PointerEventsCheckLevel } from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { GapReport } from '../api/gaps';
 import { useProjectTokens, type Project } from '../api/projects';
-import type { ResearchSnapshot, ResearchStatus } from '../api/research';
+import type { CompetitorBook, CompetitorSuggestion, ResearchSnapshot, ResearchStatus } from '../api/research';
 import { renderApp } from './utils';
 
 const project: Project = {
@@ -172,6 +172,82 @@ const TIMEOUT = 120_000;
 beforeEach(() => useProjectTokens.setState({ tokens: {} }));
 afterEach(() => vi.unstubAllGlobals());
 
+function suggestion(domain: string, extra: Partial<CompetitorSuggestion> = {}): CompetitorSuggestion {
+  return {
+    domain,
+    status: 'suggested',
+    sources: ['semrush_competitors'],
+    relevance: 0.44,
+    common_keywords: 95,
+    organic_keywords: 12000,
+    organic_traffic: 150000,
+    search_results: 0,
+    example_keywords: [],
+    first_seen: '2026-11-04T09:00:00Z',
+    last_seen: '2026-11-04T09:00:00Z',
+    times_seen: 1,
+    decided_at: null,
+    site_id: null,
+    ...extra,
+  };
+}
+
+const book: CompetitorBook = {
+  project_id: 'p1',
+  updated_at: '2026-11-04T09:00:00Z',
+  client_domain: 'example.com',
+  suggestions: [
+    suggestion('bigsure.com'),
+    suggestion('newco.io', { sources: ['search_results'], relevance: null, common_keywords: 0, search_results: 2 }),
+    suggestion('rival.com', { status: 'added', site_id: 's2' }),
+  ],
+};
+
+describe('suggested competitors', () => {
+  it(
+    'lists what the search data found; adds one to the project and dismisses another once unlocked',
+    async () => {
+      let current = book;
+      const decide = (domain: string, status: CompetitorSuggestion['status']) => {
+        current = {
+          ...current,
+          suggestions: current.suggestions.map((s) => (s.domain === domain ? { ...s, status } : s)),
+        };
+        return [200, current] as [number, unknown];
+      };
+      const sent = fakeServer({
+        ...base,
+        'GET /api/research/status': () => [200, offStatus],
+        'GET /api/projects/p1/research': () => [404, { detail: 'No research has been added yet.' }],
+        'GET /api/projects/p1/research/competitors': () => [200, current],
+        'POST /api/projects/p1/research/competitors/bigsure.com/add': () => decide('bigsure.com', 'added'),
+        'POST /api/projects/p1/research/competitors/newco.io/dismiss': () => decide('newco.io', 'dismissed'),
+      });
+      const user = userEvent.setup({ pointerEventsCheck: PointerEventsCheckLevel.Never });
+      renderApp('/projects/p1?tab=research');
+      expect(await screen.findByText('bigsure.com', {}, FIRST_PAINT)).toBeInTheDocument();
+      const row = (d: string) => screen.getByText(d).closest('tr') as HTMLElement;
+      expect(within(row('bigsure.com')).getByText('44%')).toBeInTheDocument();
+      expect(within(row('bigsure.com')).getByText((150000).toLocaleString())).toBeInTheDocument();
+      expect(within(row('newco.io')).getByText('2 keywords')).toBeInTheDocument();
+      expect(within(row('rival.com')).getByText('In the project')).toBeInTheDocument();
+      expect(within(row('bigsure.com')).getByText('Add as competitor').closest('button')).toBeDisabled();
+      act(() => useProjectTokens.getState().remember('p1', 'tok-1', '2099-01-01T00:00:00Z'));
+      await waitFor(() =>
+        expect(within(row('bigsure.com')).getByText('Add as competitor').closest('button')).not.toBeDisabled(),
+      );
+      await user.click(within(row('bigsure.com')).getByText('Add as competitor').closest('button') as HTMLElement);
+      await waitFor(() => expect(within(row('bigsure.com')).getByText('In the project')).toBeInTheDocument());
+      expect(sent[0]?.path).toBe('/api/projects/p1/research/competitors/bigsure.com/add');
+      expect(sent[0]?.headers['X-Project-Token']).toBe('tok-1');
+      await user.click(within(row('newco.io')).getByText('Dismiss').closest('button') as HTMLElement);
+      await waitFor(() => expect(screen.queryByText('newco.io')).not.toBeInTheDocument());
+      expect(screen.getByText('Show dismissed (1)')).toBeInTheDocument();
+    },
+    TIMEOUT,
+  );
+});
+
 describe('research tab', () => {
   it(
     'imports a Semrush export once unlocked and shows rankings and demand; pulls stay off',
@@ -183,6 +259,7 @@ describe('research tab', () => {
         'GET /api/projects/p1/research': () =>
           imported ? [200, snapshot] : [404, { detail: 'No research has been added yet.' }],
         'GET /api/projects/p1/research/movers': () => [404, { detail: 'Add research again later to compare.' }],
+        'GET /api/projects/p1/research/competitors': () => [200, { ...book, suggestions: [] }],
         'POST /api/projects/p1/research/import': () => {
           imported = true;
           return [200, snapshot];

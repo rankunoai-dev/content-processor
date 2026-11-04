@@ -36,6 +36,7 @@ FindingKind = Literal[
     "striking_distance",
     "competitor_momentum",
     "offering_gap",
+    "unwatched_competitor",
 ]
 FindingStatus = Literal["open", "accepted", "done", "dismissed"]
 
@@ -43,7 +44,7 @@ FindingStatus = Literal["open", "accepted", "done", "dismissed"]
 class EvidenceItem(StrictModel):
     """One fact behind a finding."""
 
-    kind: Literal["page", "pillar", "keyword", "theme", "offering", "change", "count"]
+    kind: Literal["page", "pillar", "keyword", "theme", "offering", "change", "count", "competitor"]
     label: str
     website: str | None = None
     url: str | None = None

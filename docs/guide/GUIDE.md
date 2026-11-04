@@ -1,6 +1,6 @@
 # Content Processor: A Plain-Language Guide
 
-Last updated: 3 November 2026 · Code version: main after the full page-by-page report in project reports, project reports (duplication and contradictions by topic across all of the client's websites), Claude Desktop connectors per module, the home screen with module tiles, the shared scrape queue, the Claude Desktop connection (a read-only MCP server) and the "Open in Claude.ai" button · Maintained by every session that adds a significant feature (see "Keeping this guide current" at the end)
+Last updated: 4 November 2026 · Code version: main after suggested competitors (asked for at project creation, found in the search data), the full page-by-page report in project reports, project reports (duplication and contradictions by topic across all of the client's websites), Claude Desktop connectors per module, the home screen with module tiles, the shared scrape queue, the Claude Desktop connection (a read-only MCP server) and the "Open in Claude.ai" button · Maintained by every session that adds a significant feature (see "Keeping this guide current" at the end)
 
 ## 1. What this is, in one paragraph
 
@@ -178,7 +178,7 @@ Projects are **shared**: a project (the client's websites and its competitors) i
 
 The engine is becoming one app with several modules. Module 1, the Content Scraper, lets anyone run a scrape from the browser, without the command line:
 
-1. **Create a project**: a project name, your name, the client's name and a password (at least 8 characters). The password is stored only in scrambled form and cannot be read back.
+1. **Create a project**: a project name, your name, the client's name and a password (at least 8 characters). The password is stored only in scrambled form and cannot be read back. The form also asks **who the client competes with**: every module compares the client with its competitors, so if none is named it asks once more, and you can add them now or create the project without them (the Research tab suggests competitors later, see Step 19).
 2. **Add the web addresses**: paste them (one per line) or import a file from your computer (.txt, .csv or Excel .xlsx; addresses are found in any column). Every address is checked: duplicates, addresses already in the list and unusable lines (for example ftp:// or text that is not an address) are counted and shown with the reason, never dropped silently.
 3. **Start scraping**: one button. The addresses are worked in batches of 25, each in its own process so one crashed browser cannot stop the app; pages that did not finish are tried again, up to three times. The progress (pages done, batch, results so far) updates by itself, and a scrape can be cancelled. Pages captured before and unchanged since are reused (see the URL history), so a repeat scrape is quicker. Free access only.
 4. **Download the reports**: every scrape keeps its own reports. Each file is listed with what it is ("Start here: every page with its content…"), and all of them can be downloaded at once as a zip.
@@ -348,6 +348,8 @@ There are two ways to add it:
 - **Import a Semrush export (free).** In Semrush, export a website's "Organic Positions" list as a CSV file and upload it for that website. Nothing is sent anywhere.
 - **Pull from Semrush (spends units).** The app asks Semrush directly for every website of the project. This uses Semrush API units, which cost money, so it is **off** until an operator sets the API key, switches it on and sets a **monthly unit cap**. Before a pull, the tab shows the most units it could use; the app refuses a pull that could go over the per-pull limit or what is left this month, and logs every unit spent. Only website addresses and keywords are sent to Semrush, never page content.
 
+**Suggested competitors.** The engine also notices competitors by itself. When search data comes in, it keeps every website that shows up competing with the client, from three places: Semrush's list of the client's organic competitors (part of every pull, about 800 units at most), a Semrush "Organic Competitors" export you upload (free), and the top 10 results of the keywords you pull. Each suggestion keeps how close it is (Semrush's relevance), the keywords it shares with the client, its own traffic, the keywords it appeared for, and when it was first and last seen; new pulls refresh the figures and add to them. The client's own websites are never suggested. A suggestion is only information: nothing is scraped or paid for until someone clicks **Add as competitor**, which adds it to the project (with a note saying where it was found); **Dismiss** hides it, and that decision is kept. The suggestions are also context elsewhere: the gap analysis lists close competitors that are not in the project yet ("Competitor not in project"), and Claude can read them (marked as not scraped, so it does not claim facts about their pages).
+
 A workbook of every snapshot can be downloaded. Three analyst cards that needed search data (search intent and results, high-value keywords, keyword-to-page mapping) can now run on a project once it has research. Semrush has not been called for real yet: it waits for a key and a cap; the import works today.
 
 ### Step 20: Gaps (what the client is missing, most important first)
@@ -444,6 +446,7 @@ Both send the project's data to Claude through your account, so they are for cli
 
 | Date | Significant change |
 |---|---|
+| 2026-11-04 | Competitors: creating a project asks who the client competes with (once more if none is named). The engine keeps the competitors the search data reveals (Semrush organic competitors in every pull, a free Semrush competitors export, the top 10 of pulled keywords) as suggestions with their figures; add one to the project or dismiss it in the Research tab. Close competitors not in the project appear in the gap analysis, and Claude can read the suggestions. |
 | 2026-11-04 | Project reports include the full page-by-page project report (Pages with whole content, Matching content with the shared text) for all of the client's websites; builds run in the background. |
 | 2026-11-03 | Answer templates in Claude Desktop: the app lays out each checked answer by type (answer, overview, findings by priority, comparison, page review, what changed, keywords) with a title, an "In short" summary, next steps, a sources-checked line and linked sources; seven ready-made requests in Claude Desktop's prompt menu. |
 | 2026-11-03 | Readable answers in Claude Desktop: checked answers come back with numbered sources and links instead of reference codes, and Claude no longer shows internal ids. Themes are named after their main page instead of a keyword list, in every screen and report. |

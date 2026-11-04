@@ -7,6 +7,11 @@ POST /api/projects/{project}/research/pull         pull from Semrush (unlock tok
 POST /api/projects/{project}/research/import       import an export (unlock token)
 GET  /api/projects/{project}/research/movers       latest against previous snapshot
 GET  /api/projects/{project}/research/workbook     the latest snapshot's workbook
+GET  /api/projects/{project}/research/competitors  suggested competitors (from the search data)
+POST /api/projects/{project}/research/competitors/import            a competitors export (token)
+POST /api/projects/{project}/research/competitors/{domain}/add      add it to the project (token)
+POST /api/projects/{project}/research/competitors/{domain}/dismiss  hide it (token)
+POST /api/projects/{project}/research/competitors/{domain}/restore  suggest it again (token)
 """
 
 from __future__ import annotations
@@ -24,22 +29,35 @@ from pydantic import Field
 from src.core.schemas import StrictModel
 from src.modules.analyst.playground import Playground
 from src.modules.content_processor.projects.security import TokenSigner
-from src.modules.content_processor.projects.store import ProjectNotFoundError, ProjectStore
+from src.modules.content_processor.projects.store import (
+    ProjectNotFoundError,
+    ProjectStore,
+    SiteSpec,
+)
 from src.modules.content_processor.webapi.projects_api import KnowledgeAccess
 from src.modules.research.build import movers
+from src.modules.research.competitors import (
+    SOURCE_LABELS,
+    CompetitorBook,
+    domain_of,
+    read_competitors_csv,
+)
 from src.modules.research.importer import ImportError_
 from src.modules.research.models import Mover, ResearchSnapshot
 from src.modules.research.semrush import SemrushError
 from src.modules.research.service import (
     ResearchSettings,
+    competitor_book,
+    competitors_store,
     estimate_units,
+    import_competitors,
     import_csv,
     pull_project,
     research_store,
     unit_log,
 )
 
-__all__ = ["ImportIn", "PullIn", "register_research_routes"]
+__all__ = ["CompetitorsImportIn", "ImportIn", "PullIn", "register_research_routes"]
 
 TokenHeader = Annotated[str | None, Header(alias="X-Project-Token")]
 _MAX_FILE = 20 * 1024 * 1024
@@ -57,6 +75,31 @@ class ImportIn(StrictModel):
     website: str = Field(min_length=3, max_length=300)
     file_name: str = Field(max_length=300)
     content_base64: str = Field(max_length=_MAX_FILE * 2)
+
+
+class CompetitorsImportIn(StrictModel):
+    """A Semrush Organic Competitors export of the client's website."""
+
+    file_name: str = Field(max_length=300)
+    content_base64: str = Field(max_length=_MAX_FILE * 2)
+
+
+def _decode(content_base64: str) -> bytes:
+    try:
+        data = base64.b64decode(content_base64, validate=True)
+    except (binascii.Error, ValueError):
+        raise HTTPException(status_code=422, detail="The file could not be read.") from None
+    if len(data) > _MAX_FILE:
+        raise HTTPException(status_code=413, detail="The file is larger than 20 MB.")
+    return data
+
+
+def _note(domain: str, book: CompetitorBook) -> str:
+    found = next((s for s in book.suggestions if s.domain == domain), None)
+    if found is None:
+        return "Suggested by the search data."
+    where = ", ".join(SOURCE_LABELS[s] for s in found.sources)
+    return f"Suggested by the search data ({where})."
 
 
 def register_research_routes(
@@ -131,19 +174,74 @@ def register_research_routes(
     @app.post("/api/projects/{project_id}/research/import")
     def import_file(project_id: str, body: ImportIn, token: TokenHeader = None) -> ResearchSnapshot:
         unlocked(project_id, token)
-        try:
-            data = base64.b64decode(body.content_base64, validate=True)
-        except (binascii.Error, ValueError):
-            raise HTTPException(status_code=422, detail="The file could not be read.") from None
-        if len(data) > _MAX_FILE:
-            raise HTTPException(status_code=413, detail="The file is larger than 20 MB.")
+        data = _decode(body.content_base64)
         try:
             snapshot, _files = import_csv(
                 projects, access, project_id, body.website, data, database=settings().database
             )
         except (ImportError_, ValueError) as exc:
+            if read_competitors_csv(data, datetime.now(UTC)) is not None:
+                detail = (
+                    "This is a Semrush Organic Competitors export: import it under Suggested "
+                    "competitors."
+                )
+                raise HTTPException(status_code=422, detail=detail) from None
             raise HTTPException(status_code=422, detail=str(exc)) from None
         return snapshot
+
+    @app.get("/api/projects/{project_id}/research/competitors")
+    def competitors(project_id: str) -> CompetitorBook:
+        project(project_id)
+        return competitor_book(projects, project_id)
+
+    @app.post("/api/projects/{project_id}/research/competitors/import")
+    def import_competitor_file(
+        project_id: str, body: CompetitorsImportIn, token: TokenHeader = None
+    ) -> CompetitorBook:
+        unlocked(project_id, token)
+        try:
+            import_competitors(projects, project_id, _decode(body.content_base64))
+        except ImportError_ as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from None
+        return competitor_book(projects, project_id)
+
+    def suggestion(project_id: str, domain: str, token: str | None) -> str:
+        unlocked(project_id, token)
+        clean = domain_of(domain)
+        book = competitor_book(projects, project_id)
+        if clean is None or all(s.domain != clean for s in book.suggestions):
+            raise HTTPException(status_code=404, detail="That competitor is not suggested.")
+        return clean
+
+    @app.post("/api/projects/{project_id}/research/competitors/{domain}/add")
+    def add_competitor(project_id: str, domain: str, token: TokenHeader = None) -> CompetitorBook:
+        clean = suggestion(project_id, domain, token)
+        book = competitor_book(projects, project_id)
+        if any(s.domain == clean and s.status == "added" for s in book.suggestions):
+            raise HTTPException(status_code=409, detail="That website is already in the project.")
+        try:
+            site = projects.add_site(
+                project_id, SiteSpec(name=clean, website=clean, note=_note(clean, book))
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from None
+        return competitors_store(projects).decide(
+            projects.get(project_id), clean, "added", site.site_id
+        )
+
+    @app.post("/api/projects/{project_id}/research/competitors/{domain}/dismiss")
+    def dismiss_competitor(
+        project_id: str, domain: str, token: TokenHeader = None
+    ) -> CompetitorBook:
+        clean = suggestion(project_id, domain, token)
+        return competitors_store(projects).decide(projects.get(project_id), clean, "dismissed")
+
+    @app.post("/api/projects/{project_id}/research/competitors/{domain}/restore")
+    def restore_competitor(
+        project_id: str, domain: str, token: TokenHeader = None
+    ) -> CompetitorBook:
+        clean = suggestion(project_id, domain, token)
+        return competitors_store(projects).decide(projects.get(project_id), clean, "suggested")
 
     @app.get("/api/projects/{project_id}/research/movers")
     def moves(project_id: str) -> list[Mover]:

@@ -1502,7 +1502,12 @@ export const PROJECTS = {
     clientWebsitePlaceholder: 'For example: flynns.com',
     competitors: 'Competitors',
     competitorsHelp:
-      'Optional. Each competitor gets its own address list, scrapes, reports and knowledge, stored separately.',
+      "Who does the client compete with? Name its main competitors: every module compares the client with them. Each competitor gets its own address list, scrapes, reports and knowledge, stored separately. The engine also suggests competitors from the search data later.",
+    noCompetitorsTitle: 'No competitors yet',
+    noCompetitorsText:
+      "Every module compares the client with its competitors. Add the ones you know now, or create the project without them: once search data is added, the Research tab suggests competitors (from Semrush and the search results) for you to add.",
+    addCompetitorNow: 'Add a competitor',
+    createWithout: 'Create without competitors',
     addCompetitor: 'Add a competitor',
     competitorName: 'Competitor name',
     competitorWebsite: 'Website',
@@ -1796,6 +1801,37 @@ export const MONITORING = {
 };
 
 /** Research module: the project's "Research" tab. */
+export const COMPETITORS = {
+  title: 'Suggested competitors',
+  help: 'Websites the search data shows competing with the client: from Semrush (a pull, or an Organic Competitors export) and from the top 10 results of the keywords you pull. They are kept as context for the gap analysis and Claude. Nothing is scraped or paid for until you add one to the project.',
+  empty:
+    "No suggestions yet. Pull from Semrush, or import a Semrush Organic Competitors export (Organic Research, Competitors tab, Export) of the client's website.",
+  importExport: 'Import a competitors export',
+  imported: (n: number) => `${n} suggested ${n === 1 ? 'competitor' : 'competitors'}.`,
+  showDismissed: 'Show dismissed',
+  add: 'Add as competitor',
+  added: (d: string) => `${d} is now a competitor in this project. Add its addresses and scrape it on the project page.`,
+  dismiss: 'Dismiss',
+  restore: 'Suggest again',
+  inProject: 'In the project',
+  columns: {
+    website: 'Website',
+    foundBy: 'Found by',
+    relevance: 'Relevance',
+    common: 'Keywords in common',
+    traffic: 'Their visits / month',
+    top10: 'Top 10 for',
+    action: '',
+  },
+  sources: {
+    semrush_competitors: 'Semrush',
+    competitors_export: 'Semrush export',
+    search_results: 'Search results',
+  } as Record<string, string>,
+  keywordsCount: (n: number) => `${n} ${n === 1 ? 'keyword' : 'keywords'}`,
+  client: (d: string) => `Client: ${d}`,
+};
+
 export const RESEARCH = {
   tab: 'Research',
   intro:
@@ -1877,6 +1913,7 @@ export const GAPS = {
     striking_distance: 'Page two',
     competitor_momentum: 'Competitor momentum',
     offering_gap: 'Missing offering',
+    unwatched_competitor: 'Competitor not in project',
   } as Record<string, string>,
   severity: { high: 'High', medium: 'Medium', low: 'Low' } as Record<string, string>,
   severityColor: { high: 'red', medium: 'orange', low: 'blue' } as Record<string, string>,

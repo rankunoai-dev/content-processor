@@ -53,7 +53,7 @@ def test_catalog_lists_every_built_tool_read_only_with_a_project() -> None:
     names = [d.name for d in defs]
     built = [n for n, s in TOOLS.items() if s.built]
     assert names == ["list_projects", *built, "present_answer", "check_deliverable"]
-    assert len(built) == 16
+    assert len(built) == 17
     for d in defs[1:]:
         assert d.input_schema["required"][0] == "project_id"
         assert d.input_schema["additionalProperties"] is False
@@ -135,7 +135,7 @@ def test_mcp_protocol_end_to_end(themed: World, tmp_path: Path) -> None:
         return [t.name for t in tools.tools], json.loads(text), wrong_text, bool(wrong.is_error)
 
     names, theme, wrong_text, wrong_error = anyio.run(scenario)
-    assert names[0] == "list_projects" and "check_deliverable" in names and len(names) == 19
+    assert names[0] == "list_projects" and "check_deliverable" in names and len(names) == 20
     assert theme["tool"] == "get_theme_map" and theme["data"]
     assert wrong_error and "unknown tool" in wrong_text
 

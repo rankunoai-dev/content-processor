@@ -28,6 +28,7 @@ from collections.abc import Mapping, Sequence
 
 from src.modules.gaps.models import EvidenceItem, Finding, FindingKind
 from src.modules.monitoring.models import MonitorCheck
+from src.modules.research.competitors import CompetitorSuggestion
 from src.modules.research.models import ResearchSnapshot
 from src.modules.theming.models import Theme, ThemeMap
 
@@ -40,6 +41,7 @@ _BASE: dict[FindingKind, int] = {
     "offering_gap": 40,
     "competitor_momentum": 35,
     "striking_distance": 30,
+    "unwatched_competitor": 30,
     "pillar_gap": 25,
     "funnel_gap": 15,
 }
@@ -414,6 +416,55 @@ def _offering_findings(
     return out
 
 
+_CLOSE_RELEVANCE = 0.3
+_CLOSE_COMMON = 50
+_CLOSE_RESULTS = 2
+
+
+def _unwatched_findings(suggested: Sequence[CompetitorSuggestion]) -> list[Finding]:
+    close = [
+        s
+        for s in suggested
+        if s.status == "suggested"
+        and (
+            (s.relevance or 0.0) >= _CLOSE_RELEVANCE
+            or s.common_keywords >= _CLOSE_COMMON
+            or s.search_results >= _CLOSE_RESULTS
+        )
+    ]
+    if not close:
+        return []
+    shared = sum(s.common_keywords for s in close)
+    names = ", ".join(s.domain for s in close[:5]) + (" and others" if len(close) > 5 else "")
+    return [
+        _finding(
+            "unwatched_competitor",
+            "unwatched",
+            title=f"{len(close)} competitor(s) in the search results are not in the project",
+            detail=f"The search data shows {names} competing with the client"
+            + (f" ({shared:,} keywords in common together)" if shared else "")
+            + "; their pages are not scraped, so no gap against them is measured.",
+            action="Review the suggested competitors in the Research tab; add the closest ones "
+            "to the project and scrape them, or dismiss the ones that are not real competitors.",
+            competitors=[s.domain for s in close],
+            demand=0,
+            evidence=[
+                EvidenceItem(
+                    kind="competitor",
+                    label=s.domain
+                    + (f" (relevance {s.relevance:.0%})" if s.relevance is not None else "")
+                    + (f", {s.common_keywords:,} common keywords" if s.common_keywords else "")
+                    + (f", top 10 for {s.search_results} keyword(s)" if s.search_results else ""),
+                    website=s.domain,
+                    url=f"https://{s.domain}/",
+                    value=float(s.common_keywords or s.search_results),
+                )
+                for s in close
+            ],
+        )
+    ]
+
+
 def build_findings(
     theme_map: ThemeMap,
     roles: Mapping[str, str],
@@ -421,6 +472,7 @@ def build_findings(
     research: ResearchSnapshot | None = None,
     check: MonitorCheck | None = None,
     catalogs: Mapping[str, list[tuple[str, str | None]]] | None = None,
+    suggested: Sequence[CompetitorSuggestion] = (),
 ) -> list[Finding]:
     """Every finding, highest priority first."""
     demand = _theme_demand(research)
@@ -431,4 +483,5 @@ def build_findings(
         findings += _momentum_findings(check, theme_map, roles, demand)
     if catalogs:
         findings += _offering_findings(catalogs, roles)
+    findings += _unwatched_findings(suggested)
     return sorted(findings, key=lambda f: (-f.priority, f.kind, f.title))

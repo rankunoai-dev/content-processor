@@ -107,11 +107,18 @@ function CreateProject({ open, onClose, module }: { open: boolean; onClose: () =
   const [form] = Form.useForm<CreateForm>();
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [askCompetitors, setAskCompetitors] = useState(false);
+  const [withoutCompetitors, setWithoutCompetitors] = useState(false);
   const remember = useProjectTokens((s) => s.remember);
   const client = useQueryClient();
   const navigate = useNavigate();
 
   const submit = async (values: CreateForm) => {
+    if (rows(values.competitors).length === 0 && !withoutCompetitors) {
+      setAskCompetitors(true); // ask once: who does the client compete with?
+      return;
+    }
+    setAskCompetitors(false);
     setBusy(true);
     setError(null);
     try {
@@ -128,6 +135,7 @@ function CreateProject({ open, onClose, module }: { open: boolean; onClose: () =
       remember(created.project.project_id, created.token, created.expires_at);
       await client.invalidateQueries({ queryKey: projectKeys.all() });
       form.resetFields();
+      setWithoutCompetitors(false);
       onClose();
       navigate(projectHref(created.project.project_id, module));
     } catch (e) {
@@ -190,6 +198,41 @@ function CreateProject({ open, onClose, module }: { open: boolean; onClose: () =
           nameLabel={PROJECTS.sites.competitorName}
           addLabel={PROJECTS.sites.addCompetitor}
         />
+        {askCompetitors ? (
+          <Alert
+            type="warning"
+            showIcon
+            style={{ marginTop: 12 }}
+            message={PROJECTS.sites.noCompetitorsTitle}
+            description={
+              <Space direction="vertical">
+                <Typography.Text>{PROJECTS.sites.noCompetitorsText}</Typography.Text>
+                <Space wrap>
+                  <Button
+                    type="primary"
+                    icon={<PlusOutlined />}
+                    onClick={() => {
+                      const current = form.getFieldValue('competitors') as CreateForm['competitors'];
+                      form.setFieldValue('competitors', [...(current ?? []), {}]);
+                      setAskCompetitors(false);
+                    }}
+                  >
+                    {PROJECTS.sites.addCompetitorNow}
+                  </Button>
+                  <Button
+                    onClick={() => {
+                      setWithoutCompetitors(true);
+                      setAskCompetitors(false);
+                      setTimeout(() => form.submit(), 0);
+                    }}
+                  >
+                    {PROJECTS.sites.createWithout}
+                  </Button>
+                </Space>
+              </Space>
+            }
+          />
+        ) : null}
         <Divider />
         <Form.Item
           name="password"

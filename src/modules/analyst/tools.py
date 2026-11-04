@@ -966,6 +966,53 @@ def _demand(play: Playground, _args: NoInput) -> dict[str, Any]:
     }
 
 
+def _competitors(play: Playground, _args: NoInput) -> dict[str, Any]:
+    from src.modules.research.competitors import SOURCE_LABELS
+    from src.modules.research.service import competitor_book
+
+    project_id = play.project_ids[0]
+    book = competitor_book(play.store, project_id)
+    rows = []
+    for s in book.suggestions:
+        if s.status == "dismissed":
+            continue
+        figures = [
+            f"relevance {s.relevance:.0%}" if s.relevance is not None else "",
+            f"{s.common_keywords:,} keywords in common" if s.common_keywords else "",
+            f"in the top 10 for {s.search_results} pulled keyword(s)" if s.search_results else "",
+        ]
+        ref = play.ledger.fact(
+            f"competitors\x1f{project_id}\x1f{s.domain}",
+            kind="competitor",
+            website=s.domain,
+            url=f"https://{s.domain}/",
+            project=project_id,
+            title=f"suggested competitor: {s.domain}",
+            text=", ".join(f for f in figures if f) or "seen in the search data",
+        )
+        rows.append(
+            {
+                "ref": ref,
+                "domain": s.domain,
+                "in_project": s.status == "added",
+                "found_by": [SOURCE_LABELS[x] for x in s.sources],
+                "relevance": s.relevance,
+                "common_keywords": s.common_keywords,
+                "organic_keywords": s.organic_keywords,
+                "organic_traffic": s.organic_traffic,
+                "top10_for_pulled_keywords": s.search_results,
+                "example_keywords": s.example_keywords,
+                "last_seen": s.last_seen.date().isoformat(),
+            }
+        )
+    return {
+        "client_domain": book.client_domain,
+        "note": "Websites the search data shows competing with the client. in_project false "
+        "means it is not scraped yet: say so, and do not claim facts about its pages.",
+        "competitors": rows,
+    }
+
+
 def _gaps(play: Playground, args: GapInput) -> dict[str, Any]:
     from src.modules.gaps.service import build_project_gaps, gap_store
 
@@ -1137,6 +1184,15 @@ TOOLS: dict[str, ToolSpec] = {
             "website's keywords in the top 10 and estimated visits.",
             NoInput,
             _demand,
+        ),
+        ToolSpec(
+            "get_competitor_suggestions",
+            "research",
+            "Competitors the search data reveals (Semrush organic competitors, competitors "
+            "exports and the top 10 of pulled keywords): relevance, keywords in common, traffic, "
+            "example keywords, and whether each is already a website of the project.",
+            NoInput,
+            _competitors,
         ),
     )
 }

@@ -86,6 +86,14 @@ def semrush(rival_found: bool = True, calls: list[dict[str, str]] | None = None)
         elif report == "phrase_this":
             body = "Keyword;Search Volume;CPC;Competition;Number of Results\n"
             body += f"{target};22000;12.5;0.9;150000000\n"
+        elif report == "domain_organic_organic":
+            body = (
+                "Domain;Competitor Relevance;Common Keywords;Organic Keywords;Organic Traffic\n"
+                "rival.com;0.61;140;5200;81000\n"
+                "www.bigsure.com;0.44;95;12000;150000\n"
+                "shop.example.com;0.40;80;300;900\n"
+                "smallblog.net;0.05;3;40;20\n"
+            )
         elif report == "phrase_organic":
             body = "Domain;Url\nrival.com;https://www.rival.com/term\nexample.com;https://www.example.com/life/term\n"
         else:
@@ -203,6 +211,7 @@ def test_pull_places_keywords_in_themes_and_sums_demand(themed: World) -> None:
         "domain_organic",
         "phrase_this",
         "phrase_organic",
+        "domain_organic_organic",
     }
     sites = {w.website: w for w in snapshot.websites}
     assert sites["example.com"].role == "client" and sites["rival.com"].role == "competitor"
@@ -219,9 +228,9 @@ def test_pull_places_keywords_in_themes_and_sums_demand(themed: World) -> None:
     assert (
         snapshot.keywords[0].serp[0].domain == "rival.com" and snapshot.keywords[0].volume == 22000
     )
-    assert snapshot.units_spent == sum(
-        10 * n for n in (1, 2, 1, 2, 1, 2)
-    )  # 2 overviews, 2+2 keywords, 1 metric, 2 results
+    assert snapshot.units_spent == sum(10 * n for n in (1, 2, 1, 2, 1, 2)) + 4 * 40
+    # 2 overviews, 2+2 keywords, 1 metric, 2 results, 4 organic competitors
+    assert any("4 organic competitors of example.com" in n for n in snapshot.notes)
     assert Path(files["workbook"]).exists() and snapshot.theme_map_id
     with zipfile.ZipFile(files["workbook"]) as book:
         assert "Theme demand" in book.read("xl/workbook.xml").decode()
@@ -241,7 +250,7 @@ def test_pull_is_refused_without_switch_key_cap_or_room(themed: World) -> None:
     ]:
         with pytest.raises(SemrushError, match=message):
             pull_project(themed.store, themed.access, themed.project_id, settings, http=semrush)
-    assert estimate_units(2, ResearchSettings(keyword_limit=200), 1) == 2 * (10 + 2000) + 110
+    assert estimate_units(2, ResearchSettings(keyword_limit=200), 1) == 2 * (10 + 2000) + 110 + 800
 
 
 def test_import_keeps_other_websites_and_movers_compare_snapshots(themed: World) -> None:
@@ -299,7 +308,7 @@ def test_cli_research(
     assert cli.main(["research", "units", "--app-data", str(themed.root)]) == 0
     assert "unset" in json.loads(capsys.readouterr().out)["monthly_cap"]
     assert cli.main(["research", "estimate", *base, "--keyword", "a"]) == 0
-    assert json.loads(capsys.readouterr().out)["worst_case_units"] == 2 * (10 + 2000) + 110
+    assert json.loads(capsys.readouterr().out)["worst_case_units"] == 2 * (10 + 2000) + 110 + 800
     assert cli.main(["research", "pull", *base]) == 2
     assert "switched off" in capsys.readouterr().err
     assert cli.main(["research", "import", *base]) == 2

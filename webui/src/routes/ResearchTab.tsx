@@ -35,6 +35,7 @@ import {
 } from '../api/research';
 import { QueryState } from '../components/QueryState';
 import { RESEARCH } from '../vocabulary';
+import { SuggestedCompetitors } from './SuggestedCompetitors';
 
 function websitesOf(project: Project) {
   return project.sites
@@ -297,6 +298,7 @@ export function ResearchTab({ project, token }: { project: Project; token: strin
       {token === null ? <Typography.Text type="secondary">{RESEARCH.needsUnlock}</Typography.Text> : null}
       <ImportCard project={project} token={token} />
       <PullCard project={project} token={token} />
+      <SuggestedCompetitors projectId={project.project_id} token={token} />
       <QueryState query={research} rows={6}>
         {(snap) =>
           snap === null ? (

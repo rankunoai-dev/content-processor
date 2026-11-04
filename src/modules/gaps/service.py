@@ -14,7 +14,7 @@ from src.modules.gaps.build import build_findings
 from src.modules.gaps.models import GapReport
 from src.modules.gaps.store import GapStore, write_gap_workbook
 from src.modules.monitoring.service import monitor_store
-from src.modules.research.service import research_store
+from src.modules.research.service import competitor_book, research_store
 from src.modules.theming.service import build_project_themes, theme_store
 
 __all__ = ["build_project_gaps", "gap_store"]
@@ -56,7 +56,12 @@ def build_project_gaps(
     if check is None:
         missing.append("monitoring: no check yet, so competitor momentum is left out")
     findings = build_findings(
-        theme_map, roles, research=research, check=check, catalogs=_catalogs(play)
+        theme_map,
+        roles,
+        research=research,
+        check=check,
+        catalogs=_catalogs(play),
+        suggested=competitor_book(projects, project_id).suggestions,
     )
     store = gap_store(projects)
     statuses = store.statuses(project_id)

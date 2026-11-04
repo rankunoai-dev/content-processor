@@ -215,6 +215,7 @@ function useSaved(projectId: string) {
     client.setQueryData(researchKeys.latest(projectId), snapshot);
     void client.invalidateQueries({ queryKey: researchKeys.movers(projectId) });
     void client.invalidateQueries({ queryKey: researchKeys.status });
+    void client.invalidateQueries({ queryKey: ['research', projectId, 'competitors'] });
   };
 }
 
@@ -232,6 +233,89 @@ export function useImport(projectId: string) {
   return useMutation({
     mutationFn: (args: { website: string; file: File; token: string | null }) =>
       researchApi.importFile(projectId, args.website, args.file, args.token),
+    onSuccess: saved,
+  });
+}
+
+// -- suggested competitors -------------------------------------------------------------------
+
+export type SuggestionSource = 'semrush_competitors' | 'competitors_export' | 'search_results';
+
+export interface CompetitorSuggestion {
+  domain: string;
+  status: 'suggested' | 'added' | 'dismissed';
+  sources: SuggestionSource[];
+  relevance: number | null;
+  common_keywords: number;
+  organic_keywords: number;
+  organic_traffic: number;
+  search_results: number;
+  example_keywords: string[];
+  first_seen: string;
+  last_seen: string;
+  times_seen: number;
+  decided_at: string | null;
+  site_id: string | null;
+}
+
+export interface CompetitorBook {
+  project_id: string;
+  updated_at: string;
+  client_domain: string | null;
+  suggestions: CompetitorSuggestion[];
+}
+
+export const competitorsApi = {
+  book: (projectId: string, signal?: AbortSignal) =>
+    moduleRequest<CompetitorBook>(`${path(projectId)}/competitors`, { signal }),
+  importFile: async (projectId: string, file: File, token: string | null) =>
+    moduleRequest<CompetitorBook>(
+      `${path(projectId)}/competitors/import`,
+      { method: 'POST', body: JSON.stringify({ file_name: file.name, content_base64: await fileBase64(file) }) },
+      token,
+    ),
+  decide: (projectId: string, domain: string, action: 'add' | 'dismiss' | 'restore', token: string | null) =>
+    moduleRequest<CompetitorBook>(
+      `${path(projectId)}/competitors/${enc(domain)}/${action}`,
+      { method: 'POST', body: '{}' },
+      token,
+    ),
+};
+
+export const competitorKeys = {
+  book: (projectId: string) => ['research', projectId, 'competitors'] as const,
+};
+
+export function useCompetitorBook(projectId: string) {
+  return useQuery({
+    queryKey: competitorKeys.book(projectId),
+    queryFn: ({ signal }) => competitorsApi.book(projectId, signal),
+  });
+}
+
+function useBookSaved(projectId: string) {
+  const client = useQueryClient();
+  return (book: CompetitorBook) => {
+    client.setQueryData(competitorKeys.book(projectId), book);
+    // adding a competitor changes the project's websites
+    void client.invalidateQueries({ queryKey: ['projects'] });
+  };
+}
+
+export function useImportCompetitors(projectId: string) {
+  const saved = useBookSaved(projectId);
+  return useMutation({
+    mutationFn: (args: { file: File; token: string | null }) =>
+      competitorsApi.importFile(projectId, args.file, args.token),
+    onSuccess: saved,
+  });
+}
+
+export function useDecideCompetitor(projectId: string) {
+  const saved = useBookSaved(projectId);
+  return useMutation({
+    mutationFn: (args: { domain: string; action: 'add' | 'dismiss' | 'restore'; token: string | null }) =>
+      competitorsApi.decide(projectId, args.domain, args.action, args.token),
     onSuccess: saved,
   });
 }
