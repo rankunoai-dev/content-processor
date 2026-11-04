@@ -8,22 +8,27 @@ nothing is scraped again:
 - `<project>_contradictions_by_topic.{xlsx,csv,jsonl}`: one row per topic stated
   in two or more ways (`analysis.topics`), with sheets for differences by
   condition and for time-bound figures (news and press pages, dated figures).
-- `<project>_duplication.xlsx`: matching content between every pair of pages, the
-  shared text line by line, and the R2 overlap pairs and groups, each row with
-  its website(s), so the same text on two brands shows up too.
+- `<project>_project_report.xlsx`: the page-by-page project report each scrape
+  writes (Pages with whole content, Matching content between pages with the
+  shared text, Shared text by line), for all of the client's websites; with one
+  client website it is that scrape's own workbook, copied.
+- `<project>_duplication.xlsx`: the R2 near-duplicate pairs and groups (80%+),
+  each row with its website(s), so the same text on two brands shows up too.
 - `<project>_competitors.xlsx` (only when asked): each competitor's own
   contradictions and duplicate pages, on separate sheets. A competitor never
   enters the client's contradictions: a competitor saying something else is not
   a contradiction.
 - `manifest.json`: which scrape of which website was used, and the counts.
 
-Bundles live in `<project>/reports/<stamp>/`; every build is kept.
+Bundles live in `<project>/reports/<stamp>/`; every build is kept. Builds run in the
+background (`start_project_reports`), one at a time per project.
 """
 
 from __future__ import annotations
 
 import json
 import re
+import shutil
 import threading
 import zipfile
 from collections.abc import Sequence
@@ -41,8 +46,9 @@ from src.modules.content_processor.analysis.topics import (
     topic_tables,
 )
 from src.modules.content_processor.contracts import UrlRecord
+from src.modules.content_processor.export.bundle import report_file
 from src.modules.content_processor.export.commands import load_records
-from src.modules.content_processor.export.project_report import MATCH_COLUMNS, match_rows
+from src.modules.content_processor.export.project_report import project_report_tables
 from src.modules.content_processor.export.tabular import (
     Cell,
     Table,
@@ -56,17 +62,18 @@ from src.modules.content_processor.projects.store import ProjectStore
 __all__ = [
     "ProjectReport",
     "ReportSource",
+    "BuildStatus",
     "build_project_reports",
+    "build_status",
+    "start_project_reports",
     "project_report_files",
     "project_reports",
     "report_sources",
     "zip_project_report",
 ]
 
-MATCH_MIN_PCT = 50.0
-"""Matching content lists page pairs sharing at least this share of either page's text."""
 PREVIEW_CHARS = 1500
-"""Shared text is shown up to this length per row, so the workbook stays openable."""
+"""Shared spans of a duplicate pair are shown up to this length."""
 _DUP_NOTES: tuple[tuple[str, str], ...] = (
     (
         "Duplicate pages (80%+)",
@@ -76,14 +83,10 @@ _DUP_NOTES: tuple[tuple[str, str], ...] = (
     ),
     ("Duplicate groups (80%+)", "Pages that are all near-copies of one another."),
     (
-        "Matching content (50%+)",
-        "Every pair of pages where at least half of one page's text is also on the other. "
-        "The two percentages are directional: a short page can be 100% inside a long one.",
-    ),
-    (
-        "Shared text",
-        "The text both pages carry, shortened to its first 1,500 characters. The website's "
-        "own report (Reports tab of that website) has the full text and every pair from 10%.",
+        "Matching content, page by page",
+        "In the project report workbook (<project>_project_report.xlsx): every page with its "
+        "whole content, every pair of pages sharing 10% or more of their text with the shared "
+        "text in full, and the shared text line by line.",
     ),
 )
 _STAMP = re.compile(r"^\d{8}-\d{6}(?:-\d+)?$")
@@ -259,19 +262,6 @@ def _duplication_tables(
     across = sum(1 for r in pairs.rows if r["across_websites"] == "yes")
     summary = {**overlap.summary(), "pairs_across_websites": across}
     summary.pop("skipped", None)
-    matches = match_rows(records, min_match_pct=MATCH_MIN_PCT)
-    for row in matches:
-        row["Shared text"] = _preview(str(row.get("Shared text") or ""))
-        a = websites.get(str(row.get("URL (A)", "")), "")
-        b = websites.get(str(row.get("Matching URL (B)", "")), "")
-        row["Websites"] = a if a == b else f"{a} | {b}"
-    matching = Table(
-        name=f"Matching content ({MATCH_MIN_PCT:g}%+)",
-        columns=[*MATCH_COLUMNS, "Websites"],
-        rows=matches,
-        wrap_columns=frozenset({"Shared text"}),
-        widths={"URL (A)": 60, "Matching URL (B)": 60, "Shared text": 100, "Websites": 30},
-    )
     notes = Table(
         name="How to read",
         columns=["Item", "Meaning"],
@@ -279,8 +269,7 @@ def _duplication_tables(
         wrap_columns=frozenset({"Meaning"}),
         widths={"Item": 30, "Meaning": 110},
     )
-    summary["matching_pairs"] = sum(1 for r in matches if r.get("Matching URL (B)"))
-    return [pairs, groups, matching, notes], summary
+    return [pairs, groups, notes], summary
 
 
 def _preview(text: str) -> str:
@@ -327,6 +316,9 @@ def build_project_reports(
         _write_topics(tmp, prefix, topics, used)
         dup_sheets, duplication = _duplication_tables(records, websites)
         write_xlsx(tmp / f"{prefix}_duplication.xlsx", [*dup_sheets, _sources_table(used)])
+        duplication["project_report"] = _write_project_report(
+            tmp / f"{prefix}_project_report.xlsx", clients, records
+        )
 
         competitor_counts: dict[str, object] = {}
         if include_competitors and competitors:
@@ -368,6 +360,23 @@ def build_project_reports(
     return ProjectReport(stamp=stamp, folder=folder, manifest=manifest)
 
 
+def _write_project_report(
+    path: Path, clients: Sequence[ReportSource], records: Sequence[UrlRecord]
+) -> str:
+    """The page-by-page project report (Pages, Matching content, …) for the client's websites.
+
+    With one client website, its scrape already wrote exactly this workbook: it is copied.
+    """
+    if len(clients) == 1 and clients[0].records is not None and clients[0].run_id:
+        reports = clients[0].records.parent / "reports"
+        existing = report_file(reports, clients[0].run_id, "project_report.xlsx")
+        if existing is not None:
+            shutil.copyfile(existing, path)
+            return f"copied from the scrape {clients[0].run_id}"
+    write_xlsx(path, project_report_tables(records))
+    return f"built from {len(clients)} website(s)"
+
+
 def _write_topics(
     folder: Path, prefix: str, topics: TopicResult, used: Sequence[ReportSource]
 ) -> None:
@@ -401,6 +410,75 @@ def _write_topics(
                 }
             )
     write_jsonl(folder / f"{prefix}_contradictions_by_topic.jsonl", rows)
+
+
+@dataclass
+class BuildStatus:
+    """A project's report build that runs, or the last one that failed."""
+
+    building: bool
+    started_at: datetime
+    include_competitors: bool
+    error: str = ""
+
+
+_STATUS: dict[str, BuildStatus] = {}
+
+
+def build_status(project_id: str) -> BuildStatus | None:
+    """The running build, or the last failed one (None when the last build succeeded)."""
+    with _LOCKS_GUARD:
+        return _STATUS.get(project_id)
+
+
+def start_project_reports(
+    store: ProjectStore,
+    project_id: str,
+    *,
+    include_competitors: bool = False,
+    built_by: str = "",
+    wait: bool = False,
+) -> BuildStatus:
+    """Build in the background (large websites take minutes); `wait` builds right away.
+
+    Raises `ValueError` when no client website has a finished scrape or a build runs.
+    """
+    project = store.get(project_id)
+    if not any(s.role == "client" and s.records for s in report_sources(store, project)):
+        msg = "None of the client's websites has a finished scrape yet."
+        raise ValueError(msg)
+    status = BuildStatus(
+        building=True, started_at=datetime.now(UTC), include_competitors=include_competitors
+    )
+    with _LOCKS_GUARD:
+        current = _STATUS.get(project_id)
+        if current is not None and current.building:
+            msg = "A project report is already being built for this project."
+            raise ValueError(msg)
+        _STATUS[project_id] = status
+
+    def run() -> None:
+        try:
+            build_project_reports(
+                store, project_id, include_competitors=include_competitors, built_by=built_by
+            )
+        except Exception as exc:  # noqa: BLE001 - shown to the person who asked
+            with _LOCKS_GUARD:
+                _STATUS[project_id] = BuildStatus(
+                    building=False,
+                    started_at=status.started_at,
+                    include_competitors=include_competitors,
+                    error=f"The report could not be built: {str(exc)[:300]}",
+                )
+            return
+        with _LOCKS_GUARD:
+            _STATUS.pop(project_id, None)
+
+    if wait:
+        run()
+    else:
+        threading.Thread(target=run, name=f"project-reports-{project_id}", daemon=True).start()
+    return status
 
 
 def project_reports(store: ProjectStore, project_id: str) -> list[ProjectReport]:

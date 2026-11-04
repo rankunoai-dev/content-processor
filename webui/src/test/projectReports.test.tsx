@@ -40,6 +40,7 @@ const built: ProjectReport = {
   websites: [sources[0]!],
   files: [
     { name: 'Insurer_audit_duplication.xlsx', size: 2048, modified_at: '2026-11-03T11:00:00Z' },
+    { name: 'Insurer_audit_project_report.xlsx', size: 8192, modified_at: '2026-11-03T11:00:00Z' },
     { name: 'Insurer_audit_contradictions_by_topic.xlsx', size: 4096, modified_at: '2026-11-03T11:00:00Z' },
   ],
 };
@@ -59,7 +60,10 @@ function fakeServer(reports: { current: ProjectReports }) {
       if (url.pathname === '/api/projects/ins-1/reports') {
         if (method === 'POST') {
           sent.push({ path: url.pathname, body });
-          reports.current = { sources, reports: [built] };
+          // Building runs in the background: the answer says so, the next look shows the report.
+          [status, payload] = [200, { ...reports.current, building: true, building_since: '2026-11-04T09:00:00Z' }];
+          reports.current = { sources, reports: [built], building: false, building_since: null, last_error: '' };
+          return new Response(JSON.stringify(payload), { status, headers: { 'Content-Type': 'application/json' } });
         }
         [status, payload] = [200, reports.current];
       }
@@ -78,7 +82,7 @@ afterEach(() => vi.unstubAllGlobals());
 
 describe('project reports', () => {
   it('lists the websites used, builds the report and offers the downloads', async () => {
-    const sent = fakeServer({ current: { sources, reports: [] } });
+    const sent = fakeServer({ current: { sources, reports: [], building: false, building_since: null, last_error: '' } });
     useProjectTokens.getState().remember('ins-1', 'tok', '2099-01-01T00:00:00Z');
     const user = userEvent.setup({ pointerEventsCheck: PointerEventsCheckLevel.Never });
     renderApp('/projects/ins-1?tab=project-reports');
@@ -93,13 +97,15 @@ describe('project reports', () => {
     await waitFor(() => expect(sent).toHaveLength(1));
     expect(sent[0]?.body).toEqual({ include_competitors: true });
 
-    expect(await screen.findByText('Latest report')).toBeInTheDocument();
+    expect(await screen.findByText(/Large websites take a few minutes/)).toBeInTheDocument();
+    expect(await screen.findByText('Latest report', {}, { timeout: 10_000 })).toBeInTheDocument();
     expect(screen.getByText('Topics stated differently')).toBeInTheDocument();
     expect(screen.getByText('2 of them High severity')).toBeInTheDocument();
     expect(screen.getByText('1 across websites')).toBeInTheDocument();
     const rows = screen.getAllByText(/\(Excel\)/).map((n) => n.textContent ?? '');
     expect(rows[0]).toMatch(/^Contradictions by topic/);
-    expect(rows[1]).toMatch(/^Duplication/);
+    expect(rows[1]).toMatch(/^Project report \(Excel\): every page with its whole content/);
+    expect(rows[2]).toMatch(/^Duplication/);
     const zip = screen.getByText('Download all (zip)').closest('a');
     expect(zip?.getAttribute('href')).toBe('/api/projects/ins-1/reports/20261103-110000/downloads.zip');
   }, 120_000);

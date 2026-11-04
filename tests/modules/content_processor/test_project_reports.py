@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import io
 import json
+import time
 import zipfile
 from datetime import UTC, datetime
 from pathlib import Path
@@ -30,9 +31,11 @@ from src.modules.content_processor.contracts import UrlRecord
 from src.modules.content_processor.projects.models import RunState
 from src.modules.content_processor.projects.project_reports import (
     build_project_reports,
+    build_status,
     project_report_files,
     project_reports,
     report_sources,
+    start_project_reports,
     zip_project_report,
 )
 from src.modules.content_processor.projects.runner import ScrapeRunner
@@ -330,6 +333,7 @@ def test_project_bundle_reads_the_client_websites_only(tmp_path: Path):
         "Insurer_audit_contradictions_by_topic.jsonl",
         "Insurer_audit_contradictions_by_topic.xlsx",
         "Insurer_audit_duplication.xlsx",
+        "Insurer_audit_project_report.xlsx",
         "manifest.json",
     ], "no competitor workbook unless asked"
     m = report.manifest
@@ -348,8 +352,15 @@ def test_project_bundle_reads_the_client_websites_only(tmp_path: Path):
     assert _sheets(files["Insurer_audit_duplication.xlsx"])[:3] == [
         "Duplicate pages (80%+)",
         "Duplicate groups (80%+)",
-        "Matching content (50%+)",
+        "How to read",
     ]
+    assert _sheets(files["Insurer_audit_project_report.xlsx"]) == [
+        "Pages",
+        "Matching content",
+        "Shared text by line",
+        "How to read",
+    ], "the same page-by-page report as each website's scrape writes"
+    assert m["duplication"]["project_report"] == "built from 2 website(s)"
     rows = [
         json.loads(line)
         for line in files["Insurer_audit_contradictions_by_topic.jsonl"]
@@ -419,10 +430,19 @@ def test_the_app_builds_and_serves_project_reports(client: tuple[TestClient, Pro
     assert refused.status_code == 409 and "finished scrape" in refused.json()["detail"]
 
     _scraped(store, project_id)
-    built = c.post(
+    started = c.post(
         f"/api/projects/{project_id}/reports", json={"include_competitors": False}, headers=unlocked
     )
-    assert built.status_code == 200, built.text
+    assert started.status_code == 200, started.text
+    assert started.json()["building"] is True, (
+        "large websites take minutes: built in the background"
+    )
+    deadline = time.monotonic() + 60
+    built = c.get(f"/api/projects/{project_id}/reports")
+    while built.json()["building"] and time.monotonic() < deadline:
+        time.sleep(0.2)
+        built = c.get(f"/api/projects/{project_id}/reports")
+    assert not built.json()["building"] and built.json()["last_error"] == ""
     report = built.json()["reports"][0]
     assert report["contradictions"] == 1 and report["contradictions_high"] == 1
     assert report["duplicate_pairs_across_websites"] == 1
@@ -460,3 +480,62 @@ def test_topic_rows_keep_extra_versions():
     assert row["Value A"] == "7–10 business days"
     rest = f"{row['Value B']} {row['Other versions']}"
     assert "30 days" in rest and "60 days" in rest and "claims/" in str(row["Other versions"])
+
+
+def test_one_client_website_reuses_its_scrape_project_report(tmp_path: Path):
+    store = ProjectStore(tmp_path)
+    project_id = store.create(
+        name="Solo",
+        owner_name="G",
+        client_name="Insurer",
+        password=PASSWORD,
+        client_site=SiteSpec("Insurer", "https://www.insurer.com"),
+    ).project_id
+    _finish(store, project_id, "insurer", death_claim_pages(), "run-9")
+    reports = store.run_dir(project_id, "insurer", "run-9") / "reports"
+    reports.mkdir()
+    (reports / "run-9_project_report.xlsx").write_bytes(b"PK the scrape's own workbook")
+
+    report = build_project_reports(store, project_id)
+
+    copied = project_report_files(store, project_id, report.stamp)["Solo_project_report.xlsx"]
+    assert copied.read_bytes() == b"PK the scrape's own workbook"
+    assert report.manifest["duplication"]["project_report"] == "copied from the scrape run-9"
+
+
+def test_builds_run_in_the_background_one_at_a_time(tmp_path: Path):
+    store = ProjectStore(tmp_path)
+    project_id = _project(store)
+    with pytest.raises(ValueError, match="finished scrape"):
+        start_project_reports(store, project_id)
+    _scraped(store, project_id)
+
+    status = start_project_reports(store, project_id, wait=True)
+    assert status.include_competitors is False
+    assert build_status(project_id) is None, "a finished build leaves no status behind"
+    assert len(project_reports(store, project_id)) == 1
+
+    from src.modules.content_processor.projects import project_reports as module
+
+    module._STATUS[project_id] = module.BuildStatus(
+        building=True, started_at=datetime.now(UTC), include_competitors=False
+    )
+    try:
+        with pytest.raises(ValueError, match="already being built"):
+            start_project_reports(store, project_id)
+    finally:
+        module._STATUS.pop(project_id, None)
+
+    def broken(*_a: object, **_k: object) -> None:
+        raise OSError("disk full")
+
+    original = module.build_project_reports
+    module.build_project_reports = broken  # type: ignore[assignment]
+    try:
+        start_project_reports(store, project_id, wait=True)
+    finally:
+        module.build_project_reports = original
+    failed = build_status(project_id)
+    assert failed is not None and not failed.building
+    assert failed.error == "The report could not be built: disk full"
+    module._STATUS.pop(project_id, None)

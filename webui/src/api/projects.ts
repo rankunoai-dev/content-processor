@@ -162,6 +162,11 @@ export interface ProjectReport {
 export interface ProjectReports {
   sources: ReportSource[];
   reports: ProjectReport[];
+  /** A build runs in the background (large websites take minutes). */
+  building: boolean;
+  building_since: string | null;
+  /** Why the last build failed ('' when it did not). */
+  last_error: string;
 }
 
 export interface ReportFile {
@@ -513,6 +518,7 @@ export function useProjectReports(id: string) {
   return useQuery({
     queryKey: projectKeys.projectReports(id),
     queryFn: ({ signal }) => projectsApi.projectReports(id, signal),
+    refetchInterval: (q) => (q.state.data?.building ? POLL_MS : false),
   });
 }
 

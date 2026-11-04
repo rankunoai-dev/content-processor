@@ -46,10 +46,11 @@ from src.modules.content_processor.projects.models import (
 )
 from src.modules.content_processor.projects.project_reports import (
     ProjectReport,
-    build_project_reports,
+    build_status,
     project_report_files,
     project_reports,
     report_sources,
+    start_project_reports,
     zip_project_report,
 )
 from src.modules.content_processor.projects.runner import QueueEntry, ScrapeRunner
@@ -286,6 +287,7 @@ class ProjectReportsIn(StrictModel):
     """What to put in a project report."""
 
     include_competitors: bool = False
+    wait: bool = Field(default=False, description="build before answering (tests, scripts)")
 
 
 class ReportSourceOut(StrictModel):
@@ -323,6 +325,9 @@ class ProjectReportsOut(StrictModel):
 
     sources: list[ReportSourceOut]
     reports: list[ProjectReportOut]
+    building: bool = False
+    building_since: datetime | None = None
+    last_error: str = ""
 
 
 def _report_out(report: ProjectReport, files: dict[str, Path]) -> ProjectReportOut:
@@ -820,7 +825,11 @@ def register_project_routes(
 
     def reports_out(project_id: str) -> ProjectReportsOut:
         record = project(project_id)
+        status = build_status(project_id)
         return ProjectReportsOut(
+            building=bool(status and status.building),
+            building_since=status.started_at if status and status.building else None,
+            last_error=status.error if status else "",
             sources=[
                 ReportSourceOut.model_validate(s.as_dict()) for s in report_sources(store, record)
             ],
@@ -841,11 +850,12 @@ def register_project_routes(
         record = require_token(project_id, token)
         how = body or ProjectReportsIn()
         try:
-            build_project_reports(
+            start_project_reports(
                 store,
                 project_id,
                 include_competitors=how.include_competitors,
                 built_by=record.owner_name,
+                wait=how.wait,
             )
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from None

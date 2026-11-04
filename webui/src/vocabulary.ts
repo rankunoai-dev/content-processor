@@ -1304,8 +1304,11 @@ export const PROJECT_REPORTS = {
   includeCompetitors: 'Include competitors (separate workbook)',
   build: 'Build project report',
   building: 'Building the report…',
+  buildingNote: (since: string) =>
+    `Building since ${since}. Large websites take a few minutes; you can leave this page and come back.`,
+  failed: 'The last build failed',
   needScrape: 'Scrape at least one of the client’s websites first.',
-  built: 'Project report built.',
+  built: 'Building the project report…',
   latest: 'Latest report',
   older: 'Earlier reports',
   builtOn: (when: string) => `Built ${when}`,
@@ -1323,7 +1326,9 @@ export const PROJECT_REPORTS = {
     contradictions_by_topic_xlsx: 'Contradictions by topic (Excel): Topic, Version A and B, where each appears, severity, recommended action, approved answer',
     contradictions_by_topic_csv: 'Contradictions by topic (CSV, main sheet only)',
     contradictions_by_topic_jsonl: 'Contradictions by topic, every version and place (JSONL, for tools)',
-    duplication_xlsx: 'Duplication (Excel): near-duplicate pages and groups, and page pairs sharing half their text or more, with the websites they are on',
+    project_report_xlsx:
+      'Project report (Excel): every page with its whole content, and matching content between pages with the shared text (the same report each scrape writes, for all the client’s websites)',
+    duplication_xlsx: 'Duplication (Excel): near-duplicate pages (80%+) and groups, with the website of each page',
     competitors_xlsx: 'Competitors (Excel): each competitor’s own contradictions and duplicate pages',
     manifest_json: 'What was used and the counts (JSON)',
   } as Record<string, string>,

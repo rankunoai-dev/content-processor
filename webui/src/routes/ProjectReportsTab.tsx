@@ -42,7 +42,13 @@ function bytes(n: number): string {
   return `${(n / 1024 / 1024).toFixed(1)} MB`;
 }
 
-const FILE_ORDER = ['contradictions_by_topic.xlsx', 'duplication.xlsx', 'competitors.xlsx', 'contradictions_by_topic.csv'];
+const FILE_ORDER = [
+  'contradictions_by_topic.xlsx',
+  'project_report.xlsx',
+  'duplication.xlsx',
+  'competitors.xlsx',
+  'contradictions_by_topic.csv',
+];
 
 function rank(name: string): number {
   const i = FILE_ORDER.findIndex((end) => name.endsWith(end));
@@ -177,7 +183,7 @@ export function ProjectReportsTab({ project, token }: { project: Project; token:
     try {
       const fresh = await projectsApi.buildProjectReports(id, withCompetitors, token);
       client.setQueryData(projectKeys.projectReports(id), fresh);
-      void message.success(PROJECT_REPORTS.built);
+      void message.info(PROJECT_REPORTS.built);
     } catch (e) {
       void message.error(e instanceof Error ? e.message : String(e));
     } finally {
@@ -191,15 +197,16 @@ export function ProjectReportsTab({ project, token }: { project: Project; token:
         const clientReady = data.sources.some((s) => s.role === 'client' && s.run_id);
         const hasCompetitors = data.sources.some((s) => s.role === 'competitor');
         const [latest, ...older] = data.reports;
+        const running = busy || data.building;
         const button = (
           <Button
             type="primary"
             icon={<FileSearchOutlined />}
-            loading={busy}
-            disabled={token === null || !clientReady}
+            loading={running}
+            disabled={token === null || !clientReady || running}
             onClick={() => void build()}
           >
-            {busy ? PROJECT_REPORTS.building : PROJECT_REPORTS.build}
+            {running ? PROJECT_REPORTS.building : PROJECT_REPORTS.build}
           </Button>
         );
         return (
@@ -212,6 +219,17 @@ export function ProjectReportsTab({ project, token }: { project: Project; token:
                 </Typography.Paragraph>
                 <Sources sources={data.sources} />
                 {!clientReady ? <Alert type="info" showIcon message={PROJECT_REPORTS.needScrape} /> : null}
+                {data.building ? (
+                  <Alert
+                    type="info"
+                    showIcon
+                    message={PROJECT_REPORTS.building}
+                    description={PROJECT_REPORTS.buildingNote(formatDate(data.building_since, true))}
+                  />
+                ) : null}
+                {!data.building && data.last_error ? (
+                  <Alert type="error" showIcon message={PROJECT_REPORTS.failed} description={data.last_error} />
+                ) : null}
                 <Space wrap>
                   {hasCompetitors ? (
                     <Tooltip title={PROJECT_REPORTS.competitorNote}>
