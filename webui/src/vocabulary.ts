@@ -1749,6 +1749,53 @@ export const THEMES = {
 };
 
 /** Monitoring module: the project's "Monitoring" tab. */
+export const RECRAWL = {
+  title: 'Recrawl plan',
+  help: "Which pages a scheduled re-scrape checks and which it carries forward. Core pages (pillar pages, header-menu pages, comparison pages, addresses naming pricing, plans, solutions or products, the home page and pages one level from it, and pages you pin) are checked on every pass; other pages once their last check is older than the setting below, or as soon as the website's sitemap shows a newer change. A page carried forward gets no request at all; checked pages still get a conditional request, so an unchanged page is never extracted again.",
+  empty: 'No plan yet. Preview one to see what the next pass would check (it reads the websites\' sitemaps only).',
+  preview: 'Preview the plan',
+  previewHelp: 'Reads each website\'s sitemap; nothing is scraped.',
+  now: 'Recrawl now',
+  nowHelp: 'Makes the plan and queues a scrape per website with what is due.',
+  previewed: 'Plan ready.',
+  queued: (n: number) => `${n} ${n === 1 ? 'scrape' : 'scrapes'} queued.`,
+  made: (when: string, trigger: string) =>
+    `Plan of ${when} (${trigger === 'preview' ? 'preview' : trigger === 'scheduled' ? 'scheduled pass' : 'started by hand'})`,
+  columns: {
+    website: 'Website',
+    core: 'Core pages',
+    check: 'To check',
+    skip: 'Carried forward',
+    sitemap: 'Sitemap',
+    scrape: 'Scrape',
+    page: 'Page',
+    tier: 'Tier',
+    action: 'Action',
+    why: 'Why',
+  },
+  tier: { core: 'Core', other: 'Other' } as Record<string, string>,
+  action: { check: 'Check', skip: 'Carry forward' } as Record<string, string>,
+  sitemapSummary: (files: number, dates: number) =>
+    files === 0 ? '' : `${files} ${files === 1 ? 'file' : 'files'}, ${dates.toLocaleString()} dated pages`,
+  queuedRun: 'Queued',
+  smart: 'Smart recrawl',
+  smartHelp: 'On: scheduled passes follow the plan. Off: every page is requested on every pass.',
+  otherEvery: 'Check other pages every',
+  sitemaps: 'Use sitemap dates',
+  sitemapsHelp: "Read each website's sitemap to skip pages it shows unchanged and to check pages it shows changed sooner.",
+  words: (before: number, after: number) =>
+    `${before.toLocaleString()} → ${after.toLocaleString()} words (${after - before >= 0 ? '+' : ''}${(after - before).toLocaleString()})`,
+  headingsAdded: 'New headings',
+  headingsRemoved: 'Headings gone',
+  newTerms: 'New terms',
+  droppedTerms: 'Dropped terms',
+  blocks: (added: Record<string, number>, removed: Record<string, number>) =>
+    [
+      ...Object.entries(added).map(([k, n]) => `+${n} ${k}`),
+      ...Object.entries(removed).map(([k, n]) => `−${n} ${k}`),
+    ].join(', '),
+};
+
 export const MONITORING = {
   tab: 'Monitoring',
   intro:

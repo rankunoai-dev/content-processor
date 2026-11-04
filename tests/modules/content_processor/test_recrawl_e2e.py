@@ -221,3 +221,21 @@ async def test_url_history_sees_a_changed_page_and_re_extracts(tmp_path: Path):
     assert second.change_status is ChangeStatus.CHANGED
     assert _render_tasks(ledger) == 1
     assert scrape_action(second).startswith("Re-scraped (updated: ")
+
+
+async def test_planned_skip_sends_no_request_and_keeps_the_capture_time(tmp_path: Path):
+    """A page the recrawl plan says is not due is carried forward without any request."""
+    _, first, _ = await _run(tmp_path / "a", "run-1", None)
+    server.FRESH_PAGE.update(text="Changed, but the plan says this page is not due.")
+    baseline = Baseline([first])
+    baseline.plan_skips([URL.replace("http://", "HTTP://")], "sitemap: not changed")
+    ledger, second, sent = await _run(tmp_path / "b", "run-2", baseline)
+    assert sent == [], "no request at all for a skipped page"
+    assert second.change_status is ChangeStatus.UNCHANGED
+    assert second.change_basis == "planned_skip;sitemap: not changed"
+    assert second.captured_at == first.captured_at, "the age of the capture is kept"
+    assert second.reused_from_run_id == "run-1" and _render_tasks(ledger) == 0
+    assert (second.resource_status_reason or "").startswith("unchanged:planned_skip")
+    other = Baseline([first])
+    other.plan_skips(["http://127.0.0.1:8765/elsewhere"])
+    assert not other.planned_skip(URL) and other.planned_skip("http://127.0.0.1:8765/elsewhere")

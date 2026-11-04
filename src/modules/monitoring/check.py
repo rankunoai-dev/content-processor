@@ -25,6 +25,7 @@ from src.modules.monitoring.models import (
     Alert,
     AlertKind,
     MonitorCheck,
+    PageChange,
     PageRef,
     Severity,
     SiteDiff,
@@ -38,6 +39,8 @@ __all__ = ["PILLAR_DRIFT", "run_check"]
 
 PILLAR_DRIFT = 0.3
 _REWRITE_ALERT = 1
+GROWTH_WORDS = 500
+SHIFT_HEADINGS = 2
 _CLIENT_SIDE = {"client_owned", "contested", "competitor_led", "client_only"}
 _RANK = {"client_only": 4, "client_owned": 3, "contested": 2, "competitor_led": 1, "client_gap": 0}
 _SEVERITY_ORDER = {"high": 0, "medium": 1, "low": 2, "info": 3}
@@ -225,6 +228,79 @@ def _drift(current: ThemeMap, before: ThemeMap | None, diffs: list[SiteDiff]) ->
     return out
 
 
+def _page_name(change: PageChange) -> str:
+    return change.title or change.url
+
+
+def _competitor_moves(d: SiteDiff) -> list[Alert]:
+    """Pages a competitor grew, re-headed toward new terms, or gave new tables or prices."""
+    out: list[Alert] = []
+    grown = [c for c in d.changed_pages if c.words_delta >= GROWTH_WORDS]
+    if grown:
+        out.append(
+            _alert(
+                "competitor_content_growth",
+                "high" if any(c.is_pillar for c in grown) else "medium",
+                d.website,
+                f"{d.name} expanded {len(grown)} page(s) by {GROWTH_WORDS}+ words",
+                "; ".join(
+                    f"{_page_name(c)}: {c.words_before:,} → {c.words_after:,} words "
+                    f"(+{c.words_delta:,})"
+                    for c in sorted(grown, key=lambda c: -c.words_delta)
+                )[:700],
+                urls=[c.url for c in grown],
+            )
+        )
+    shifted = [
+        c
+        for c in d.changed_pages
+        if c.new_terms
+        and (
+            len(c.headings_added) + len(c.headings_removed) >= SHIFT_HEADINGS
+            or "h1" in c.head_changes
+        )
+    ]
+    if shifted:
+        out.append(
+            _alert(
+                "competitor_messaging_shift",
+                "high" if any(c.is_pillar for c in shifted) else "medium",
+                d.website,
+                f"{d.name} changed the headings of {len(shifted)} page(s) toward new terms",
+                "; ".join(
+                    f"{_page_name(c)}: added {', '.join(c.new_terms[:8])}"
+                    + (f"; dropped {', '.join(c.dropped_terms[:6])}" if c.dropped_terms else "")
+                    for c in shifted
+                )[:700],
+                urls=[c.url for c in shifted],
+            )
+        )
+    tabled = [
+        c
+        for c in d.changed_pages
+        if c.blocks_added.get("tables") or c.blocks_added.get("pricing blocks")
+    ]
+    if tabled:
+        priced = any(c.blocks_added.get("pricing blocks") for c in tabled)
+        out.append(
+            _alert(
+                "competitor_new_tables",
+                "high" if priced else "medium",
+                d.website,
+                f"{d.name} added "
+                + ("pricing or comparison blocks" if priced else "comparison tables")
+                + f" on {len(tabled)} page(s)",
+                "; ".join(
+                    f"{_page_name(c)}: "
+                    + ", ".join(f"+{n} {k}" for k, n in sorted(c.blocks_added.items()))
+                    for c in tabled
+                )[:700],
+                urls=[c.url for c in tabled],
+            )
+        )
+    return out
+
+
 def _alerts(
     diffs: list[SiteDiff], drift: list[ThemeDrift], current: ThemeMap, push_threshold: int
 ) -> list[Alert]:
@@ -326,6 +402,8 @@ def _alerts(
                     urls=[c.url for c in rewrites],
                 )
             )
+        if d.role == "competitor":
+            alerts += _competitor_moves(d)
         drifted = [c for c in d.changed_pages if c.is_pillar and c.drift >= PILLAR_DRIFT]
         if drifted:
             alerts.append(

@@ -50,6 +50,10 @@ class Baseline:
         self._by_key: dict[str, UrlRecord] = {}
         self.skipped = 0
         self.reuse_since = reuse_since
+        # Pages a recrawl plan says are not due: their previous capture is carried
+        # forward without any request (see `planned_skip`).
+        self.skip_fetch: frozenset[str] = frozenset()
+        self.skip_reason = "not due in the recrawl plan"
         for record in records:
             if not self.reusable(record):
                 self.skipped += 1
@@ -78,6 +82,20 @@ class Baseline:
             if line.strip()
         ]
         return cls(records)
+
+    def plan_skips(self, urls: Iterable[str], reason: str | None = None) -> None:
+        """Mark pages the recrawl plan says are not due (by their normalized key)."""
+        self.skip_fetch = frozenset(k for k in (url_key(u) for u in urls) if k)
+        if reason:
+            self.skip_reason = reason
+
+    def planned_skip(self, *urls: str | None) -> bool:
+        """True when the recrawl plan says one of these addresses need not be fetched."""
+        if not self.skip_fetch:
+            return False
+        return any(
+            (url in self.skip_fetch) or (url_key(url) in self.skip_fetch) for url in urls if url
+        )
 
     def reuse_allowed(self, prior: UrlRecord) -> bool:
         """Whether a matching capture may be reused as is (it is recent enough)."""

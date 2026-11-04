@@ -1,7 +1,7 @@
 import { act, screen, waitFor, within } from '@testing-library/react';
 import userEvent, { PointerEventsCheckLevel } from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { MonitorCheck, WatchSettings } from '../api/monitoring';
+import type { MonitorCheck, RecrawlPlan, WatchSettings } from '../api/monitoring';
 import { useProjectTokens, type Project } from '../api/projects';
 import { renderApp } from './utils';
 
@@ -48,6 +48,14 @@ const check: MonitorCheck = {
           prices: [{ before: '$25 per month', after: '$19 per month', context: 'plans start at … today' }],
           new_numbers: [],
           is_pillar: true,
+          words_before: 800,
+          words_after: 2000,
+          headings_added: ['AI-Powered RFP Evaluation', 'Generative AI Supplier Matching'],
+          headings_removed: ['Streamline your RFP processes'],
+          new_terms: ['Generative', 'AI'],
+          dropped_terms: ['Streamline'],
+          blocks_added: { 'pricing blocks': 1, tables: 1 },
+          blocks_removed: {},
         },
       ],
       unchanged_pages: 4,
@@ -87,6 +95,11 @@ const watch: WatchSettings = {
   auto_check: true,
   rescrape_every_days: 0,
   push_threshold: 3,
+  smart_recrawl: true,
+  other_every_days: 30,
+  use_sitemaps: true,
+  core_urls: [],
+  core_limit: 50,
   last_rescrape_at: null,
   last_auto_check_at: null,
 };
@@ -126,6 +139,79 @@ const TIMEOUT = 120_000;
 beforeEach(() => useProjectTokens.setState({ tokens: {} }));
 afterEach(() => vi.unstubAllGlobals());
 
+const plan: RecrawlPlan = {
+  plan_id: 'recrawl-20261104-120000-000',
+  project_id: 'p1',
+  created_at: '2026-11-04T12:00:00Z',
+  trigger: 'preview',
+  core_every_days: 7,
+  other_every_days: 30,
+  sites: [
+    {
+      site_id: 'xerox',
+      name: 'Xerox',
+      role: 'competitor',
+      website: 'xerox.com',
+      baseline_run: 'r2',
+      sitemap_files: ['https://www.xerox.com/sitemap.xml'],
+      sitemap_addresses: 40,
+      sitemap_dates: 38,
+      sitemap_note: '',
+      core: 1,
+      check: 2,
+      skip: 1,
+      run_id: null,
+      note: '',
+      pages: [
+        { url: 'https://www.xerox.com/pricing', tier: 'core', action: 'check', reason: 'core page (address names pricing)', sitemap_lastmod: null, last_captured: null },
+        { url: 'https://www.xerox.com/blog/a', tier: 'other', action: 'check', reason: 'sitemap shows a change on 3 Nov 2026', sitemap_lastmod: null, last_captured: null },
+        { url: 'https://www.xerox.com/blog/b', tier: 'other', action: 'skip', reason: 'sitemap: unchanged since the last capture', sitemap_lastmod: null, last_captured: null },
+      ],
+    },
+  ],
+};
+
+describe('recrawl plan', () => {
+  it(
+    'previews the plan once unlocked, explains each page, and recrawls on request',
+    async () => {
+      let made: RecrawlPlan | null = null;
+      const sent = fakeServer({
+        ...base,
+        'GET /api/projects/p1/monitoring': () => [200, check],
+        'GET /api/projects/p1/monitoring/recrawl': () =>
+          made ? [200, made] : [404, { detail: 'No recrawl plan has been made yet.' }],
+        'POST /api/projects/p1/monitoring/recrawl': (body) => {
+          const queue = (body as { queue: boolean }).queue;
+          made = queue
+            ? { ...plan, trigger: 'manual', sites: plan.sites.map((x) => ({ ...x, run_id: 'xerox_1' })) }
+            : plan;
+          return [200, made];
+        },
+      });
+      const user = userEvent.setup({ pointerEventsCheck: PointerEventsCheckLevel.Never });
+      renderApp('/projects/p1?tab=monitoring');
+      expect(await screen.findByText(/No plan yet/, {}, FIRST_PAINT)).toBeInTheDocument();
+      const preview = () => screen.getByText('Preview the plan').closest('button') as HTMLElement;
+      expect(preview()).toBeDisabled();
+      act(() => useProjectTokens.getState().remember('p1', 'tok-1', '2099-01-01T00:00:00Z'));
+      await waitFor(() => expect(preview()).not.toBeDisabled());
+      await user.click(preview());
+      expect(await screen.findByText('1 file, 38 dated pages')).toBeInTheDocument();
+      expect(sent[0]?.body).toEqual({ queue: false });
+      const card = screen.getByText('Recrawl plan').closest('.ant-card') as HTMLElement;
+      const row = within(card).getByText('Xerox').closest('tr') as HTMLElement;
+      await user.click(within(row).getByRole('button'));
+      expect(await within(card).findByText('sitemap: unchanged since the last capture')).toBeInTheDocument();
+      expect(within(card).getByText('Carry forward')).toBeInTheDocument();
+      await user.click(within(card).getByText('Recrawl now').closest('button') as HTMLElement);
+      expect(await within(card).findByText('Queued')).toBeInTheDocument();
+      expect(sent[1]?.body).toEqual({ queue: true });
+    },
+    TIMEOUT,
+  );
+});
+
 describe('monitoring tab', () => {
   it(
     'runs a first check once unlocked and shows alerts, changes and theme drift',
@@ -158,6 +244,13 @@ describe('monitoring tab', () => {
       expect(await screen.findByText(/\$25 per month → \$19 per month \(plans start/)).toBeInTheDocument();
       expect(screen.getByText('pillar')).toBeInTheDocument();
       expect(screen.getByText(/“Read more” \(\+5 \/ −0\)/)).toBeInTheDocument();
+      // what the rewrite did: words, headings, new terms, new blocks
+      expect(
+        screen.getByText(`${(800).toLocaleString()} → ${(2000).toLocaleString()} words (+${(1200).toLocaleString()})`),
+      ).toBeInTheDocument();
+      expect(screen.getByText(/New headings: AI-Powered RFP Evaluation · Generative AI Supplier Matching/)).toBeInTheDocument();
+      expect(screen.getByText('Generative')).toBeInTheDocument();
+      expect(screen.getByText('+1 pricing blocks, +1 tables')).toBeInTheDocument();
     },
     TIMEOUT,
   );
@@ -179,7 +272,14 @@ describe('monitoring tab', () => {
       await user.click(screen.getByLabelText('Check automatically after each new scrape'));
       await user.click(screen.getByText('Save').closest('button') as HTMLElement);
       await waitFor(() => expect(sent).toHaveLength(1));
-      expect(sent[0]?.body).toEqual({ auto_check: false, rescrape_every_days: 0, push_threshold: 3 });
+      expect(sent[0]?.body).toEqual({
+        auto_check: false,
+        rescrape_every_days: 0,
+        push_threshold: 3,
+        smart_recrawl: true,
+        other_every_days: 30,
+        use_sitemaps: true,
+      });
       expect(screen.getByText(/contacts the client’s and competitors’ websites/)).toBeInTheDocument();
     },
     TIMEOUT,

@@ -34,6 +34,14 @@ export interface PageChange {
   prices: PriceChange[];
   new_numbers: string[];
   is_pillar: boolean;
+  words_before: number;
+  words_after: number;
+  headings_added: string[];
+  headings_removed: string[];
+  new_terms: string[];
+  dropped_terms: string[];
+  blocks_added: Record<string, number>;
+  blocks_removed: Record<string, number>;
 }
 
 export interface TemplateChange {
@@ -97,8 +105,53 @@ export interface WatchSettings {
   auto_check: boolean;
   rescrape_every_days: number;
   push_threshold: number;
+  smart_recrawl: boolean;
+  other_every_days: number;
+  use_sitemaps: boolean;
+  core_urls: string[];
+  core_limit: number;
   last_rescrape_at: string | null;
   last_auto_check_at: string | null;
+}
+
+export type WatchBody = Pick<WatchSettings, 'auto_check' | 'rescrape_every_days' | 'push_threshold'> &
+  Partial<Pick<WatchSettings, 'smart_recrawl' | 'other_every_days' | 'use_sitemaps'>>;
+
+export interface PageDecision {
+  url: string;
+  tier: 'core' | 'other';
+  action: 'check' | 'skip';
+  reason: string;
+  sitemap_lastmod: string | null;
+  last_captured: string | null;
+}
+
+export interface SitePlan {
+  site_id: string;
+  name: string;
+  role: 'client' | 'competitor';
+  website: string;
+  baseline_run: string | null;
+  sitemap_files: string[];
+  sitemap_addresses: number;
+  sitemap_dates: number;
+  sitemap_note: string;
+  core: number;
+  check: number;
+  skip: number;
+  run_id: string | null;
+  note: string;
+  pages: PageDecision[];
+}
+
+export interface RecrawlPlan {
+  plan_id: string;
+  project_id: string;
+  created_at: string;
+  trigger: string;
+  core_every_days: number;
+  other_every_days: number;
+  sites: SitePlan[];
 }
 
 const enc = encodeURIComponent;
@@ -154,18 +207,46 @@ export const monitoringApi = {
   run: (projectId: string, token: string | null) =>
     request<MonitorCheck>(path(projectId), { method: 'POST', body: '{}' }, token),
   watch: (projectId: string, signal?: AbortSignal) => request<WatchSettings>(`${path(projectId)}/watch`, { signal }),
-  setWatch: (
-    projectId: string,
-    body: Pick<WatchSettings, 'auto_check' | 'rescrape_every_days' | 'push_threshold'>,
-    token: string | null,
-  ) => request<WatchSettings>(`${path(projectId)}/watch`, { method: 'POST', body: JSON.stringify(body) }, token),
+  setWatch: (projectId: string, body: WatchBody, token: string | null) =>
+    request<WatchSettings>(`${path(projectId)}/watch`, { method: 'POST', body: JSON.stringify(body) }, token),
+  plan: async (projectId: string, signal?: AbortSignal): Promise<RecrawlPlan | null> => {
+    try {
+      return await request<RecrawlPlan>(`${path(projectId)}/recrawl`, { signal });
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 404) return null;
+      throw error;
+    }
+  },
+  makePlan: (projectId: string, queue: boolean, token: string | null) =>
+    request<RecrawlPlan>(`${path(projectId)}/recrawl`, { method: 'POST', body: JSON.stringify({ queue }) }, token),
   workbookUrl: (projectId: string) => `${path(projectId)}/workbook`,
 };
 
 export const monitoringKeys = {
   latest: (projectId: string) => ['monitoring', projectId] as const,
   watch: (projectId: string) => ['monitoring', projectId, 'watch'] as const,
+  plan: (projectId: string) => ['monitoring', projectId, 'recrawl'] as const,
 };
+
+export function useRecrawlPlan(projectId: string) {
+  return useQuery({
+    queryKey: monitoringKeys.plan(projectId),
+    queryFn: ({ signal }) => monitoringApi.plan(projectId, signal),
+  });
+}
+
+export function useMakePlan(projectId: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (args: { queue: boolean; token: string | null }) =>
+      monitoringApi.makePlan(projectId, args.queue, args.token),
+    onSuccess: (plan) => {
+      client.setQueryData(monitoringKeys.plan(projectId), plan);
+      void client.invalidateQueries({ queryKey: ['exports', projectId] });
+      if (plan.trigger !== 'preview') void client.invalidateQueries({ queryKey: ['projects'] });
+    },
+  });
+}
 
 export function useMonitorCheck(projectId: string) {
   return useQuery({
@@ -192,10 +273,8 @@ export function useRunCheck(projectId: string) {
 export function useSetWatch(projectId: string) {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: (args: {
-      body: Pick<WatchSettings, 'auto_check' | 'rescrape_every_days' | 'push_threshold'>;
-      token: string | null;
-    }) => monitoringApi.setWatch(projectId, args.body, args.token),
+    mutationFn: (args: { body: WatchBody; token: string | null }) =>
+      monitoringApi.setWatch(projectId, args.body, args.token),
     onSuccess: (settings) => client.setQueryData(monitoringKeys.watch(projectId), settings),
   });
 }

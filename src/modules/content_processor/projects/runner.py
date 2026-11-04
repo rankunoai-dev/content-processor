@@ -119,9 +119,18 @@ def build_scope(
     }
 
 
+SKIP_FILE = "skip_fetch.json"
+
+
 def subprocess_command(scope: Path, out: Path, cancel: threading.Event) -> int:
-    """Run one batch with the scraper's command line; stop it when `cancel` is set."""
+    """Run one batch with the scraper's command line; stop it when `cancel` is set.
+
+    A `skip_fetch.json` next to the batch's scope (written by a recrawl plan) lists
+    pages that are not due: they are carried forward without a request.
+    """
     log = out.with_suffix(".log")
+    skip = scope.parent / SKIP_FILE
+    extra = ["--skip-fetch", str(skip)] if skip.is_file() else []
     with log.open("w", encoding="utf-8") as sink:
         process = subprocess.Popen(  # noqa: S603 - fixed argv, no shell
             [
@@ -137,6 +146,7 @@ def subprocess_command(scope: Path, out: Path, cancel: threading.Event) -> int:
                 "--max-wait",
                 str(MAX_WAIT_S),
                 "--no-reports",
+                *extra,
             ],
             cwd=REPO_ROOT,
             stdout=sink,
@@ -253,8 +263,13 @@ class ScrapeRunner:
         on_turn: OnTurn = "auto",
         email: str | None = None,
         email_when_done: bool = False,
+        skip_fetch: Sequence[str] = (),
+        skip_reason: str = "",
     ) -> RunState:
         """Queue a run over one website's current URLs.
+
+        `skip_fetch` (from a recrawl plan) lists pages that are not due: they are
+        carried forward from their last capture without a request.
 
         `on_turn` notify (email when its turn comes, then wait to be started) and
         `email_when_done` need an `email`.
@@ -295,6 +310,10 @@ class ScrapeRunner:
         folder = self._store.run_dir(project_id, site_id, run_id)
         folder.mkdir(parents=True, exist_ok=False)
         (folder / "urls.json").write_text(json.dumps(urls), encoding="utf-8")
+        if skip_fetch:
+            (folder / SKIP_FILE).write_text(
+                json.dumps({"urls": list(skip_fetch), "reason": skip_reason}), encoding="utf-8"
+            )
         if address:
             (folder / "notify.json").write_text(json.dumps({"email": address}), encoding="utf-8")
         self._store.save_run(state)

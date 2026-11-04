@@ -29,12 +29,13 @@ import {
   type MonitorCheck,
   type SiteDiff,
   type ThemeDrift,
-  type WatchSettings,
+  type WatchBody,
 } from '../api/monitoring';
 import type { Project } from '../api/projects';
 import { DownloadMenu } from '../components/DownloadMenu';
+import { RecrawlCard } from './RecrawlCard';
 import { QueryState } from '../components/QueryState';
-import { MONITORING, THEMES } from '../vocabulary';
+import { MONITORING, RECRAWL, THEMES } from '../vocabulary';
 
 const RESCRAPE_DAYS = [0, 1, 3, 7, 14, 30];
 
@@ -66,6 +67,39 @@ function SiteDetail({ site }: { site: SiteDiff }) {
                     {MONITORING.columns.drift} {Math.round(c.drift * 100)}% · +{c.sections_added} −{c.sections_removed}
                   </Typography.Text>
                 </Space>
+                {c.words_before || c.words_after ? (
+                  <Typography.Text type={c.words_after - c.words_before >= 500 ? 'warning' : 'secondary'}>
+                    {RECRAWL.words(c.words_before, c.words_after)}
+                  </Typography.Text>
+                ) : null}
+                {c.headings_added.length > 0 ? (
+                  <Typography.Text type="secondary">
+                    {RECRAWL.headingsAdded}: {c.headings_added.slice(0, 5).join(' · ')}
+                  </Typography.Text>
+                ) : null}
+                {c.headings_removed.length > 0 ? (
+                  <Typography.Text type="secondary">
+                    {RECRAWL.headingsRemoved}: {c.headings_removed.slice(0, 5).join(' · ')}
+                  </Typography.Text>
+                ) : null}
+                {c.new_terms.length > 0 ? (
+                  <Space wrap size={4}>
+                    <Typography.Text type="secondary">{RECRAWL.newTerms}:</Typography.Text>
+                    {c.new_terms.slice(0, 10).map((t) => (
+                      <Tag key={t} color="green">
+                        {t}
+                      </Tag>
+                    ))}
+                    {c.dropped_terms.slice(0, 6).map((t) => (
+                      <Tag key={`-${t}`} style={{ textDecoration: 'line-through' }}>
+                        {t}
+                      </Tag>
+                    ))}
+                  </Space>
+                ) : null}
+                {Object.keys(c.blocks_added).length + Object.keys(c.blocks_removed).length > 0 ? (
+                  <Typography.Text type="warning">{RECRAWL.blocks(c.blocks_added, c.blocks_removed)}</Typography.Text>
+                ) : null}
                 {Object.entries(c.head_changes).map(([field, v]) => (
                   <Typography.Text key={field} type="secondary">
                     {field}: “{v.before}” → “{v.after}”
@@ -155,6 +189,7 @@ function CheckView({ check }: { check: MonitorCheck }) {
         )}
       </Card>
       <Table<SiteDiff>
+        scroll={{ x: true }}
         rowKey="website"
         size="small"
         pagination={false}
@@ -179,6 +214,7 @@ function CheckView({ check }: { check: MonitorCheck }) {
           <Typography.Text type="secondary">{MONITORING.noDrift}</Typography.Text>
         ) : (
           <Table<ThemeDrift>
+            scroll={{ x: true }}
             rowKey="theme_id"
             size="small"
             pagination={{ pageSize: 15, hideOnSinglePage: true }}
@@ -206,7 +242,7 @@ function CheckView({ check }: { check: MonitorCheck }) {
 function WatchCard({ project, token }: { project: Project; token: string | null }) {
   const watch = useWatchSettings(project.project_id);
   const save = useSetWatch(project.project_id);
-  const [form] = Form.useForm<Pick<WatchSettings, 'auto_check' | 'rescrape_every_days' | 'push_threshold'>>();
+  const [form] = Form.useForm<WatchBody>();
   const { message } = AntApp.useApp();
   useEffect(() => {
     if (watch.data) form.setFieldsValue(watch.data);
@@ -235,6 +271,19 @@ function WatchCard({ project, token }: { project: Project; token: string | null 
                 style={{ maxWidth: 260 }}
                 options={RESCRAPE_DAYS.map((d) => ({ value: d, label: d === 0 ? MONITORING.rescrapeOff : MONITORING.everyDays(d) }))}
               />
+            </Form.Item>
+            <Form.Item name="smart_recrawl" label={RECRAWL.smart} extra={RECRAWL.smartHelp} valuePropName="checked">
+              <Switch aria-label={RECRAWL.smart} />
+            </Form.Item>
+            <Form.Item name="other_every_days" label={RECRAWL.otherEvery}>
+              <Select
+                aria-label={RECRAWL.otherEvery}
+                style={{ maxWidth: 260 }}
+                options={[7, 14, 30, 60, 90].map((d) => ({ value: d, label: MONITORING.everyDays(d) }))}
+              />
+            </Form.Item>
+            <Form.Item name="use_sitemaps" label={RECRAWL.sitemaps} extra={RECRAWL.sitemapsHelp} valuePropName="checked">
+              <Switch aria-label={RECRAWL.sitemaps} />
             </Form.Item>
             <Form.Item name="push_threshold" label={MONITORING.pushThreshold}>
               <InputNumber aria-label={MONITORING.pushThreshold} min={1} max={100} />
@@ -286,6 +335,7 @@ export function MonitoringTab({ project, token }: { project: Project; token: str
           </Space>
         )}
       </QueryState>
+      <RecrawlCard project={project} token={token} />
       <WatchCard project={project} token={token} />
     </Space>
   );

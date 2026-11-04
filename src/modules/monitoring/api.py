@@ -9,18 +9,21 @@ POST /api/projects/{project}/monitoring/watch      change it (project unlock tok
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Annotated
 
+import httpx
 from fastapi import FastAPI, Header, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import Field
 
 from src.core.schemas import StrictModel
+from src.modules.content_processor.projects.runner import ScrapeRunner
 from src.modules.content_processor.projects.security import TokenSigner
 from src.modules.content_processor.projects.store import ProjectNotFoundError, ProjectStore
 from src.modules.content_processor.webapi.projects_api import KnowledgeAccess
-from src.modules.monitoring.models import MonitorCheck, WatchSettings
-from src.modules.monitoring.service import monitor_store, run_project_check
+from src.modules.monitoring.models import MonitorCheck, RecrawlPlan, WatchSettings
+from src.modules.monitoring.service import monitor_store, recrawl_project, run_project_check
 
 __all__ = ["WatchIn", "register_monitoring_routes"]
 
@@ -33,10 +36,26 @@ class WatchIn(StrictModel):
     auto_check: bool
     rescrape_every_days: int = Field(ge=0, le=90)
     push_threshold: int = Field(ge=1, le=100)
+    smart_recrawl: bool | None = None
+    other_every_days: int | None = Field(default=None, ge=1, le=365)
+    use_sitemaps: bool | None = None
+    core_urls: list[str] | None = Field(default=None, max_length=200)
+
+
+class RecrawlIn(StrictModel):
+    """Plan only (reads the sitemaps), or plan and queue the scrapes now."""
+
+    queue: bool = False
 
 
 def register_monitoring_routes(
-    app: FastAPI, *, projects: ProjectStore, access: KnowledgeAccess, signer: TokenSigner
+    app: FastAPI,
+    *,
+    projects: ProjectStore,
+    access: KnowledgeAccess,
+    signer: TokenSigner,
+    runner: ScrapeRunner | None = None,
+    sitemap_http: Callable[[], httpx.Client] | None = None,
 ) -> None:
     """Add the monitoring routes (before the app's catch-all routes)."""
     store = monitor_store(projects)
@@ -90,4 +109,26 @@ def register_monitoring_routes(
     def set_watch(project_id: str, body: WatchIn, token: TokenHeader = None) -> WatchSettings:
         unlocked(project_id, token)
         current = store.watch(project_id)
-        return store.set_watch(project_id, current.model_copy(update=body.model_dump()))
+        changes = {k: v for k, v in body.model_dump().items() if v is not None}
+        return store.set_watch(project_id, current.model_copy(update=changes))
+
+    @app.get("/api/projects/{project_id}/monitoring/recrawl")
+    def latest_plan(project_id: str) -> RecrawlPlan:
+        project(project_id)
+        found = store.latest_plan(project_id)
+        if found is None:
+            raise HTTPException(status_code=404, detail="No recrawl plan has been made yet.")
+        return found
+
+    @app.post("/api/projects/{project_id}/monitoring/recrawl")
+    def make_plan(project_id: str, body: RecrawlIn, token: TokenHeader = None) -> RecrawlPlan:
+        unlocked(project_id, token)
+        if body.queue and runner is None:
+            raise HTTPException(status_code=409, detail="Scrapes cannot be queued here.")
+        return recrawl_project(
+            projects,
+            runner,
+            project_id,
+            trigger="manual" if body.queue else "preview",
+            http=sitemap_http,
+        )

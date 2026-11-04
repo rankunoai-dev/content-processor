@@ -102,6 +102,85 @@ def price_changes(before: Iterable[str], after: Iterable[str]) -> list[PriceChan
     return changes
 
 
+_PERIOD = re.compile(
+    r"(?:per|a|/)\s?(?:month|year|yr|mo|user|seat|license|licence)\b|monthly|annually|/mo\b",
+    re.IGNORECASE,
+)
+_TERM = re.compile(r"[A-Za-z][A-Za-z0-9+&'-]*")
+_STOP_TERMS = frozenset(
+    {
+        "about",
+        "with",
+        "your",
+        "from",
+        "that",
+        "this",
+        "what",
+        "when",
+        "where",
+        "which",
+        "their",
+        "into",
+        "more",
+        "than",
+        "have",
+        "will",
+        "they",
+        "them",
+        "these",
+        "those",
+        "using",
+        "used",
+        "make",
+        "made",
+        "each",
+        "other",
+        "also",
+        "only",
+        "over",
+        "under",
+    }
+)
+_BLOCK_KINDS = {"table": "tables", "faq": "FAQ answers", "form_steps": "forms"}
+_MAX_HEADINGS = 15
+
+
+def _terms(texts: Iterable[str]) -> dict[str, str]:
+    """Distinct meaningful words (case-folded -> as written): acronyms and words of 4+."""
+    out: dict[str, str] = {}
+    for text in texts:
+        for word in _TERM.findall(text):
+            low = word.casefold()
+            if (len(word) >= 4 or (word.isupper() and len(word) >= 2)) and low not in _STOP_TERMS:
+                out.setdefault(low, word)
+    return out
+
+
+def _blocks(chunks: list[Chunk]) -> Counter[str]:
+    """Tables, pricing blocks, FAQ answers and forms of a page."""
+    counts: Counter[str] = Counter()
+    for chunk in chunks:
+        name = _BLOCK_KINDS.get(chunk.kind)
+        if name:
+            counts[name] += 1
+        if _AMOUNT.search(chunk.text) and _PERIOD.search(chunk.text):
+            counts["pricing blocks"] += 1
+    return counts
+
+
+def _outline(a: PageStamp, b: PageStamp) -> tuple[list[str], list[str], list[str], list[str]]:
+    """H2/H3 headings added and removed; words new to and gone from the headings and H1."""
+    before = {_norm(h): h for h in a.headings if _norm(h)}
+    after = {_norm(h): h for h in b.headings if _norm(h)}
+    added = [h for k, h in after.items() if k not in before]
+    removed = [h for k, h in before.items() if k not in after]
+    old_terms = _terms([*a.headings, a.h1 or ""])
+    new_terms = _terms([*b.headings, b.h1 or ""])
+    gained = [w for k, w in new_terms.items() if k not in old_terms]
+    lost = [w for k, w in old_terms.items() if k not in new_terms]
+    return added[:_MAX_HEADINGS], removed[:_MAX_HEADINGS], gained[:20], lost[:20]
+
+
 def _clip(text: str) -> str:
     return text if len(text) <= _MAX_TEXT else text[: _MAX_TEXT - 1].rstrip() + "…"
 
@@ -190,9 +269,12 @@ def diff_runs(old: RunFiles, new: RunFiles, *, template_pages: int = TEMPLATE_PA
         gained = [t for t in gained if _norm(t) not in template]
         lost = [t for t in lost if _norm(t) not in template]
         numbers = sorted(set(b.numbers) - set(a.numbers))
-        if not (head or gained or lost):
+        h_added, h_removed, terms_new, terms_lost = _outline(a, b)
+        if not (head or gained or lost or h_added or h_removed):
             result.unchanged += 1
             continue
+        blocks_before = _blocks(old.chunks.get(url, []))
+        blocks_after = _blocks(new.chunks.get(url, []))
         before_set, after_set = before_set - template, after_set - template
         union = before_set | after_set
         result.changed.append(
@@ -207,6 +289,22 @@ def diff_runs(old: RunFiles, new: RunFiles, *, template_pages: int = TEMPLATE_PA
                 drift=round(len(union - (before_set & after_set)) / max(len(union), 1), 3),
                 prices=price_changes(lost, gained),
                 new_numbers=numbers[:20],
+                words_before=a.main_word_count or a.word_count,
+                words_after=b.main_word_count or b.word_count,
+                headings_added=h_added,
+                headings_removed=h_removed,
+                new_terms=terms_new if (h_added or "h1" in head) else [],
+                dropped_terms=terms_lost if (h_removed or "h1" in head) else [],
+                blocks_added={
+                    k: n - blocks_before.get(k, 0)
+                    for k, n in blocks_after.items()
+                    if n > blocks_before.get(k, 0)
+                },
+                blocks_removed={
+                    k: n - blocks_after.get(k, 0)
+                    for k, n in blocks_before.items()
+                    if n > blocks_after.get(k, 0)
+                },
             )
         )
     return result

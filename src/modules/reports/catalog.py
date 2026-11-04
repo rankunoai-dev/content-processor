@@ -140,6 +140,29 @@ def _monitoring(ctx: Context) -> Report | None:
     )
 
 
+def _recrawl(ctx: Context) -> Report | None:
+    from src.modules.monitoring.service import monitor_store
+    from src.modules.monitoring.store import plan_tables
+
+    found = monitor_store(ctx.projects).latest_plan(ctx.project.project_id)
+    if found is None:
+        return None
+    check = sum(s.check for s in found.sites)
+    skip = sum(s.skip for s in found.sites)
+    return Report(
+        key="recrawl",
+        title=f"{ctx.project.name}: recrawl plan",
+        subtitle=f"Plan of {_when(found.created_at)} ({found.trigger})",
+        summary=[
+            f"{check:,} page(s) to check, {skip:,} carried forward without a request.",
+            f"Core pages are checked on every pass (every {found.core_every_days} days when "
+            f"scheduled); other pages every {found.other_every_days} days, or sooner when the "
+            "sitemap shows a change.",
+        ],
+        tables=plan_tables(found),
+    )
+
+
 def _research(ctx: Context) -> Report | None:
     from src.modules.research.build import movers
     from src.modules.research.service import research_store
@@ -291,6 +314,15 @@ REPORTS: Final[tuple[ReportDef, ...]] = (
         "Alerts ranked by severity, what changed on each website and theme drift.",
         "Run a monitoring check in the Monitoring tab first.",
         _monitoring,
+    ),
+    ReportDef(
+        "recrawl",
+        "monitoring",
+        "Recrawl plan",
+        "Which pages the latest recrawl checked or carried forward, and why (core page, "
+        "sitemap date, last check).",
+        "Preview or run a recrawl in the Monitoring tab first.",
+        _recrawl,
     ),
     ReportDef(
         "research",

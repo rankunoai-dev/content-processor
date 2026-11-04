@@ -44,6 +44,7 @@ from src.modules.content_processor.enums import (
     AccessTier,
     AuthorizationKind,
     BlockKind,
+    ChangeStatus,
     EntityStatus,
     PriorityClass,
     RedirectKind,
@@ -78,7 +79,7 @@ from src.modules.content_processor.verify.gaps import gap_for_gate, gap_id_for
 from src.modules.content_processor.workers.ports import LedgerPort, RobotsCache
 from src.modules.content_processor.workers.render_worker import RENDER_MAX_ATTEMPTS
 
-__all__ = ["FetchWorker", "extraction_kind_for", "user_agent_for"]
+__all__ = ["FetchWorker", "extraction_kind_for", "user_agent_for", "visitor_user_agent"]
 
 _logger = get_logger("content_processor.fetch_worker")
 
@@ -88,6 +89,11 @@ _CHROME_UA = (
     "(KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
 )
 _TRANSIENT_BACKOFF_S = (5, 30, 120)
+
+
+def visitor_user_agent() -> str:
+    """The user agent of an ordinary visitor (used for public third-party websites)."""
+    return _CHROME_UA
 
 
 def user_agent_for(scope: RunScope) -> str:
@@ -305,6 +311,24 @@ class FetchWorker:
         )
         if prior is not None:
             self._priors[resource.resource_id] = prior
+        if (
+            prior is not None
+            and self._baseline is not None
+            and self._may_reuse(prior)
+            and self._baseline.planned_skip(resource.schedule_key, requested_url)
+        ):
+            # The recrawl plan says this page is not due (not a core page, and the
+            # site's sitemap does not show a newer change): no request is sent; the
+            # previous capture is carried forward and keeps its capture time.
+            resource.acquired_at = prior.captured_at
+            decision = ChangeDecision(
+                status=ChangeStatus.UNCHANGED,
+                basis="planned_skip",
+                notes=[self._baseline.skip_reason],
+            )
+            self._reuse(task, resource, prior, decision, depth)
+            self._ledger.complete(task.id or 0, self._worker_id)
+            return
         # A capture too old to reuse is still compared, but fetched in full.
         validators = conditional_headers(prior) if self._may_reuse(prior) else {}
         result = await (

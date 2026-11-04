@@ -29,6 +29,9 @@ __all__ = [
     "TemplateChange",
     "ThemeDrift",
     "WatchSettings",
+    "PageDecision",
+    "RecrawlPlan",
+    "SitePlan",
 ]
 
 CHECK_VERSION: Final = "monitor-v1"
@@ -44,6 +47,9 @@ AlertKind = Literal[
     "competitor_rewrites",
     "pillar_drift",
     "client_content_change",
+    "competitor_content_growth",
+    "competitor_messaging_shift",
+    "competitor_new_tables",
 ]
 
 
@@ -80,6 +86,25 @@ class PageChange(StrictModel):
     prices: list[PriceChange] = Field(default_factory=list)
     new_numbers: list[str] = Field(default_factory=list)
     is_pillar: bool = False
+    words_before: int = Field(default=0, ge=0, description="Main-content words before")
+    words_after: int = Field(default=0, ge=0, description="Main-content words after")
+    headings_added: list[str] = Field(default_factory=list, description="New H2/H3 headings")
+    headings_removed: list[str] = Field(default_factory=list, description="H2/H3 headings gone")
+    new_terms: list[str] = Field(
+        default_factory=list, description="Words in the new headings (and H1) not in the old ones"
+    )
+    dropped_terms: list[str] = Field(
+        default_factory=list, description="Words of the old headings (and H1) no longer there"
+    )
+    blocks_added: dict[str, int] = Field(
+        default_factory=dict, description="Tables, pricing blocks, FAQs, forms: how many more"
+    )
+    blocks_removed: dict[str, int] = Field(default_factory=dict, description="How many fewer")
+
+    @property
+    def words_delta(self) -> int:
+        """Main-content words added (negative: removed)."""
+        return self.words_after - self.words_before
 
 
 class TemplateChange(StrictModel):
@@ -163,10 +188,69 @@ class WatchSettings(StrictModel):
         default=0,
         ge=0,
         le=90,
-        description="Re-scrape every website this often; 0 = off (it contacts the websites)",
+        description="Scheduled re-scrape this often (core pages are checked on every pass); "
+        "0 = off (it contacts the websites)",
     )
+    smart_recrawl: bool = Field(
+        default=True,
+        description="Scheduled passes check core pages and pages the sitemap shows changed; "
+        "other pages only when older than other_every_days (off: every page every pass)",
+    )
+    other_every_days: int = Field(
+        default=30, ge=1, le=365, description="How often pages that are not core are checked"
+    )
+    use_sitemaps: bool = Field(
+        default=True, description="Read each website's sitemap last-modified dates"
+    )
+    core_urls: list[str] = Field(
+        default_factory=list, max_length=200, description="Pages always treated as core"
+    )
+    core_limit: int = Field(default=50, ge=1, le=500, description="Core pages per website")
     push_threshold: int = Field(
         default=3, ge=1, le=100, description="New competitor pages in a client theme that alert"
     )
     last_rescrape_at: datetime | None = None
     last_auto_check_at: datetime | None = None
+
+
+class PageDecision(StrictModel):
+    """What a scheduled pass does with one page, and why."""
+
+    url: str
+    tier: Literal["core", "other"]
+    action: Literal["check", "skip"]
+    reason: str
+    sitemap_lastmod: datetime | None = None
+    last_captured: datetime | None = None
+
+
+class SitePlan(StrictModel):
+    """One website's recrawl plan."""
+
+    site_id: str
+    name: str
+    role: Literal["client", "competitor"]
+    website: str
+    baseline_run: str | None = None
+    sitemap_files: list[str] = Field(default_factory=list)
+    sitemap_addresses: int = Field(default=0, ge=0)
+    sitemap_dates: int = Field(default=0, ge=0, description="Addresses with a last-modified date")
+    sitemap_note: str = ""
+    core: int = Field(default=0, ge=0)
+    check: int = Field(default=0, ge=0)
+    skip: int = Field(default=0, ge=0)
+    run_id: str | None = Field(default=None, description="The scrape queued for it, if any")
+    note: str = ""
+    pages: list[PageDecision] = Field(default_factory=list)
+
+
+class RecrawlPlan(StrictModel):
+    """Which pages a scheduled re-scrape checks and which it carries forward."""
+
+    plan_id: str
+    project_id: str
+    created_at: datetime
+    trigger: str = Field(description="preview, scheduled or manual")
+    core_every_days: int = Field(ge=0)
+    other_every_days: int = Field(ge=1)
+    sites: list[SitePlan] = Field(default_factory=list)

@@ -240,13 +240,14 @@ def test_watcher_checks_after_new_scrapes_and_rescrapes_only_when_opted_in(watch
     assert monitor_store(watched.store).latest(watched.project_id).trigger == "auto"
     assert watcher.tick() == {"checked": [], "rescraped": []}  # nothing new since
     store = monitor_store(watched.store)
-    store.set_watch(watched.project_id, WatchSettings(auto_check=False, rescrape_every_days=1))
+    old_way = WatchSettings(auto_check=False, rescrape_every_days=1, smart_recrawl=False)
+    store.set_watch(watched.project_id, old_way)
     later = datetime.now(UTC) + timedelta(days=3)
     assert watcher.tick(later) == {"checked": [], "rescraped": [watched.project_id]}
     assert runner.calls == [(watched.project_id, "scheduled monitoring")]
     assert watcher.tick(later + timedelta(hours=1))["rescraped"] == []  # waits a full interval
     failing = MonitorWatcher(watched.store, watched.access, FakeRunner(fail=True))  # type: ignore[arg-type]
-    store.set_watch(watched.project_id, WatchSettings(auto_check=False, rescrape_every_days=1))
+    store.set_watch(watched.project_id, old_way)
     assert failing.tick(later) == {"checked": [], "rescraped": []}
     off = MonitorWatcher(watched.store, watched.access, None)
     assert off.tick(later)["rescraped"] == []

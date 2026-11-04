@@ -294,7 +294,9 @@ def create_app(
             register_theming_routes(app, projects=project_store, access=knowledge, signer=signer)
             from src.modules.monitoring.api import register_monitoring_routes
 
-            register_monitoring_routes(app, projects=project_store, access=knowledge, signer=signer)
+            register_monitoring_routes(
+                app, projects=project_store, access=knowledge, signer=signer, runner=runner
+            )
             from src.modules.research.api import register_research_routes
 
             register_research_routes(app, projects=project_store, access=knowledge, signer=signer)

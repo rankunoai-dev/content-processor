@@ -11,9 +11,9 @@ import threading
 from pathlib import Path
 
 from src.modules.content_processor.export.tabular import Cell, Table, write_xlsx
-from src.modules.monitoring.models import MonitorCheck, WatchSettings
+from src.modules.monitoring.models import MonitorCheck, RecrawlPlan, WatchSettings
 
-__all__ = ["MonitorStore", "check_tables", "write_check_workbook"]
+__all__ = ["MonitorStore", "check_tables", "plan_tables", "write_check_workbook"]
 
 _ID = re.compile(r"^[a-z0-9][a-z0-9-]{0,80}$")
 _CHECK_ID = re.compile(r"^check-\d{8}-\d{6}-\d{3}$")
@@ -87,6 +87,24 @@ class MonitorStore:
             tmp.write_text(settings.model_dump_json(indent=1), encoding="utf-8")
             tmp.replace(folder / "watch.json")
         return settings
+
+    def save_plan(self, plan: RecrawlPlan) -> Path:
+        """Keep a recrawl plan (`plans/<plan id>.json`, the newest as `plans/latest.json`)."""
+        folder = self.folder(plan.project_id) / "plans"
+        folder.mkdir(parents=True, exist_ok=True)
+        text = plan.model_dump_json(indent=1)
+        (folder / f"{plan.plan_id}.json").write_text(text, encoding="utf-8")
+        tmp = folder / "latest.json.tmp"
+        tmp.write_text(text, encoding="utf-8")
+        tmp.replace(folder / "latest.json")
+        return folder / f"{plan.plan_id}.json"
+
+    def latest_plan(self, project_id: str) -> RecrawlPlan | None:
+        """The newest recrawl plan, or None."""
+        path = self.folder(project_id) / "plans" / "latest.json"
+        if not path.exists():
+            return None
+        return RecrawlPlan.model_validate_json(path.read_text(encoding="utf-8"))
 
     def workbook(self, check: MonitorCheck) -> Path:
         """Where a check's workbook is written."""
@@ -163,6 +181,15 @@ def check_tables(check: MonitorCheck) -> list[Table]:
             "Drift": c.drift,
             "Sections added": c.sections_added,
             "Sections removed": c.sections_removed,
+            "Words before": c.words_before,
+            "Words after": c.words_after,
+            "Words added": c.words_delta,
+            "Headings added": "\n".join(c.headings_added),
+            "Headings removed": "\n".join(c.headings_removed),
+            "New heading terms": ", ".join(c.new_terms),
+            "Dropped heading terms": ", ".join(c.dropped_terms),
+            "Blocks added": ", ".join(f"+{n} {k}" for k, n in sorted(c.blocks_added.items())),
+            "Blocks removed": ", ".join(f"-{n} {k}" for k, n in sorted(c.blocks_removed.items())),
             "Head changes": "; ".join(
                 f"{k}: {v.get('before')} → {v.get('after')}" for k, v in c.head_changes.items()
             ),
@@ -227,6 +254,47 @@ def check_tables(check: MonitorCheck) -> list[Table]:
             [{"Column": k, "Meaning": v} for k, v in _HOW_TO_READ],
             widths={"Meaning": 110},
         ),
+    ]
+
+
+def plan_tables(plan: RecrawlPlan) -> list[Table]:
+    """A recrawl plan as sheets: one row per website, one per page."""
+    sites: list[dict[str, Cell]] = [
+        {
+            "Website": s.name,
+            "Side": "Client" if s.role == "client" else "Competitor",
+            "Address": s.website,
+            "Pages": len(s.pages),
+            "Core pages": s.core,
+            "To check": s.check,
+            "Carried forward": s.skip,
+            "Sitemap files": len(s.sitemap_files),
+            "Sitemap addresses": s.sitemap_addresses,
+            "With a date": s.sitemap_dates,
+            "Sitemap note": s.sitemap_note,
+            "Scrape queued": s.run_id or "",
+            "Note": s.note,
+        }
+        for s in plan.sites
+    ]
+    pages: list[dict[str, Cell]] = [
+        {
+            "Website": s.name,
+            "URL": p.url,
+            "Tier": p.tier,
+            "Action": "check" if p.action == "check" else "carry forward",
+            "Why": p.reason,
+            "Sitemap last modified": p.sitemap_lastmod.date().isoformat()
+            if p.sitemap_lastmod
+            else "",
+            "Last captured": p.last_captured.date().isoformat() if p.last_captured else "",
+        }
+        for s in plan.sites
+        for p in s.pages
+    ]
+    return [
+        Table("Websites", list(sites[0]) if sites else ["Website"], sites),
+        Table("Pages", list(pages[0]) if pages else ["URL"], pages),
     ]
 
 

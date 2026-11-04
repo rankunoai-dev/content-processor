@@ -412,6 +412,15 @@ def _history_baseline(
     return baseline, "history"
 
 
+def _apply_skip_plan(args: argparse.Namespace, baseline: Baseline | None) -> None:
+    """Pages a recrawl plan says are not due are reused without a request."""
+    path = getattr(args, "skip_fetch", None)
+    if not path or baseline is None:
+        return
+    plan = json.loads(Path(path).read_text(encoding="utf-8"))
+    baseline.plan_skips(plan.get("urls", []), plan.get("reason"))
+
+
 def _baseline_info(baseline: Baseline | None, source: str | None) -> dict[str, Any] | None:
     if baseline is None:
         return None
@@ -558,6 +567,7 @@ async def _dryrun_with(
     baseline_source = getattr(args, "baseline", None)
     if baseline is None:
         baseline, baseline_source = _history_baseline(args, history, evidence)
+    _apply_skip_plan(args, baseline)
     execution = await _drive(
         ledger,
         scope=scope,
@@ -772,6 +782,12 @@ def _add_drive_options(p: argparse.ArgumentParser) -> None:
     p.add_argument("--stages", default=None, help="comma list of fetch,render,docs")
     p.add_argument("--no-render", action="store_true", help="skip the T3 render stage")
     p.add_argument("--no-docs", action="store_true", help="skip the document/OCR stage")
+    p.add_argument(
+        "--skip-fetch",
+        default=None,
+        help="JSON file: {'urls': [...], 'reason': '...'} of pages a recrawl plan says are not "
+        "due; their previous capture is carried forward without a request",
+    )
     p.add_argument(
         "--group-assets",
         action="store_true",

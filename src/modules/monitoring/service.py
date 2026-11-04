@@ -7,15 +7,21 @@ The watcher wakes up every few minutes and, for every project:
 - **scheduled re-scrape** (off by default): when `rescrape_every_days` is set and the
   project's last scrape is older than that, it queues a scrape of every website.
   That contacts the client's and competitors' websites, so it is an opt-in per
-  project, set by someone who unlocked the project.
+  project, set by someone who unlocked the project. With `smart_recrawl` (the
+  default) the pass follows a recrawl plan (`recrawl.py`): core pages and pages
+  the sitemap shows changed are checked, the others only once a month; pages not
+  due are carried forward without a request. The plan is saved with the pass.
 """
 
 from __future__ import annotations
 
 import threading
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Literal
+
+import httpx
 
 from src.core.logger import get_logger
 from src.modules.analyst.playground import Playground
@@ -24,10 +30,10 @@ from src.modules.content_processor.projects.runner import ScrapeRunner
 from src.modules.content_processor.projects.store import ProjectStore
 from src.modules.content_processor.webapi.projects_api import KnowledgeAccess
 from src.modules.monitoring.check import run_check
-from src.modules.monitoring.models import MonitorCheck
+from src.modules.monitoring.models import MonitorCheck, RecrawlPlan
 from src.modules.monitoring.store import MonitorStore, write_check_workbook
 
-__all__ = ["MonitorWatcher", "monitor_store", "run_project_check"]
+__all__ = ["MonitorWatcher", "monitor_store", "recrawl_project", "run_project_check"]
 
 _logger = get_logger("rankuno.monitoring")
 WAKE_S = 300.0
@@ -65,6 +71,54 @@ def run_project_check(
     }
 
 
+def recrawl_project(
+    projects: ProjectStore,
+    runner: ScrapeRunner | None,
+    project_id: str,
+    *,
+    trigger: str = "preview",
+    http: Callable[[], httpx.Client] | None = None,
+    now: datetime | None = None,
+) -> RecrawlPlan:
+    """Plan a recrawl and (unless a preview) queue a scrape per website with its skips."""
+    from src.modules.monitoring.recrawl import plan_project
+    from src.modules.theming.service import theme_store
+
+    store = monitor_store(projects)
+    settings = store.watch(project_id)
+    plan = plan_project(
+        projects,
+        project_id,
+        settings,
+        theme_map=theme_store(projects).latest(project_id),
+        http=http,
+        now=now,
+        trigger=trigger,
+    )
+    if trigger != "preview" and runner is not None:
+        sites = []
+        for site in plan.sites:
+            if site.check == 0:
+                sites.append(site.model_copy(update={"note": "nothing due: no scrape queued"}))
+                continue
+            skips = [p.url for p in site.pages if p.action == "skip"]
+            try:
+                state = runner.submit(
+                    project_id,
+                    site.site_id,
+                    started_by=f"{trigger} recrawl",
+                    skip_fetch=skips,
+                    skip_reason="not due in the recrawl plan",
+                )
+            except ValueError as exc:  # already being scraped, or no addresses
+                sites.append(site.model_copy(update={"note": str(exc)}))
+                continue
+            sites.append(site.model_copy(update={"run_id": state.run_id}))
+        plan = plan.model_copy(update={"sites": sites})
+    store.save_plan(plan)
+    return plan
+
+
 def _finished(runs: list[RunState]) -> datetime | None:
     done = [
         r.finished_at for r in runs if r.finished_at is not None and r.knowledge_status == "ready"
@@ -82,6 +136,7 @@ class MonitorWatcher:
         runner: ScrapeRunner | None,
         *,
         wake_s: float = WAKE_S,
+        http: Callable[[], httpx.Client] | None = None,
     ) -> None:
         """Bind to the projects; `runner` queues scheduled re-scrapes (None: never)."""
         self.projects = projects
@@ -89,6 +144,7 @@ class MonitorWatcher:
         self.runner = runner
         self.store = monitor_store(projects)
         self.wake_s = wake_s
+        self.http = http  # sitemap reads of smart recrawls (tests pass a fake)
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
 
@@ -144,10 +200,15 @@ class MonitorWatcher:
                     >= timedelta(days=settings.rescrape_every_days)
                 )
             ):
-                try:
-                    self.runner.submit_all(pid, started_by="scheduled monitoring")
-                except ValueError:  # no website has addresses to scrape
-                    continue
+                if settings.smart_recrawl:
+                    recrawl_project(
+                        self.projects, self.runner, pid, trigger="scheduled", now=moment
+                    )
+                else:
+                    try:
+                        self.runner.submit_all(pid, started_by="scheduled monitoring")
+                    except ValueError:  # no website has addresses to scrape
+                        continue
                 self.store.set_watch(pid, settings.model_copy(update={"last_rescrape_at": moment}))
                 done["rescraped"].append(pid)
         return done
