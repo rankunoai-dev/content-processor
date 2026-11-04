@@ -1801,6 +1801,29 @@ export const MONITORING = {
 };
 
 /** Research module: the project's "Research" tab. */
+export const EXPORTS = {
+  tab: 'Downloads',
+  button: 'Download',
+  formats: { xlsx: 'Excel (.xlsx)', csv: 'CSV', docx: 'Word (.docx)' } as Record<string, string>,
+  intro:
+    "Every report of this project, one per module, built from each module's latest results. Excel has every row and the full text; CSV is for other tools (a zip when a report has several tables); Word is for reading and sharing (long tables show their first rows). Nothing is scraped or paid for to make them.",
+  all: 'Download everything (zip)',
+  ready: (n: number, total: number) => `${n} of ${total} reports ready.`,
+  notYet: 'Not yet',
+  rows: (n: number) => `${n.toLocaleString()} ${n === 1 ? 'row' : 'rows'}`,
+  modules: {
+    content: 'Content Scraper',
+    themes: 'Themes',
+    monitoring: 'Monitoring',
+    research: 'Research',
+    gaps: 'Gaps',
+    analyst: 'Analyst cards',
+  } as Record<string, string>,
+  scrapeFiles:
+    "Each scrape's own files (page-by-page reports, matching content) download from the Reports tab, and the cross-website reports from Project reports.",
+  word: 'Word',
+};
+
 export const COMPETITORS = {
   title: 'Suggested competitors',
   help: 'Websites the search data shows competing with the client: from Semrush (a pull, or an Organic Competitors export) and from the top 10 results of the keywords you pull. They are kept as context for the gap analysis and Claude. Nothing is scraped or paid for until you add one to the project.',

@@ -304,6 +304,17 @@ def create_app(
             from src.modules.mcp_server.bridge import register_mcp_routes
 
             register_mcp_routes(app, projects=project_store, access=knowledge)
+        from src.modules.reports.api import register_report_routes
+
+        register_report_routes(
+            app,
+            projects=project_store,
+            analyst_runs=(
+                (lambda pid: [r for r in analyst.runs.all() if pid in r.project_ids])
+                if analyst is not None
+                else None
+            ),
+        )
         from src.modules.workspace.status import register_workspace_routes
 
         register_workspace_routes(app, projects=project_store)

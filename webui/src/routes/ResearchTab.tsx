@@ -2,7 +2,7 @@
  * The project's "Research" tab: import a Semrush export (free) or pull from Semrush
  * (capped, off by default), then read rankings per website, demand per theme and movers.
  */
-import { CloudDownloadOutlined, DownloadOutlined, UploadOutlined } from '@ant-design/icons';
+import { CloudDownloadOutlined, UploadOutlined } from '@ant-design/icons';
 import {
   Alert as AntAlert,
   App as AntApp,
@@ -20,7 +20,6 @@ import {
 import { useMemo, useState } from 'react';
 import type { Project } from '../api/projects';
 import {
-  researchApi,
   useEstimate,
   useImport,
   useMovers,
@@ -33,6 +32,7 @@ import {
   type ThemeDemand,
   type WebsiteResearch,
 } from '../api/research';
+import { DownloadMenu } from '../components/DownloadMenu';
 import { QueryState } from '../components/QueryState';
 import { RESEARCH } from '../vocabulary';
 import { SuggestedCompetitors } from './SuggestedCompetitors';
@@ -306,9 +306,7 @@ export function ResearchTab({ project, token }: { project: Project; token: strin
           ) : (
             <Space direction="vertical" size={16} style={{ width: '100%' }}>
               <Space wrap>
-                <Button icon={<DownloadOutlined />} href={researchApi.workbookUrl(project.project_id)}>
-                  {RESEARCH.workbook}
-                </Button>
+                <DownloadMenu projectId={project.project_id} reportKey="research" />
                 <Typography.Text type="secondary">
                   {RESEARCH.addedAt(new Date(snap.created_at).toLocaleString(), snap.units_spent)}
                 </Typography.Text>

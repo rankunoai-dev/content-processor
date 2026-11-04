@@ -129,7 +129,13 @@ describe('themes tab', () => {
       expect(await screen.findByText('Secure print, release')).toBeInTheDocument();
       expect(sent[0]?.headers['X-Project-Token']).toBe('tok-1');
       expect(screen.getByText('Build again')).toBeInTheDocument();
-      expect(screen.getByText('Download workbook').closest('a')).toHaveAttribute('href', '/api/projects/p1/themes/workbook');
+      await user.click(screen.getByText('Download').closest('button') as HTMLElement);
+      expect((await screen.findByText('Excel (.xlsx)')).closest('a')).toHaveAttribute(
+        'href',
+        '/api/projects/p1/exports/themes.xlsx',
+      );
+      expect(screen.getByText('CSV').closest('a')).toHaveAttribute('href', '/api/projects/p1/exports/themes.csv');
+      expect(screen.getByText('Word (.docx)').closest('a')).toHaveAttribute('href', '/api/projects/p1/exports/themes.docx');
     },
     TIMEOUT,
   );

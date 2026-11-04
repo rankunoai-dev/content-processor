@@ -1,6 +1,6 @@
 # Content Processor: A Plain-Language Guide
 
-Last updated: 4 November 2026 · Code version: main after suggested competitors (asked for at project creation, found in the search data), the full page-by-page report in project reports, project reports (duplication and contradictions by topic across all of the client's websites), Claude Desktop connectors per module, the home screen with module tiles, the shared scrape queue, the Claude Desktop connection (a read-only MCP server) and the "Open in Claude.ai" button · Maintained by every session that adds a significant feature (see "Keeping this guide current" at the end)
+Last updated: 4 November 2026 · Code version: main after downloads in every module (Excel, CSV and Word, and everything in one zip), suggested competitors (asked for at project creation, found in the search data), the full page-by-page report in project reports, project reports (duplication and contradictions by topic across all of the client's websites), Claude Desktop connectors per module, the home screen with module tiles, the shared scrape queue, the Claude Desktop connection (a read-only MCP server) and the "Open in Claude.ai" button · Maintained by every session that adds a significant feature (see "Keeping this guide current" at the end)
 
 ## 1. What this is, in one paragraph
 
@@ -380,6 +380,16 @@ Two ways to use your own Claude account with the app, without an API key or API 
 
 Both send the project's data to Claude through your account, so they are for clients whose data may go to Claude (the data policy question is still open). Search now also works when the local meaning model is off: it falls back to exact words and says so.
 
+### Step 22: Downloads (every report, in Excel, CSV or Word)
+
+Everything the modules show can be taken away as a file. Each module tab (Themes, Monitoring, Research, Gaps, and the Suggested competitors panel) has a **Download** button with three choices:
+
+- **Excel (.xlsx)**: every row and the full text, one sheet per table. The file to work in.
+- **CSV**: the same tables for other tools (one file, or a zip with one file per table).
+- **Word (.docx)**: the report laid out for reading and sharing: a title, what it is and when its data was made, a short summary, then each table. Word is not made for thousands of rows, so a long table shows its first 300 rows and a very long cell its first 600 characters, each time with a line saying so; the Excel file always has everything.
+
+A project's **Downloads** tab lists every report at once (project overview with its websites and scrapes, themes, monitoring, search data, suggested competitors, gaps, analyst card runs), says which are ready and, for the others, what to do first ("Build the theme map in the Themes tab first"), and has **Download everything (zip)**: every ready report in all three formats, with a short read-me. Each analyst card result can also be downloaded as a Word document next to the Markdown file. Reports are made on request from each module's latest results: nothing is scraped, pulled or paid for to make them. The page-by-page scrape reports stay in the Reports and Project reports tabs.
+
 ## 5. Safety and cost promises
 
 - Read-only: the engine never submits forms, logs in, buys, unsubscribes or clicks anything that changes the website.
@@ -446,6 +456,7 @@ Both send the project's data to Claude through your account, so they are for cli
 
 | Date | Significant change |
 |---|---|
+| 2026-11-04 | Downloads everywhere: a Download button in every module (Excel, CSV or Word) and a Downloads tab per project listing every report (overview, themes, monitoring, search data, suggested competitors, gaps, analyst runs) with what each needs first, plus everything in one zip; analyst card results also as Word. Made from the latest results, at no cost. |
 | 2026-11-04 | Competitors: creating a project asks who the client competes with (once more if none is named). The engine keeps the competitors the search data reveals (Semrush organic competitors in every pull, a free Semrush competitors export, the top 10 of pulled keywords) as suggestions with their figures; add one to the project or dismiss it in the Research tab. Close competitors not in the project appear in the gap analysis, and Claude can read the suggestions. |
 | 2026-11-04 | Project reports include the full page-by-page project report (Pages with whole content, Matching content with the shared text) for all of the client's websites; builds run in the background. |
 | 2026-11-03 | Answer templates in Claude Desktop: the app lays out each checked answer by type (answer, overview, findings by priority, comparison, page review, what changed, keywords) with a title, an "In short" summary, next steps, a sources-checked line and linked sources; seven ready-made requests in Claude Desktop's prompt menu. |

@@ -3,7 +3,14 @@
  * card, the project's card runs, and a viewer with live progress, the citation
  * check and the deliverable (or context pack).
  */
-import { CopyOutlined, DownloadOutlined, ExportOutlined, FileSearchOutlined, PlayCircleOutlined } from '@ant-design/icons';
+import {
+  CopyOutlined,
+  DownloadOutlined,
+  ExportOutlined,
+  FileSearchOutlined,
+  FileWordOutlined,
+  PlayCircleOutlined,
+} from '@ant-design/icons';
 import {
   Alert,
   App as AntApp,
@@ -41,8 +48,9 @@ import {
   type RunEvent,
 } from '../api/analyst';
 import type { Project } from '../api/projects';
+import { exportsApi } from '../api/exports';
 import { QueryState } from '../components/QueryState';
-import { ANALYST } from '../vocabulary';
+import { ANALYST, EXPORTS } from '../vocabulary';
 
 const MODULE_ORDER = ['content', 'theming', 'research', 'monitoring', 'gap', 'playground'];
 
@@ -397,6 +405,13 @@ function RunDrawer({
                         onClick={() => download(`${record.card_id}-${record.run_id}.md`, text)}
                       >
                         {ANALYST.viewer.download}
+                      </Button>
+                      <Button
+                        size="small"
+                        icon={<FileWordOutlined />}
+                        href={exportsApi.cardResultUrl(project.project_id, record.run_id, 'docx')}
+                      >
+                        {EXPORTS.word}
                       </Button>
                     </Space>
                   ) : null

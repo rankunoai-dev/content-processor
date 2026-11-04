@@ -2,7 +2,7 @@
  * The project's "Themes" tab: build the theme map, see each theme's ownership and
  * pages per website, its topics and pillar pages, and the funnel per website.
  */
-import { BranchesOutlined, DownloadOutlined } from '@ant-design/icons';
+import { BranchesOutlined } from '@ant-design/icons';
 import {
   Alert,
   App as AntApp,
@@ -19,7 +19,8 @@ import {
 } from 'antd';
 import { useMemo, useState } from 'react';
 import type { Project } from '../api/projects';
-import { themesApi, useBuildThemes, useThemeMap, type Theme, type ThemeMap } from '../api/themes';
+import { useBuildThemes, useThemeMap, type Theme, type ThemeMap } from '../api/themes';
+import { DownloadMenu } from '../components/DownloadMenu';
 import { QueryState } from '../components/QueryState';
 import { THEMES } from '../vocabulary';
 
@@ -182,9 +183,7 @@ export function ThemesTab({ project, token }: { project: Project; token: string 
                 </Button>
               </Tooltip>
               {m !== null ? (
-                <Button icon={<DownloadOutlined />} href={themesApi.workbookUrl(project.project_id)}>
-                  {THEMES.workbook}
-                </Button>
+                <DownloadMenu projectId={project.project_id} reportKey="themes" />
               ) : null}
               {m !== null ? (
                 <Typography.Text type="secondary">

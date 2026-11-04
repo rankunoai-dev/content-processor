@@ -63,6 +63,7 @@ import {
 } from '../api/projects';
 import { QueryState } from '../components/QueryState';
 import { AnalystTab } from './AnalystTab';
+import { DownloadsTab } from './DownloadsTab';
 import { ThemesTab } from './ThemesTab';
 import { StartDialog } from './StartDialog';
 import { MonitoringTab } from './MonitoringTab';
@@ -72,7 +73,7 @@ import { ProjectReportsTab } from './ProjectReportsTab';
 import { StatusBar, StatusLegend } from '../components/StatusBar';
 import { PageHeading } from '../components/bits';
 import { moduleByTab } from '../modules';
-import { MODULES_TEXT, PROJECTS, PROJECT_REPORTS, QUEUE, formatDate, reportKind, roughDuration, ANALYST, GAPS, MONITORING, RESEARCH, THEMES } from '../vocabulary';
+import { MODULES_TEXT, PROJECTS, PROJECT_REPORTS, QUEUE, formatDate, reportKind, roughDuration, ANALYST, EXPORTS, GAPS, MONITORING, RESEARCH, THEMES } from '../vocabulary';
 
 const STATUS_COLOR: Record<string, string> = {
   queued: 'default',
@@ -1308,6 +1309,7 @@ export default function ProjectPage() {
                 { key: 'research', label: RESEARCH.tab, children: <ResearchTab project={p} token={token} /> },
                 { key: 'gaps', label: GAPS.tab, children: <GapsTab project={p} token={token} /> },
                 { key: 'analyst', label: ANALYST.tab, children: <AnalystTab project={p} token={token} /> },
+                { key: 'downloads', label: EXPORTS.tab, children: <DownloadsTab project={p} /> },
                 { key: 'settings', label: PROJECTS.tabs.settings, children: <SettingsTab project={p} token={token} /> },
               ]}
             />

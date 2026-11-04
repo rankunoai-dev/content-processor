@@ -11,6 +11,7 @@ import {
   useImportCompetitors,
   type CompetitorSuggestion,
 } from '../api/research';
+import { DownloadMenu } from '../components/DownloadMenu';
 import { QueryState } from '../components/QueryState';
 import { COMPETITORS } from '../vocabulary';
 
@@ -65,7 +66,9 @@ export function SuggestedCompetitors({ projectId, token }: { projectId: string; 
       size="small"
       title={COMPETITORS.title}
       extra={
-        <Upload
+        <Space wrap size={6}>
+          <DownloadMenu projectId={projectId} reportKey="competitors" size="small" />
+          <Upload
           accept=".csv,text/csv"
           showUploadList={false}
           disabled={token === null}
@@ -86,7 +89,8 @@ export function SuggestedCompetitors({ projectId, token }: { projectId: string; 
           <Button size="small" icon={<UploadOutlined />} loading={upload.isPending} disabled={token === null}>
             {COMPETITORS.importExport}
           </Button>
-        </Upload>
+          </Upload>
+        </Space>
       }
     >
       <Space direction="vertical" style={{ width: '100%' }}>

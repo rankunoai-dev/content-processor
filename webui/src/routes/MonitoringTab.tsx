@@ -2,7 +2,7 @@
  * The project's "Monitoring" tab: run a check, read its alerts, what changed on each
  * website and how themes moved, and set how the project is watched.
  */
-import { DownloadOutlined, RadarChartOutlined } from '@ant-design/icons';
+import { RadarChartOutlined } from '@ant-design/icons';
 import {
   Alert as AntAlert,
   App as AntApp,
@@ -22,7 +22,6 @@ import {
 } from 'antd';
 import { useEffect } from 'react';
 import {
-  monitoringApi,
   useMonitorCheck,
   useRunCheck,
   useSetWatch,
@@ -33,6 +32,7 @@ import {
   type WatchSettings,
 } from '../api/monitoring';
 import type { Project } from '../api/projects';
+import { DownloadMenu } from '../components/DownloadMenu';
 import { QueryState } from '../components/QueryState';
 import { MONITORING, THEMES } from '../vocabulary';
 
@@ -272,9 +272,7 @@ export function MonitoringTab({ project, token }: { project: Project; token: str
                 </Button>
               </Tooltip>
               {c !== null ? (
-                <Button icon={<DownloadOutlined />} href={monitoringApi.workbookUrl(project.project_id)}>
-                  {MONITORING.workbook}
-                </Button>
+                <DownloadMenu projectId={project.project_id} reportKey="monitoring" />
               ) : null}
               {c !== null ? (
                 <Typography.Text type="secondary">

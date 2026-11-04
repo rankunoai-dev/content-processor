@@ -2,7 +2,7 @@
  * The project's "Gaps" tab: build the gap analysis, filter its findings, read the
  * evidence behind each one and record what the team decided.
  */
-import { AimOutlined, DownloadOutlined } from '@ant-design/icons';
+import { AimOutlined } from '@ant-design/icons';
 import {
   Alert as AntAlert,
   App as AntApp,
@@ -18,8 +18,9 @@ import {
   Typography,
 } from 'antd';
 import { useState } from 'react';
-import { gapsApi, useBuildGaps, useGaps, useSetStatus, type Finding, type FindingStatus, type GapReport } from '../api/gaps';
+import { useBuildGaps, useGaps, useSetStatus, type Finding, type FindingStatus, type GapReport } from '../api/gaps';
 import type { Project } from '../api/projects';
+import { DownloadMenu } from '../components/DownloadMenu';
 import { QueryState } from '../components/QueryState';
 import { GAPS } from '../vocabulary';
 
@@ -161,9 +162,7 @@ export function GapsTab({ project, token }: { project: Project; token: string | 
                 </Button>
               </Tooltip>
               {r !== null ? (
-                <Button icon={<DownloadOutlined />} href={gapsApi.workbookUrl(project.project_id)}>
-                  {GAPS.workbook}
-                </Button>
+                <DownloadMenu projectId={project.project_id} reportKey="gaps" />
               ) : null}
               {r !== null ? (
                 <Typography.Text type="secondary">

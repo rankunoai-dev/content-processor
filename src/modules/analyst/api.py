@@ -18,15 +18,19 @@ from __future__ import annotations
 
 import asyncio
 import json
+import shutil
+import tempfile
 import threading
 from collections.abc import AsyncIterator
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Annotated, Any
 
 from fastapi import FastAPI, Header, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import Field
+from starlette.background import BackgroundTask
 
 from src.core.schemas import StrictModel
 from src.modules.analyst.library import CARDS, card
@@ -35,6 +39,7 @@ from src.modules.analyst.runs import CardRunner
 from src.modules.analyst.tools import TOOLS
 from src.modules.content_processor.projects.security import TokenSigner
 from src.modules.content_processor.projects.store import ProjectNotFoundError
+from src.modules.reports.writers import markdown_to_docx, word_available
 
 __all__ = ["AnalystWorker", "register_analyst_routes"]
 
@@ -196,6 +201,35 @@ def register_analyst_routes(
         if name and (folder / name).exists():
             text = (folder / name).read_text(encoding="utf-8")[:_MAX_TEXT]
         return RunDetail(record=record, text=text, events=runner.runs.events(run_id))
+
+    @app.get("/api/projects/{project_id}/analyst/runs/{run_id}/result/{file_name}")
+    def run_result(project_id: str, run_id: str, file_name: str) -> FileResponse:
+        record = run_of(project_id, run_id)
+        folder = runner.runs.folder(run_id)
+        name = record.files.get("deliverable") or record.files.get("context_pack")
+        if not name or not (folder / name).exists():
+            raise HTTPException(status_code=404, detail="This run has no result to download yet.")
+        source = folder / name
+        title = f"{chosen_card(record.card_id).title} ({run_id})"
+        stem = f"{record.card_id}_{run_id}_{name.removesuffix('.md')}"
+        if file_name == "result.md":
+            return FileResponse(
+                source,
+                filename=f"{stem}.md",
+                media_type="text/markdown",
+                content_disposition_type="attachment",
+            )
+        if file_name != "result.docx" or not word_available():
+            raise HTTPException(status_code=404, detail="There is no such download.")
+        out = Path(tempfile.mkdtemp(prefix="cp-card-"))
+        path = markdown_to_docx(source.read_text(encoding="utf-8"), out / stem, title)
+        return FileResponse(
+            path,
+            filename=path.name,
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            content_disposition_type="attachment",
+            background=BackgroundTask(shutil.rmtree, out, ignore_errors=True),
+        )
 
     @app.get("/api/projects/{project_id}/analyst/runs/{run_id}/events")
     async def run_events(project_id: str, run_id: str) -> StreamingResponse:
