@@ -7,6 +7,12 @@ Every call is priced at its worst case (the line limit times the report's units 
 line, from `UNITS_PER_LINE`) and refused when that would cross the pull or monthly cap,
 before anything is sent; the actual cost (lines returned) is logged afterwards.
 
+Calls are **paced**: one `Pacer` shared by every pull of the app server waits so two
+calls are at least `CP_SEMRUSH_MIN_INTERVAL_MS` apart (500 ms: two a second), well under
+Semrush's limit, so pulls run steadily instead of in bursts. An HTTP 429 (too many
+requests) is retried twice, after the server's `Retry-After` or a growing pause; the
+units of a refused call are not charged.
+
 The per-line costs below follow Semrush's documentation where it states them (organic
 results and domain overview 10 units, keyword difficulty 50); check them against your
 plan. An unknown report is priced at 50 units per line.
@@ -18,7 +24,8 @@ import csv
 import io
 import json
 import threading
-from collections.abc import Mapping
+import time
+from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Final
@@ -29,6 +36,8 @@ from src.core.schemas import StrictModel
 
 __all__ = [
     "BASE_URL",
+    "SHARED_PACER",
+    "Pacer",
     "UNITS_PER_LINE",
     "SemrushClient",
     "SemrushError",
@@ -48,6 +57,51 @@ UNITS_PER_LINE: Final[dict[str, int]] = {
 }
 _UNKNOWN_UNITS = 50
 _LOCK = threading.Lock()
+
+
+_RETRIES: Final = 2
+_BACKOFF_S: Final = 2.0
+_MAX_RETRY_AFTER_S: Final = 60.0
+
+
+class Pacer:
+    """Keeps calls at least `interval_s` apart (thread-safe; shared by every pull)."""
+
+    def __init__(
+        self,
+        interval_s: float = 0.5,
+        *,
+        clock: Callable[[], float] = time.monotonic,
+        sleep: Callable[[float], None] = time.sleep,
+    ) -> None:
+        """Bind to a minimum interval; `clock` and `sleep` are injectable for tests."""
+        self.interval_s = interval_s
+        self._clock = clock
+        self._sleep = sleep
+        self._next = 0.0
+        self._lock = threading.Lock()
+        self.waited_s = 0.0
+        self.calls = 0
+
+    def wait(self) -> float:
+        """Block until the next call may go; returns how long it waited."""
+        with self._lock:
+            now = self._clock()
+            pause = max(0.0, self._next - now)
+            if pause:
+                self._sleep(pause)
+            self._next = max(now, self._next) + self.interval_s
+            self.waited_s += pause
+            self.calls += 1
+            return pause
+
+    def hold(self, seconds: float) -> None:
+        """Push the next call back (after a 429 or a Retry-After)."""
+        with self._lock:
+            self._next = max(self._next, self._clock() + seconds)
+
+
+SHARED_PACER: Final = Pacer()
 
 
 class SemrushError(RuntimeError):
@@ -159,6 +213,15 @@ def parse_rows(text: str) -> list[dict[str, str]]:
     return [{k.strip(): (v or "").strip() for k, v in row.items() if k} for row in reader]
 
 
+def _retry_after(response: httpx.Response, attempt: int) -> float:
+    """The server's Retry-After (seconds), else a growing pause."""
+    raw = response.headers.get("retry-after", "")
+    try:
+        return min(_MAX_RETRY_AFTER_S, max(0.0, float(raw)))
+    except ValueError:
+        return _BACKOFF_S * attempt
+
+
 class SemrushClient:
     """The Analytics API reports the Research module uses, each priced before it is sent."""
 
@@ -171,26 +234,40 @@ class SemrushClient:
         *,
         client: httpx.Client | None = None,
         base_url: str = BASE_URL,
+        pacer: Pacer | None = None,
     ) -> None:
-        """Bind to a key, the pull's budget and the unit log."""
+        """Bind to a key, the pull's budget and the unit log (paced by `SHARED_PACER`)."""
         self._key = api_key
         self.budget = budget
         self.log = log
         self.project_id = project_id
         self._client = client or httpx.Client(timeout=60.0)
         self._base = base_url
+        self.pacer = pacer or SHARED_PACER
+        self.retries = 0
 
     def _call(
         self, report: str, params: Mapping[str, str], lines: int, target: str
     ) -> list[dict[str, str]]:
         self.budget.reserve(report, lines)
         query = {"type": report, "key": self._key, "display_limit": str(lines), **params}
-        try:
-            response = self._client.get(self._base, params=query)
-            response.raise_for_status()
-        except httpx.HTTPError as exc:
-            msg = f"could not reach Semrush for {report}: {type(exc).__name__}"
-            raise SemrushError(msg) from exc
+        attempt = 0
+        while True:
+            self.pacer.wait()
+            try:
+                response = self._client.get(self._base, params=query)
+                if response.status_code == 429 and attempt < _RETRIES:
+                    attempt += 1
+                    self.retries += 1
+                    self.pacer.hold(_retry_after(response, attempt))
+                    continue
+                response.raise_for_status()
+            except httpx.HTTPError as exc:
+                msg = f"could not reach Semrush for {report}: {type(exc).__name__}"
+                if isinstance(exc, httpx.HTTPStatusError):
+                    msg += f" (HTTP {exc.response.status_code})"
+                raise SemrushError(msg) from exc
+            break
         rows = parse_rows(response.text)
         units = len(rows) * UNITS_PER_LINE.get(report, _UNKNOWN_UNITS)
         self.budget.charge(units)

@@ -8,6 +8,7 @@ import {
   App as AntApp,
   Button,
   Card,
+  Checkbox,
   Empty,
   Input,
   Select,
@@ -94,6 +95,7 @@ function ImportCard({ project, token }: { project: Project; token: string | null
 function PullCard({ project, token }: { project: Project; token: string | null }) {
   const status = useResearchStatus();
   const [text, setText] = useState('');
+  const [refresh, setRefresh] = useState(false);
   const keywords = text
     .split('\n')
     .map((k) => k.trim())
@@ -114,10 +116,13 @@ function PullCard({ project, token }: { project: Project; token: string | null }
             <Space direction="vertical" style={{ width: '100%' }}>
               <Typography.Text>{RESEARCH.budget(s.used_this_month, s.monthly_cap)}</Typography.Text>
               {estimate.data ? (
-                <Typography.Text type={over ? 'danger' : 'secondary'}>
+                <Typography.Text type={over ? 'warning' : 'secondary'}>
                   {RESEARCH.estimate(estimate.data.worst_case_units, estimate.data.websites, estimate.data.pull_cap)}
-                  {over ? ` ${RESEARCH.overCap}` : ''}
+                  {over ? ` ${RESEARCH.shared}` : ''}
                 </Typography.Text>
+              ) : null}
+              {s.min_interval_ms !== undefined && s.fresh_days !== undefined ? (
+                <Typography.Text type="secondary">{RESEARCH.pacing(s.min_interval_ms, s.fresh_days)}</Typography.Text>
               ) : null}
               <Input.TextArea
                 aria-label={RESEARCH.keywords}
@@ -127,13 +132,18 @@ function PullCard({ project, token }: { project: Project; token: string | null }
                 onChange={(e) => setText(e.target.value)}
                 disabled={token === null}
               />
+              {s.fresh_days ? (
+                <Checkbox checked={refresh} onChange={(e) => setRefresh(e.target.checked)} disabled={token === null}>
+                  {RESEARCH.refresh(s.fresh_days)}
+                </Checkbox>
+              ) : null}
               <Button
                 icon={<CloudDownloadOutlined />}
-                disabled={token === null || over}
+                disabled={token === null}
                 loading={pull.isPending}
                 onClick={() =>
                   pull.mutate(
-                    { keywords, token },
+                    { keywords, token, refresh },
                     {
                       onSuccess: (snap) => void message.success(RESEARCH.pulled(snap.units_spent)),
                       onError: (e) => void message.error(e.message),

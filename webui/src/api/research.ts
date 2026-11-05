@@ -80,6 +80,8 @@ export interface ResearchStatus {
   pull_cap: number;
   keyword_limit: number;
   database: string;
+  min_interval_ms?: number;
+  fresh_days?: number;
 }
 
 export interface Estimate {
@@ -157,10 +159,10 @@ export const researchApi = {
     moduleRequest<Estimate>(`${path(projectId)}/estimate?keywords=${keywords}`, { signal }),
   movers: (projectId: string, signal?: AbortSignal) =>
     orNull(moduleRequest<Mover[]>(`${path(projectId)}/movers`, { signal }), 'Add research again'),
-  pull: (projectId: string, keywords: string[], token: string | null) =>
+  pull: (projectId: string, keywords: string[], token: string | null, refresh = false) =>
     moduleRequest<ResearchSnapshot>(
       `${path(projectId)}/pull`,
-      { method: 'POST', body: JSON.stringify({ keywords }) },
+      { method: 'POST', body: JSON.stringify(refresh ? { keywords, refresh } : { keywords }) },
       token,
     ),
   importFile: async (projectId: string, website: string, file: File, token: string | null) =>
@@ -222,8 +224,8 @@ function useSaved(projectId: string) {
 export function usePull(projectId: string) {
   const saved = useSaved(projectId);
   return useMutation({
-    mutationFn: (args: { keywords: string[]; token: string | null }) =>
-      researchApi.pull(projectId, args.keywords, args.token),
+    mutationFn: (args: { keywords: string[]; token: string | null; refresh?: boolean }) =>
+      researchApi.pull(projectId, args.keywords, args.token, args.refresh ?? false),
     onSuccess: saved,
   });
 }

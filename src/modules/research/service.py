@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import httpx
@@ -12,7 +12,13 @@ import httpx
 from src.modules.analyst.playground import Playground
 from src.modules.content_processor.projects.store import ProjectStore
 from src.modules.content_processor.webapi.projects_api import KnowledgeAccess
-from src.modules.research.build import finish_snapshot, import_website, movers, pull_snapshot
+from src.modules.research.build import (
+    MIN_KEYWORDS,
+    finish_snapshot,
+    import_website,
+    movers,
+    pull_snapshot,
+)
 from src.modules.research.competitors import (
     COMPETITOR_LINES,
     CompetitorBook,
@@ -25,8 +31,14 @@ from src.modules.research.competitors import (
     with_project_status,
 )
 from src.modules.research.importer import read_positions_csv
-from src.modules.research.models import ResearchSnapshot
-from src.modules.research.semrush import UNITS_PER_LINE, SemrushClient, UnitBudget, UnitLog
+from src.modules.research.models import ResearchSnapshot, WebsiteResearch
+from src.modules.research.semrush import (
+    UNITS_PER_LINE,
+    Pacer,
+    SemrushClient,
+    UnitBudget,
+    UnitLog,
+)
 from src.modules.research.store import ResearchStore, write_research_workbook
 from src.modules.theming.models import ThemeMap
 from src.modules.theming.service import build_project_themes, theme_store
@@ -56,6 +68,8 @@ class ResearchSettings:
     pull_units: int = 5000
     database: str = "us"
     keyword_limit: int = 200
+    min_interval_ms: int = 500
+    fresh_days: int = 14
 
     @classmethod
     def from_env(cls) -> ResearchSettings:
@@ -70,6 +84,8 @@ class ResearchSettings:
             pull_units=s.cp_semrush_pull_units,
             database=s.cp_semrush_database,
             keyword_limit=s.cp_semrush_keyword_limit,
+            min_interval_ms=s.cp_semrush_min_interval_ms,
+            fresh_days=s.cp_semrush_fresh_days,
         )
 
 
@@ -197,9 +213,15 @@ def pull_project(
     *,
     serp_keywords: Sequence[str] = (),
     http: Callable[[], httpx.Client] | None = None,
+    refresh: bool = False,
+    pacer: Pacer | None = None,
 ) -> tuple[ResearchSnapshot, dict[str, str]]:
-    """Pull the project's websites from Semrush (refused unless switched on and capped)."""
-    from src.modules.research.semrush import SemrushError
+    """Pull the project's websites from Semrush (refused unless switched on and capped).
+
+    Websites pulled less than `fresh_days` ago are reused (unless `refresh`); the rest
+    share the budget fairly (see `build.pull_snapshot`). Calls are paced.
+    """
+    from src.modules.research.semrush import SHARED_PACER, SemrushError
 
     log = unit_log(projects)
     budget = UnitBudget(
@@ -212,16 +234,26 @@ def pull_project(
     if refusal or not settings.api_key:
         raise SemrushError(refusal or "SEMRUSH_API_KEY is not set in .env")
     play = Playground(projects, access, [project_id])
-    worst = estimate_units(len(play.websites()), settings, len(serp_keywords))
-    if worst > budget.left:
+    reuse = {} if refresh else _fresh(projects, project_id, settings)
+    competitors_fresh = not refresh and _competitors_fresh(projects, project_id, settings)
+    reserve = len(serp_keywords) * (
+        UNITS_PER_LINE["phrase_this"] + 10 * UNITS_PER_LINE["phrase_organic"]
+    ) + (0 if competitors_fresh else COMPETITOR_LINES * UNITS_PER_LINE["domain_organic_organic"])
+    to_pull = len([w for w in play.websites() if w.key not in reuse])
+    need = UNITS_PER_LINE["domain_ranks"] + MIN_KEYWORDS * UNITS_PER_LINE["domain_organic"]
+    if to_pull and (budget.left - reserve) // to_pull < need:
         msg = (
-            f"this pull could use up to {worst} units ({len(play.websites())} websites x "
-            f"{settings.keyword_limit} keywords); only {budget.left} are allowed: lower "
-            "CP_SEMRUSH_KEYWORD_LIMIT or raise the caps"
+            f"the pull may use {budget.left} units; after {reserve} for the chosen keywords and "
+            f"the competitor report, each of the {to_pull} websites would get "
+            f"{max(0, budget.left - reserve) // to_pull}, and at least {need} are needed (its "
+            f"overview and {MIN_KEYWORDS} keywords): raise CP_SEMRUSH_PULL_UNITS or the monthly "
+            "cap, or pull fewer keywords"
         )
         raise SemrushError(msg)
+    pace = pacer or SHARED_PACER
+    pace.interval_s = settings.min_interval_ms / 1000
     client = SemrushClient(
-        settings.api_key, budget, log, project_id, client=http() if http else None
+        settings.api_key, budget, log, project_id, client=http() if http else None, pacer=pace
     )
     try:
         snapshot = pull_snapshot(
@@ -230,11 +262,48 @@ def pull_project(
             database=settings.database,
             keyword_limit=settings.keyword_limit,
             serp_keywords=serp_keywords,
+            reserve=reserve,
+            reuse=reuse,
         )
-        snapshot = _pull_competitors(projects, project_id, client, settings, snapshot)
+        if competitors_fresh:
+            note = "Competitor suggestions are recent: the competitor report was not pulled again"
+            snapshot = snapshot.model_copy(update={"notes": [*snapshot.notes, note]})
+        else:
+            snapshot = _pull_competitors(projects, project_id, client, settings, snapshot)
+        if client.retries:
+            note = (
+                f"Semrush asked to slow down {client.retries} time(s); the pull waited and went on"
+            )
+            snapshot = snapshot.model_copy(update={"notes": [*snapshot.notes, note]})
     finally:
         client.close()
     return _save(projects, finish_snapshot(snapshot, _theme_map(projects, access, project_id)))
+
+
+def _fresh(
+    projects: ProjectStore, project_id: str, settings: ResearchSettings
+) -> dict[str, WebsiteResearch]:
+    """Websites of the latest snapshot pulled from Semrush less than `fresh_days` ago."""
+    if settings.fresh_days <= 0:
+        return {}
+    latest = research_store(projects).latest(project_id)
+    cutoff = datetime.now(UTC) - timedelta(days=settings.fresh_days)
+    return {
+        w.website: w
+        for w in (latest.websites if latest else [])
+        if w.source == "semrush_api" and w.pulled_at >= cutoff and w.keywords
+    }
+
+
+def _competitors_fresh(projects: ProjectStore, project_id: str, settings: ResearchSettings) -> bool:
+    """True when Semrush's competitor report was pulled less than `fresh_days` ago."""
+    if settings.fresh_days <= 0:
+        return False
+    book = competitors_store(projects).get(project_id)
+    cutoff = datetime.now(UTC) - timedelta(days=settings.fresh_days)
+    return book is not None and any(
+        "semrush_competitors" in s.sources and s.last_seen >= cutoff for s in book.suggestions
+    )
 
 
 def import_csv(

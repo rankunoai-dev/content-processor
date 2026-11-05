@@ -3,6 +3,13 @@
 - **Pull**: for every website in the project's scope, its domain overview and the
   keywords it ranks for (up to the keyword limit, by traffic); optionally demand and
   the top results for chosen keywords. Every call is priced and capped first.
+  **Fair split**: the pull budget (after what the chosen keywords and the competitor
+  report need) is shared out website by website, client first: each gets an equal
+  share of what is left, so the first website cannot use up what the others need,
+  and what one does not use passes to the next. A website whose share cannot pay for
+  its overview and `MIN_KEYWORDS` keywords is left out, with a note.
+  **Fresh data is reused**: websites in `reuse` (pulled recently) are copied from the
+  previous snapshot instead of being paid for again.
 - **Import**: one website's Semrush "Organic Positions" export; the other websites keep
   the data of the latest snapshot.
 
@@ -16,7 +23,7 @@ the click-through rate of its position).
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Literal
 
@@ -33,11 +40,13 @@ from src.modules.research.models import (
     ThemeDemand,
     WebsiteResearch,
 )
-from src.modules.research.semrush import SemrushClient
+from src.modules.research.semrush import UNITS_PER_LINE, SemrushClient
 from src.modules.theming.models import ThemeMap
 
 __all__ = [
     "CTR",
+    "MIN_KEYWORDS",
+    "fair_lines",
     "estimated_visits",
     "finish_snapshot",
     "import_website",
@@ -60,6 +69,7 @@ CTR: dict[int, float] = {
     10: 0.018,
 }
 _PAGE_TWO = 0.01
+MIN_KEYWORDS = 10
 _WORD = re.compile(r"[a-z0-9]+")
 _MATCH_SHARE = 0.5
 _MOVE = 3
@@ -107,6 +117,13 @@ def _role(play: Playground, website: object) -> Literal["client", "competitor"]:
     return "client" if play.role_in_run(website) == "client" else "competitor"  # type: ignore[arg-type]
 
 
+def fair_lines(left: int, websites_left: int, keyword_limit: int) -> tuple[int, int]:
+    """(keyword lines, units share) for the next website: an equal share of what is left."""
+    share = left // max(1, websites_left)
+    lines = (share - UNITS_PER_LINE["domain_ranks"]) // UNITS_PER_LINE["domain_organic"]
+    return max(0, min(keyword_limit, lines)), share
+
+
 def pull_snapshot(
     play: Playground,
     client: SemrushClient,
@@ -114,14 +131,44 @@ def pull_snapshot(
     database: str,
     keyword_limit: int,
     serp_keywords: Sequence[str] = (),
+    reserve: int = 0,
+    reuse: Mapping[str, WebsiteResearch] | None = None,
 ) -> ResearchSnapshot:
-    """Pull every website of the scope (and the chosen keywords) from Semrush."""
+    """Pull every website of the scope (and the chosen keywords) from Semrush.
+
+    `reserve` units are kept for calls made after the websites (the chosen keywords
+    are pulled here, after the websites; the competitor report by the caller).
+    """
     created, snapshot_id = _now_id("research-")
     websites: list[WebsiteResearch] = []
     notes: list[str] = []
-    for website in play.websites():
+    kept = dict(reuse or {})
+    order = sorted(play.websites(), key=lambda w: (_role(play, w) != "client", w.name.lower()))
+    to_pull = [w for w in order if w.key not in kept]
+    shares: list[str] = []
+    for website in order:
+        if website.key in kept:
+            old = kept[website.key]
+            websites.append(
+                old.model_copy(
+                    update={
+                        "note": f"reused from the pull of {old.pulled_at:%d %b %Y} "
+                        "(recent enough; not paid for again)"
+                    }
+                )
+            )
+            continue
+        remaining = len(to_pull) - to_pull.index(website)
+        lines, share = fair_lines(client.budget.left - reserve, remaining, keyword_limit)
+        if lines < MIN_KEYWORDS:
+            notes.append(
+                f"{website.name} was left out: its share of the pull budget ({share} units) "
+                f"cannot pay for its overview and {MIN_KEYWORDS} keywords"
+            )
+            continue
         overview = _overview(client.domain_overview(website.key, database))
-        rows = keyword_rows(client.domain_organic(website.key, database, keyword_limit))
+        rows = keyword_rows(client.domain_organic(website.key, database, lines))
+        shares.append(f"{website.name} {lines}")
         websites.append(
             WebsiteResearch(
                 website=website.key,
@@ -132,8 +179,12 @@ def pull_snapshot(
                 overview=overview,
                 keywords=rows,
                 note="" if rows else "Semrush has no ranking keywords for this domain",
-                keyword_limit=keyword_limit,
+                keyword_limit=lines,
             )
+        )
+    if shares and any(not s.endswith(f" {keyword_limit}") for s in shares):
+        notes.append(
+            "The pull budget was shared fairly: keywords asked per website: " + ", ".join(shares)
         )
     keywords: list[KeywordMetrics] = []
     for phrase in dict.fromkeys(p.strip() for p in serp_keywords if p.strip()):

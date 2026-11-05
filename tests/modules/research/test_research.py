@@ -104,7 +104,13 @@ def semrush(rival_found: bool = True, calls: list[dict[str, str]] | None = None)
 
 
 ON = ResearchSettings(
-    enabled=True, api_key="k", monthly_units=100_000, pull_units=10_000, keyword_limit=50
+    enabled=True,
+    api_key="k",
+    monthly_units=100_000,
+    pull_units=10_000,
+    keyword_limit=50,
+    min_interval_ms=0,  # tests do not wait between calls
+    fresh_days=0,  # every test pull really pulls
 )
 
 
@@ -245,7 +251,7 @@ def test_pull_is_refused_without_switch_key_cap_or_room(themed: World) -> None:
             ResearchSettings(
                 enabled=True, api_key="k", monthly_units=10**6, pull_units=100, keyword_limit=200
             ),
-            "could use up to",
+            "at least 110 are needed",
         ),
     ]:
         with pytest.raises(SemrushError, match=message):

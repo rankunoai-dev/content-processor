@@ -132,6 +132,12 @@ class Settings(BaseSettings):
     cp_semrush_pull_units: int = Field(default=5000, ge=0, description="Most one pull may use")
     cp_semrush_database: str = "us"
     cp_semrush_keyword_limit: int = Field(default=200, ge=1, le=10000)
+    cp_semrush_min_interval_ms: int = Field(
+        default=500, ge=0, le=10000, description="Pause between two Semrush calls (all pulls)"
+    )
+    cp_semrush_fresh_days: int = Field(
+        default=14, ge=0, le=365, description="Reuse a website's pull younger than this; 0 = never"
+    )
 
     # -- Content Scraper: the shared scrape queue and its emails ------------
     # One scrape runs at a time on the instance; the others wait in one queue.

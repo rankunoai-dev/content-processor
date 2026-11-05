@@ -1940,6 +1940,12 @@ export const RESEARCH = {
   pull: 'Pull from Semrush',
   pulling: 'Pulling…',
   pulled: (units: number) => `Pulled. ${units} units spent.`,
+  shared:
+    'The pull cap is smaller: the budget will be shared fairly between the websites, so each gets fewer keywords (the result says how many).',
+  pacing: (ms: number, days: number) =>
+    `Calls are paced (one every ${ms} ms).` +
+    (days ? ` Websites pulled in the last ${days} days are reused, not paid for again.` : ''),
+  refresh: (days: number) => `Pull every website again, even those pulled in the last ${days} days`,
   workbook: 'Download workbook',
   addedAt: (when: string, units: number) => `Last added ${when}${units ? ` · ${units} units spent` : ''}`,
   source: { semrush_api: 'Semrush pull', csv_import: 'Imported export' } as Record<string, string>,

@@ -67,6 +67,9 @@ class PullIn(StrictModel):
     """Optional keywords whose demand and top results are pulled too."""
 
     keywords: list[str] = Field(default_factory=list, max_length=50)
+    refresh: bool = Field(
+        default=False, description="Pull every website again, even ones pulled recently"
+    )
 
 
 class ImportIn(StrictModel):
@@ -138,6 +141,8 @@ def register_research_routes(
             "pull_cap": s.pull_units,
             "keyword_limit": s.keyword_limit,
             "database": s.database,
+            "min_interval_ms": s.min_interval_ms,
+            "fresh_days": s.fresh_days,
         }
 
     @app.get("/api/projects/{project_id}/research")
@@ -165,7 +170,12 @@ def register_research_routes(
         unlocked(project_id, token)
         try:
             snapshot, _files = pull_project(
-                projects, access, project_id, settings(), serp_keywords=body.keywords
+                projects,
+                access,
+                project_id,
+                settings(),
+                serp_keywords=body.keywords,
+                refresh=body.refresh,
             )
         except SemrushError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from None
