@@ -19,7 +19,7 @@ from typing import Literal, Protocol
 
 import httpx
 
-from src.modules.content_processor.analysis.nli import is_local_endpoint
+from src.modules.content_processor.analysis.nli import endpoint_decision, model_headers
 from src.modules.content_processor.knowledge.assist import LocalEmbedder, LocalOnlyError
 
 __all__ = [
@@ -106,9 +106,10 @@ class ModelServer:
 
 def check_model_server(endpoint: str, *, client: httpx.Client | None = None) -> ModelServer:
     """List the models of an Ollama server (`<endpoint>/models`); never raises."""
-    if not is_local_endpoint(endpoint):
-        return ModelServer(endpoint, False, detail="refused: not a local or private endpoint")
-    http = client or httpx.Client(timeout=5.0, trust_env=False)
+    allowed, why = endpoint_decision(endpoint)
+    if not allowed:
+        return ModelServer(endpoint, False, detail=f"refused: {why}")
+    http = client or httpx.Client(timeout=5.0, trust_env=False, headers=model_headers())
     try:
         response = http.get(endpoint.rstrip("/") + "/models")
         response.raise_for_status()
@@ -137,8 +138,9 @@ def open_embedder(
     """
     if choice == "hashing" or model.startswith("hashing-"):
         return HashingEmbedder(), "hashing fallback (asked for)"
-    if not is_local_endpoint(endpoint):
-        msg = f"refused model endpoint {endpoint}: only local or private-network endpoints"
+    allowed, why = endpoint_decision(endpoint)
+    if not allowed:
+        msg = f"refused model endpoint {endpoint}: {why}"
         raise LocalOnlyError(msg)
     status = server or check_model_server(endpoint)
     if status.reachable and status.has(model):

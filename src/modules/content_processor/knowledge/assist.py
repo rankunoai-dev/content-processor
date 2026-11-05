@@ -25,7 +25,7 @@ from typing import Any
 
 import httpx
 
-from src.modules.content_processor.analysis.nli import is_local_endpoint
+from src.modules.content_processor.analysis.nli import endpoint_decision, model_headers
 from src.modules.content_processor.knowledge.catalog import merge_offerings, name_key
 from src.modules.content_processor.knowledge.catalog_models import (
     CardAttribute,
@@ -86,11 +86,9 @@ class LocalOnlyError(ValueError):
 
 
 def _require_local(url: str) -> None:
-    if not is_local_endpoint(url):
-        msg = (
-            f"refused model endpoint {url}: only local or private-network endpoints are "
-            "allowed (client content stays in-house; cost ceiling is $0)"
-        )
+    allowed, why = endpoint_decision(url)
+    if not allowed:
+        msg = f"refused model endpoint {url}: {why} (client content stays in-house)"
         raise LocalOnlyError(msg)
 
 
@@ -109,7 +107,9 @@ class LocalEmbedder:
         _require_local(base_url)
         self._url = base_url.rstrip("/") + "/embeddings"
         self.model = model
-        self._client = client or httpx.Client(timeout=timeout_s, trust_env=False)
+        self._client = client or httpx.Client(
+            timeout=timeout_s, trust_env=False, headers=model_headers()
+        )
         self.calls = 0
         self.errors = 0
 
@@ -152,7 +152,9 @@ class LocalChat:
         _require_local(base_url)
         self._url = base_url.rstrip("/") + "/chat/completions"
         self.model = model
-        self._client = client or httpx.Client(timeout=timeout_s, trust_env=False)
+        self._client = client or httpx.Client(
+            timeout=timeout_s, trust_env=False, headers=model_headers()
+        )
         self.calls = 0
         self.errors = 0
 

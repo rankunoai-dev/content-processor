@@ -21,7 +21,9 @@ from __future__ import annotations
 import ipaddress
 import json
 import re
+import socket
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import Protocol
 from urllib.parse import urlsplit
 
@@ -33,7 +35,10 @@ __all__ = [
     "JudgeRefusedError",
     "NliJudge",
     "NliVerdict",
+    "endpoint_decision",
     "is_local_endpoint",
+    "model_endpoint_allowed",
+    "model_headers",
 ]
 
 _SYSTEM = (
@@ -101,6 +106,67 @@ class DisabledJudge:
         return None
 
 
+@lru_cache(maxsize=64)
+def _resolves_private(host: str) -> bool:
+    """True when every address the name resolves to is loopback or private (in-house)."""
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except (OSError, UnicodeError):
+        return False
+    addresses = {str(info[4][0]) for info in infos}
+    if not addresses:
+        return False
+    try:
+        return all(
+            ipaddress.ip_address(a.split("%")[0]).is_loopback
+            or ipaddress.ip_address(a.split("%")[0]).is_private
+            for a in addresses
+        )
+    except ValueError:
+        return False
+
+
+def endpoint_decision(url: str, *, allow_remote: bool | None = None) -> tuple[bool, str]:
+    """Whether page text may be sent to this model endpoint, and why.
+
+    Accepted: this machine or a private address; a host name that resolves only to
+    private addresses (an in-house server, for example `ollama.office.lan`); a public
+    host only with `CP_ALLOW_REMOTE_MODEL_ENDPOINT=true` and https (never plain http,
+    which would send page text unencrypted).
+    """
+    if is_local_endpoint(url):
+        return True, "local or private address"
+    parts = urlsplit(url)
+    host = (parts.hostname or "").lower()
+    if host and _resolves_private(host):
+        return True, "in-house server (resolves to a private address)"
+    if allow_remote is None:
+        from src.core.config import get_settings
+
+        allow_remote = get_settings().cp_allow_remote_model_endpoint
+    if allow_remote and parts.scheme == "https":
+        return True, "remote server allowed by CP_ALLOW_REMOTE_MODEL_ENDPOINT"
+    if allow_remote:
+        return False, "a remote model endpoint must use https"
+    return False, (
+        "only local or private-network endpoints are allowed; for your own cloud server set "
+        "CP_ALLOW_REMOTE_MODEL_ENDPOINT=true and use https"
+    )
+
+
+def model_endpoint_allowed(url: str, *, allow_remote: bool | None = None) -> bool:
+    """True when page text may be sent to this model endpoint (see `endpoint_decision`)."""
+    return endpoint_decision(url, allow_remote=allow_remote)[0]
+
+
+def model_headers() -> dict[str, str]:
+    """The Authorization header when `CP_MODEL_API_KEY` is set."""
+    from src.core.config import get_settings
+
+    key = get_settings().cp_model_api_key
+    return {"Authorization": f"Bearer {key.get_secret_value()}"} if key else {}
+
+
 def is_local_endpoint(url: str) -> bool:
     """True for loopback, private-range and well-known local host names."""
     host = (urlsplit(url).hostname or "").lower()
@@ -147,12 +213,15 @@ class GatewayJudge:
                 $0, so a remote (paid) provider is refused until the cost ledger
                 (A-7) can cap it.
         """
-        if not is_local_endpoint(base_url):
-            msg = f"refused non-local NLI endpoint {base_url}: cost ceiling is $0 (needs A-7)"
+        allowed, why = endpoint_decision(base_url)
+        if not allowed:
+            msg = f"refused NLI endpoint {base_url}: {why} (cost ceiling is $0)"
             raise JudgeRefusedError(msg)
         self._url = base_url.rstrip("/") + "/chat/completions"
         self._model = model
-        self._client = client or httpx.Client(timeout=timeout_s, trust_env=False)
+        self._client = client or httpx.Client(
+            timeout=timeout_s, trust_env=False, headers=model_headers()
+        )
         self.calls = 0
         self.errors = 0
 

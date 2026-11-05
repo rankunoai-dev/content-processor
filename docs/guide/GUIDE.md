@@ -1,6 +1,6 @@
 # Content Processor: A Plain-Language Guide
 
-Last updated: 5 November 2026 · Code version: main after Semrush pacing and fair budget split, keyword gaps by the client's position, smart recrawl and richer change alerts, downloads in every module (Excel, CSV and Word, and everything in one zip), suggested competitors (asked for at project creation, found in the search data), the full page-by-page report in project reports, project reports (duplication and contradictions by topic across all of the client's websites), Claude Desktop connectors per module, the home screen with module tiles, the shared scrape queue, the Claude Desktop connection (a read-only MCP server) and the "Open in Claude.ai" button · Maintained by every session that adds a significant feature (see "Keeping this guide current" at the end)
+Last updated: 5 November 2026 · Code version: main after in-house and cloud model servers, Semrush pacing and fair budget split, keyword gaps by the client's position, smart recrawl and richer change alerts, downloads in every module (Excel, CSV and Word, and everything in one zip), suggested competitors (asked for at project creation, found in the search data), the full page-by-page report in project reports, project reports (duplication and contradictions by topic across all of the client's websites), Claude Desktop connectors per module, the home screen with module tiles, the shared scrape queue, the Claude Desktop connection (a read-only MCP server) and the "Open in Claude.ai" button · Maintained by every session that adds a significant feature (see "Keeping this guide current" at the end)
 
 ## 1. What this is, in one paragraph
 
@@ -287,7 +287,14 @@ On the John Hancock run (303 pages, about a minute, $0): 7,455 paragraphs, 551 s
 
 Four commands turn a run's page sections into a knowledge base you can search and question, with every answer traced back to the stored page.
 
-**Checking what is ready ("kb-check").** It says whether the local AI model server (Ollama) is running with its models, whether the Postgres database with its vector add-on (pgvector) is reachable, and what the next steps will therefore use. Nothing is ever sent to an outside AI service: only a model server on this machine or the company's private network is accepted, and the cost stays $0.
+**Checking what is ready ("kb-check").** It says whether the local AI model server (Ollama) is running with its models, whether the Postgres database with its vector add-on (pgvector) is reachable, and what the next steps will therefore use. Nothing is sent to an outside AI service, and the cost stays $0.
+
+**Which model servers are accepted.**
+- **Accepted by default:**
+  - a server on this machine;
+  - a server on the company's private network, by its address (for example 192.168.1.50) or by a name that points only to private addresses (for example ollama.office.lan).
+- **The company's own server in the cloud** is accepted only when an operator switches that on (`CP_ALLOW_REMOTE_MODEL_ENDPOINT=true`) and the address uses https, so page text is never sent unencrypted. A plain http address on the internet is always refused, and the refusal says why.
+- **A server behind a sign-in gateway** can be given its access key (`CP_MODEL_API_KEY`).
 
 **Filling the knowledge base ("index").** Every section of every page is turned into a list of numbers that captures its meaning (a "vector"), using the free bge-m3 model on Ollama. Sections whose text has not changed since the last time keep their vectors, so a re-run only works on new or changed sections. Each section is stored with its exact text, its headings, the page it came from and the proof (evidence) behind it. The knowledge base lives in Postgres when that is set up, and otherwise in a single local file that needs nothing installed. If the AI model server is not running yet, a simple word-matching stand-in is used so everything still works; the knowledge base remembers which was used and asks for a rebuild when the real model arrives, because the two cannot be mixed.
 
@@ -466,6 +473,7 @@ A project's **Downloads** tab lists every report at once (project overview with 
 
 | Date | Significant change |
 |---|---|
+| 2026-11-05 | Model servers: an in-house Ollama is accepted by its private address or by a name that points only to private addresses; the company's own cloud server is accepted only when switched on and over https (plain http to the internet is always refused, with the reason); an optional access key for servers behind a sign-in gateway. |
 | 2026-11-05 | Semrush pulls are paced (one call every half second across the app, waiting and retrying when Semrush asks to slow down, without paying twice), share the pull budget fairly between websites, and reuse websites pulled in the last 14 days instead of paying again (a checkbox pulls everything again). |
 | 2026-11-04 | Keyword gaps by the client's position: complete deficit (not in the top 100, only when the client's data is complete), probable gap (the client's data was cut at the pull limit, with how much it holds), page far behind (21-100) and page two (11-20), each summed up per theme and competitor ("coupa.com ranks for 120 of them with 25 pages"); minimum searches and competitor rank can be set per project. |
 | 2026-11-04 | Smart recrawl and richer change alerts: scheduled re-scrapes follow a plan (core pages every pass; other pages monthly or when the sitemap shows a change; the rest carried forward with no request), with a preview and "recrawl now" in Monitoring and the plan kept and downloadable. Each changed page now shows words before and after, headings added and removed, new and dropped heading terms, and new tables, pricing blocks, FAQs and forms; competitors get alerts for big expansions, heading shifts and new tables or pricing. |

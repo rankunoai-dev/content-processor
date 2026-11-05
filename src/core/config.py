@@ -106,8 +106,14 @@ class Settings(BaseSettings):
     # -- Content processor: knowledge base (RFC 0002 stages 5-7) -----------
     # Embedded vector store, used when Postgres with pgvector is not configured.
     cp_knowledge_root: Path = REPO_ROOT / "knowledge_store"
-    # OpenAI-compatible model endpoint; only local or private-network hosts are accepted.
+    # OpenAI-compatible model endpoint (Ollama). Accepted: this machine, a private address,
+    # or a host name that resolves only to private addresses (an in-house server). A public
+    # (cloud) host needs CP_ALLOW_REMOTE_MODEL_ENDPOINT=true and https; page text is sent to it.
     cp_model_endpoint: str = "http://localhost:11434/v1"
+    cp_allow_remote_model_endpoint: bool = False
+    cp_model_api_key: SecretStr | None = Field(
+        default=None, description="Bearer token for a model server behind an authenticating proxy"
+    )
     cp_embed_model: str = "bge-m3"
     cp_chat_model: str = "qwen2.5:7b-instruct"
 
