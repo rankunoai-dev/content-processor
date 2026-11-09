@@ -177,6 +177,34 @@ def _title(name: str) -> str:
     return name.replace("_", " ").capitalize()
 
 
+def _theme_pages_schema() -> dict[str, object]:
+    """The arguments of the theme-pages tools: a project, a theme, optionally one website."""
+    return {
+        "type": "object",
+        "properties": {
+            "project_id": {
+                "type": "string",
+                "description": "The project, from list_projects",
+                "minLength": 1,
+                "maxLength": 80,
+            },
+            "theme": {
+                "type": "string",
+                "description": "The theme id (th-...) or its name, from get_theme_map",
+                "minLength": 1,
+                "maxLength": 200,
+            },
+            "website": {
+                "type": "string",
+                "description": "Optional: one website only, such as johnhancock.com",
+                "maxLength": 200,
+            },
+        },
+        "required": ["project_id", "theme"],
+        "additionalProperties": False,
+    }
+
+
 def definitions(scope: Scope = None) -> list[ToolDef]:
     """The tools of this scope, `list_projects` first and `check_deliverable` last."""
     out = [
@@ -213,33 +241,32 @@ def definitions(scope: Scope = None) -> list[ToolDef]:
                 "title, website, role, page type, funnel stage and words. Give the project_id "
                 "and the theme id or name as get_theme_map lists them. Use it to list all the "
                 "URLs of a theme. (read-only)",
-                {
-                    "type": "object",
-                    "properties": {
-                        "project_id": {
-                            "type": "string",
-                            "description": "The project, from list_projects",
-                            "minLength": 1,
-                            "maxLength": 80,
-                        },
-                        "theme": {
-                            "type": "string",
-                            "description": "The theme id (th-...) or its name, from get_theme_map",
-                            "minLength": 1,
-                            "maxLength": 200,
-                        },
-                        "website": {
-                            "type": "string",
-                            "description": "Optional: one website only, such as johnhancock.com",
-                            "maxLength": 200,
-                        },
-                    },
-                    "required": ["project_id", "theme"],
-                    "additionalProperties": False,
-                },
+                _theme_pages_schema(),
                 "themes",
             )
         )
+    if scope is None or "themes" in scope:
+        out.append(
+            ToolDef(
+                "export_theme_pages_csv",
+                "Themes: Export theme pages as CSV",
+                "[Themes] The same list as get_theme_pages, as CSV text (one row per page, with "
+                "the theme name) that can be saved as a file. Give the project_id and the theme "
+                "id or name. (read-only)",
+                copy.deepcopy(_theme_pages_schema()),
+                "themes",
+            )
+        )
+    out.append(
+        ToolDef(
+            "get_scrape_queue",
+            "Scrape queue",
+            "Scrapes running, waiting and ready to start across all projects, with progress "
+            "(batches done, pages, the current message) and the estimated wait. Takes no "
+            "arguments. Read-only: it does not start or change anything.",
+            {"type": "object", "properties": {}, "additionalProperties": False},
+        )
+    )
     from src.modules.mcp_server.templates import TYPES, PresentInput
 
     out.append(

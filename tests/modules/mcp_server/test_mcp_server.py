@@ -56,11 +56,15 @@ def test_catalog_lists_every_built_tool_read_only_with_a_project() -> None:
         "list_projects",
         *built,
         "get_theme_pages",
+        "export_theme_pages_csv",
+        "get_scrape_queue",
         "present_answer",
         "check_deliverable",
     ]
     assert len(built) == 17
     for d in defs[1:]:
+        if d.name == "get_scrape_queue":  # the one tool that takes no project
+            continue
         assert d.input_schema["required"][0] == "project_id"
         assert d.input_schema["additionalProperties"] is False
     search = next(d for d in defs if d.name == "search_knowledge")
@@ -141,8 +145,8 @@ def test_mcp_protocol_end_to_end(themed: World, tmp_path: Path) -> None:
         return [t.name for t in tools.tools], json.loads(text), wrong_text, bool(wrong.is_error)
 
     names, theme, wrong_text, wrong_error = anyio.run(scenario)
-    assert names[0] == "list_projects" and "check_deliverable" in names and len(names) == 21
-    assert "get_theme_pages" in names
+    assert names[0] == "list_projects" and "check_deliverable" in names and len(names) == 23
+    assert {"get_theme_pages", "export_theme_pages_csv", "get_scrape_queue"} <= set(names)
     assert theme["tool"] == "get_theme_map" and theme["data"]
     assert wrong_error and "unknown tool" in wrong_text
 
@@ -210,10 +214,16 @@ def test_a_scoped_catalog_lists_only_that_module() -> None:
         "get_offering_catalog",
         "get_theme_map",
         "get_theme_pages",
+        "export_theme_pages_csv",
+        "get_scrape_queue",
         "present_answer",
         "check_deliverable",
     ]
-    assert all(d.description.startswith("[Themes]") for d in definitions(themes)[1:-2])
+    assert all(
+        d.description.startswith("[Themes]")
+        for d in definitions(themes)[1:-2]
+        if d.module == "themes"
+    )
     assert "limited to: Themes" in instructions(themes) and "Module focus" not in instructions(
         themes
     )
@@ -252,6 +262,7 @@ def test_the_app_refuses_other_modules_on_a_scoped_connection(
     assert [t["name"] for t in tools] == [
         "list_projects",
         "get_gap_findings",
+        "get_scrape_queue",
         "present_answer",
         "check_deliverable",
     ]
@@ -284,6 +295,7 @@ def test_a_scoped_server_over_the_protocol(themed: World, tmp_path: Path) -> Non
         "list_projects",
         "get_changes",
         "get_monitoring_alerts",
+        "get_scrape_queue",
         "present_answer",
         "check_deliverable",
     ]

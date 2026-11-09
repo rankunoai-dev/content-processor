@@ -63,3 +63,35 @@ def test_theme_pages_says_how_to_start_the_app_when_it_is_down() -> None:
 
     text, is_error = anyio.run(run)
     assert is_error and "not running" in text
+
+
+def test_csv_export_and_queue_check_through_the_protocol(themed: World, tmp_path: Path) -> None:
+    app = _app(themed, tmp_path)
+
+    async def scenario() -> tuple[dict[str, Any], str, str, bool]:
+        transport = httpx.ASGITransport(app=app)
+        async with (
+            httpx.AsyncClient(
+                transport=transport, base_url="http://127.0.0.1", headers=WRITE
+            ) as http,
+            Client(build_server(http)) as client,
+        ):
+            themes = await client.call_tool("get_theme_map", {"project_id": themed.project_id})
+            theme = json.loads(themes.content[0].text)["data"]["themes"][0]
+            args = {"project_id": themed.project_id, "theme": theme["theme_id"]}
+            pages = await client.call_tool("get_theme_pages", args)
+            csv_reply = await client.call_tool("export_theme_pages_csv", args)
+            queue = await client.call_tool("get_scrape_queue", {})
+        return (
+            json.loads(pages.content[0].text),
+            csv_reply.content[0].text,
+            queue.content[0].text,
+            bool(queue.is_error),
+        )
+
+    listed, csv_text, queue_text, queue_error = anyio.run(scenario)
+    lines = csv_text.strip().split("\n")
+    assert lines[0].startswith("theme,url,title,website,role,page_type,funnel_stage,words")
+    assert len(lines) - 1 == listed["count"] > 0  # one CSV row per page, nothing cut short
+    queue = json.loads(queue_text)
+    assert not queue_error and {"running", "waiting", "ready"} <= set(queue)

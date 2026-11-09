@@ -23,7 +23,7 @@ from src.modules.mcp_server.catalog import (
     prompts_for,
     scope_label,
 )
-from src.modules.mcp_server.theme_pages import LOCAL_TOOLS, theme_pages_text
+from src.modules.mcp_server.theme_pages import LOCAL_TOOLS, scrape_queue_text, theme_pages_text
 
 __all__ = ["DEFAULT_APP_URL", "SERVER_NAME", "build_server", "serve", "server_name"]
 
@@ -124,7 +124,14 @@ def build_server(
             return _result(f'{{"error": "unknown tool {params.name}{where}"}}', True)
         if params.name in LOCAL_TOOLS:
             # Answered here from the app's read-only endpoints: no app code is involved.
-            text, is_error = await theme_pages_text(client, params.arguments or {})
+            if params.name == "get_scrape_queue":
+                text, is_error = await scrape_queue_text(client)
+            else:
+                text, is_error = await theme_pages_text(
+                    client,
+                    params.arguments or {},
+                    as_csv=params.name == "export_theme_pages_csv",
+                )
             return _result(text, is_error)
         try:
             response = await client.post(

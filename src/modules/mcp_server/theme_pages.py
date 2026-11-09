@@ -8,6 +8,8 @@ belongs to, so the list is complete; nothing is truncated.
 
 from __future__ import annotations
 
+import csv
+import io
 import json
 import re
 from typing import Any
@@ -16,7 +18,10 @@ import httpx
 
 __all__ = ["LOCAL_TOOLS", "theme_pages_text"]
 
-LOCAL_TOOLS: frozenset[str] = frozenset({"get_theme_pages"})
+LOCAL_TOOLS: frozenset[str] = frozenset(
+    {"get_theme_pages", "export_theme_pages_csv", "get_scrape_queue"}
+)
+CSV_COLUMNS = ("url", "title", "website", "role", "page_type", "funnel_stage", "words")
 _PROJECT = re.compile(r"^[a-z0-9][a-z0-9-]{0,79}$")
 
 
@@ -43,9 +48,9 @@ def _match_theme(themes: list[dict[str, Any]], wanted: str) -> tuple[dict[str, A
 
 
 async def theme_pages_text(
-    client: httpx.AsyncClient, arguments: dict[str, Any]
+    client: httpx.AsyncClient, arguments: dict[str, Any], *, as_csv: bool = False
 ) -> tuple[str, bool]:
-    """The JSON text answer for `get_theme_pages`, and whether it is an error."""
+    """The text answer for `get_theme_pages` (JSON) or `export_theme_pages_csv` (CSV)."""
     project = str(arguments.get("project_id") or "").strip()
     theme_arg = str(arguments.get("theme") or "").strip()
     website = str(arguments.get("website") or "").strip().lower()
@@ -94,5 +99,49 @@ async def theme_pages_text(
         "website_filter": website or None,
         "count": len(rows),
         "pages": rows,
+    }
+    if as_csv:
+        buffer = io.StringIO()
+        writer = csv.DictWriter(buffer, fieldnames=["theme", *CSV_COLUMNS], lineterminator="\n")
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({"theme": theme["label"], **{k: row.get(k) for k in CSV_COLUMNS}})
+        return buffer.getvalue(), False
+    return json.dumps(answer, ensure_ascii=False, indent=2), False
+
+
+async def scrape_queue_text(client: httpx.AsyncClient) -> tuple[str, bool]:
+    """Scrapes running, waiting and ready to start, with progress: read-only."""
+    try:
+        response = await client.get("/api/queue")
+    except httpx.ConnectError:
+        return _error("The Content Processor app is not running; start it, then try again.")
+    except httpx.TimeoutException:
+        return _error("The app took too long to answer; try again.")
+    if response.status_code != 200:
+        return _error(f"The app answered with an error (HTTP {response.status_code}).")
+    data = response.json()
+
+    def brief(entry: dict[str, Any]) -> dict[str, Any]:
+        run = entry.get("run") or {}
+        return {
+            "run_id": run.get("run_id"),
+            "project": entry.get("project_name"),
+            "website": entry.get("site_name"),
+            "status": run.get("status"),
+            "urls": run.get("url_count"),
+            "progress": run.get("message"),
+            "batches_done": run.get("batches_done"),
+            "batches_total": run.get("batches_total"),
+            "started_at": run.get("started_at"),
+            "position": entry.get("position"),
+            "wait_s": entry.get("wait_s"),
+        }
+
+    answer = {
+        "running": [brief(e) for e in data.get("running") or []],
+        "waiting": [brief(e) for e in data.get("waiting") or []],
+        "ready": [brief(e) for e in data.get("ready") or []],
+        "seconds_per_url": data.get("seconds_per_url"),
     }
     return json.dumps(answer, ensure_ascii=False, indent=2), False

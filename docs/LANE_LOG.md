@@ -947,3 +947,9 @@ git worktree add ../content-processor-lane4 -b lane/L4-verify
 - **No app change:** the web app and its running scrapes are not touched; only the Claude Desktop MCP server process needs to be restarted to pick up the tool.
 - **Gate:** ruff, `mypy --strict`, and the full test suite pass (MCP tests updated for the new tool count).
 - **Verified on live data:** John Hancock monthly distributions theme = 79 pages; premium dividend fund notices = 130 pages; both complete.
+
+## [2026-11-09] Branch feat/theme-pages-tool: theme CSV export and scrape queue for Claude Desktop
+
+- **What landed:** `export_theme_pages_csv` (the theme's pages as CSV text, one row per page) and `get_scrape_queue` (running, waiting and ready scrapes with progress). Both are read-only and answered by the stdio MCP server from the app's existing endpoints (`/api/projects/{id}/themes`, `/api/queue`). No web-app code changed.
+- **Not done:** scrape triggers from Claude. Starting a scrape spends time and contacts client websites, and the app keeps that behind the password unlock; needs an explicit decision (confirmed trigger with the unlock token) before it is built.
+- **Gate:** ruff, `mypy --strict` and the full test suite pass; coverage 93.7%. Checked against the live app: CSV for the monthly distributions theme = 79 rows.
