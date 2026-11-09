@@ -29,6 +29,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from src.core.config import REPO_ROOT, get_settings
 from src.modules.content_processor.knowledge.assist import LocalChat, LocalOnlyError
+from src.modules.content_processor.knowledge.cpu_embedder import cpu_available
 from src.modules.content_processor.knowledge.embedders import (
     HASHING_DIMS,
     Embedder,
@@ -50,8 +51,9 @@ DEFAULT_TENANT = "rankuno-dev"
 
 
 def _db_url(args: argparse.Namespace) -> str | None:
-    if getattr(args, "db_url", None):
-        return str(args.db_url)
+    given = getattr(args, "db_url", None)
+    if given is not None:
+        return str(given)
     secret = get_settings().cp_database_url
     return secret.get_secret_value() if secret else None
 
@@ -107,7 +109,11 @@ def cmd_kb_check(args: argparse.Namespace) -> int:
             "store": "postgres" if pg_ok else f"sqlite: {_sqlite_root(args) / args.tenant}",
             "embedder": settings.cp_embed_model
             if server.has(settings.cp_embed_model)
-            else "hashing fallback (words only)",
+            else (
+                f"CPU fallback ({settings.cp_fallback_embed_model})"
+                if cpu_available() and settings.cp_fallback_embed_model
+                else "hashing fallback (words only)"
+            ),
             "answers": "local model" if server.has(settings.cp_chat_model) else "extractive quotes",
         },
     }
