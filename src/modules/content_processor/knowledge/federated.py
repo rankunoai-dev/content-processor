@@ -15,7 +15,7 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 
-from src.modules.content_processor.knowledge.embedders import Embedder
+from src.modules.content_processor.knowledge.embedders import Embedder, model_kind
 from src.modules.content_processor.knowledge.retrieval import (
     SearchHit,
     hybrid_search,
@@ -60,14 +60,16 @@ class FederatedHit:
 class FederatedResult:
     """The fused hits, which spaces were searched and which were skipped (with why).
 
-    `words_only` lists the spaces searched by exact words alone because the meaning
-    model could not be reached (still searched, with less recall).
+    `words_only` lists the spaces searched by exact words alone: indexed without a
+    meaning model, or the model could not be reached (still searched, with less recall).
+    `lighter` lists the spaces whose meaning came from the CPU fallback model.
     """
 
     hits: list[FederatedHit] = field(default_factory=list)
     searched: list[Space] = field(default_factory=list)
     skipped: list[tuple[Space, str]] = field(default_factory=list)
     words_only: list[tuple[Space, str]] = field(default_factory=list)
+    lighter: list[tuple[Space, str]] = field(default_factory=list)
 
     def by_site(self) -> dict[str, list[FederatedHit]]:
         """The hits grouped by website, best first: the side-by-side comparison view."""
@@ -114,6 +116,14 @@ def federated_search(
                     embedder = embedders.get(model) or embedder_for(model)
                     embedders[model] = embedder
                     hits = hybrid_search(store, embedder, query, top_k=pool)
+                    if model_kind(model) == "words only":
+                        result.words_only.append(
+                            (space, "indexed without a meaning model: searched by exact words")
+                        )
+                    elif model_kind(model) == "CPU fallback":
+                        result.lighter.append(
+                            (space, "meaning from the lighter CPU fallback model (not bge-m3)")
+                        )
                 except (RuntimeError, ValueError) as exc:
                     try:
                         hits = keyword_only_search(store, query, top_k=pool)

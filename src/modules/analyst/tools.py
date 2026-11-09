@@ -371,12 +371,16 @@ def _search(play: Playground, args: SearchInput) -> dict[str, Any]:
         "passages": passages,
         "skipped": skipped,
     }
-    if result.words_only:
-        out["notes"] = [
-            f"{s.site_name}: {why}; passages that say the same thing in other words may be "
-            "missing (start the local model server for search by meaning)"
-            for s, why in result.words_only
-        ]
+    notes = [
+        f"{s.site_name}: {why}; passages that say the same thing in other words may be "
+        "missing (start the local model server for search by meaning)"
+        for s, why in result.words_only
+    ] + [
+        f"{s.site_name}: {why}; paraphrases are found, but less reliably than with bge-m3"
+        for s, why in result.lighter
+    ]
+    if notes:
+        out["notes"] = notes
     return out
 
 

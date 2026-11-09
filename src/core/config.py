@@ -106,6 +106,10 @@ class Settings(BaseSettings):
     # -- Content processor: knowledge base (RFC 0002 stages 5-7) -----------
     # Embedded vector store, used when Postgres with pgvector is not configured.
     cp_knowledge_root: Path = REPO_ROOT / "knowledge_store"
+    # CPU fallback embedder (fastembed, the `fallback` extra) used when Ollama is not
+    # available; "" switches it off (then the hashing stand-in is used). Downloaded once.
+    cp_fallback_embed_model: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+    cp_model_cache_dir: Path = REPO_ROOT / "model_cache"
     # OpenAI-compatible model endpoint (Ollama). Accepted: this machine, a private address,
     # or a host name that resolves only to private addresses (an in-house server). A public
     # (cloud) host needs CP_ALLOW_REMOTE_MODEL_ENDPOINT=true and https; page text is sent to it.

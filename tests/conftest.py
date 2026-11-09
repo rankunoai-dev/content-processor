@@ -39,6 +39,13 @@ def _isolate_url_history(tmp_path, monkeypatch) -> None:
 
 
 @pytest.fixture(autouse=True)
+def _no_cpu_model(monkeypatch) -> None:
+    """Tests never load or download the CPU fallback model; tests of it bring a fake."""
+    monkeypatch.setenv("CP_FALLBACK_EMBED_MODEL", "")
+    reset_settings_cache()
+
+
+@pytest.fixture(autouse=True)
 def _isolate_registry() -> Iterator[None]:
     registry.clear()
     yield

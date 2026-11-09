@@ -1028,7 +1028,7 @@ def register_project_routes(
             searched=[s.namespace for s in result.searched],
             skipped=not_built
             + [{"space": s.namespace, "site": s.site_name, "reason": r} for s, r in result.skipped],
-            notes=[f"{s.site_name}: {why}" for s, why in result.words_only],
+            notes=[f"{s.site_name}: {why}" for s, why in [*result.words_only, *result.lighter]],
         )
 
 

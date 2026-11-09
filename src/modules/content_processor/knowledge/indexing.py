@@ -25,7 +25,12 @@ from typing import Any
 
 from src.modules.content_processor.export.tabular import Cell, Table, write_xlsx
 from src.modules.content_processor.knowledge.catalog_models import Catalog
-from src.modules.content_processor.knowledge.embedders import Embedder, is_semantic
+from src.modules.content_processor.knowledge.embedders import (
+    Embedder,
+    is_semantic,
+    model_kind,
+    model_rank,
+)
 from src.modules.content_processor.knowledge.labels import LABELS_VERSION, ChunkLabel, Labeller
 from src.modules.content_processor.knowledge.models import Chunk, PageStamp
 from src.modules.content_processor.knowledge.numeric import np
@@ -85,6 +90,7 @@ class IndexReport:
     offerings: dict[str, int] = field(default_factory=dict)
     offering_status: dict[str, int] = field(default_factory=dict)
     labels: list[ChunkLabel] = field(default_factory=list)
+    upgraded_from: str | None = None
 
     def summary(self) -> dict[str, Any]:
         """JSON-ready counts (without the per-chunk labels)."""
@@ -180,13 +186,23 @@ def index_run(
 ) -> IndexReport:
     """Embed (or reuse), label and store every chunk and page of a run."""
     stored_model = store.meta().get("model")
+    upgraded_from = None
     if stored_model and stored_model != embedder.model:
-        msg = (
-            f"the store holds {stored_model} vectors and this run would add {embedder.model} "
-            "vectors; they cannot be compared. Re-run with --rebuild to start the store again"
-        )
-        raise ModelMismatchError(msg)
+        if model_rank(embedder.model) > model_rank(stored_model):
+            # a better model is here (bge-m3 over the CPU model, either over hashing):
+            # start the store again with it rather than refuse
+            store.reset()
+            upgraded_from = stored_model
+        else:
+            msg = (
+                f"the store holds {stored_model} vectors and this run would add "
+                f"{embedder.model} vectors ({model_kind(embedder.model)}); they cannot be "
+                "compared. The better vectors are kept: bring the model server back, or "
+                "re-run with --rebuild to start the store again"
+            )
+            raise ModelMismatchError(msg)
     report = IndexReport()
+    report.upgraded_from = upgraded_from
     chunks = [
         c
         for c in run.chunks

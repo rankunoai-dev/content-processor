@@ -23,6 +23,7 @@ evidence/
 url_history/
 app_data/
 knowledge_store/
+model_cache/
 exports/
 outputs/
 scratch/

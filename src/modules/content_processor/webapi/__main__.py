@@ -77,8 +77,7 @@ def knowledge_access() -> KnowledgeAccess:
     from src.modules.content_processor.knowledge.embedders import (
         HASHING_DIMS,
         Embedder,
-        HashingEmbedder,
-        open_embedder,
+        embedder_for_model,
     )
     from src.modules.content_processor.knowledge.federated import Space
     from src.modules.content_processor.knowledge.vector_store import VectorStore, open_store
@@ -97,10 +96,7 @@ def knowledge_access() -> KnowledgeAccess:
         return store
 
     def embedder_for(model: str) -> Embedder:
-        if model.startswith("hashing-"):
-            return HashingEmbedder()
-        embedder, _note = open_embedder("ollama", settings.cp_model_endpoint, model)
-        return embedder
+        return embedder_for_model(model, settings.cp_model_endpoint)
 
     return KnowledgeAccess(open_store=open_space, embedder_for=embedder_for)
 

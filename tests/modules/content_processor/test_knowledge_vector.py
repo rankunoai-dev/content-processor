@@ -704,8 +704,13 @@ def test_index_run_stores_labels_pages_and_reuses_vectors(store: SqliteVectorSto
     third = index_run(run_inputs(CHUNKS[:2]), store, CountingEmbedder(), Labeller(STAMPS, CATALOG))
     assert third.removed == 2 and store.counts()["chunk_vectors"] == 3
 
-    with pytest.raises(ModelMismatchError, match="--rebuild"):
-        index_run(run_inputs(), store, CountingEmbedder("bge-m3"), Labeller(STAMPS, CATALOG))
+    # a better model (here bge-m3 over hashing) starts the store again instead of refusing
+    upgraded = index_run(run_inputs(), store, CountingEmbedder("bge-m3"), Labeller(STAMPS, CATALOG))
+    assert upgraded.upgraded_from == HASHING_MODEL and store.meta()["model"] == "bge-m3"
+    assert upgraded.embedded == 5 and upgraded.reused == 0
+    # a worse one never replaces better vectors
+    with pytest.raises(ModelMismatchError, match="better vectors are kept"):
+        index_run(run_inputs(), store, CountingEmbedder(), Labeller(STAMPS, CATALOG))
 
 
 def test_index_run_embeds_offerings_with_a_semantic_model(store: SqliteVectorStore) -> None:

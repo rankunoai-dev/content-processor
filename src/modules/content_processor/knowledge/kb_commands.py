@@ -33,8 +33,8 @@ from src.modules.content_processor.knowledge.embedders import (
     HASHING_DIMS,
     Embedder,
     EmbedderChoice,
-    HashingEmbedder,
     check_model_server,
+    embedder_for_model,
     open_embedder,
 )
 
@@ -206,10 +206,7 @@ def _query_embedder(args: argparse.Namespace, store: VectorStore) -> Embedder:
     if not model:
         msg = "the store is empty: run `index --run <run>` first"
         raise RuntimeError(msg)
-    if model.startswith("hashing-"):
-        return HashingEmbedder()
-    embedder, _note = open_embedder("ollama", _endpoint(args), model)
-    return embedder
+    return embedder_for_model(model, _endpoint(args))
 
 
 def cmd_search(args: argparse.Namespace) -> int:
@@ -323,9 +320,9 @@ def register(subparsers: Any) -> None:
     _store_args(index)
     index.add_argument(
         "--embedder",
-        choices=["auto", "ollama", "hashing"],
+        choices=["auto", "ollama", "cpu", "hashing"],
         default="auto",
-        help="auto: Ollama when it has the model, else the offline hashing fallback",
+        help="auto: Ollama when it has the model, else the CPU fallback model, else hashing",
     )
     index.add_argument("--embed-model", default=None, help="default: CP_EMBED_MODEL (bge-m3)")
     index.add_argument(
