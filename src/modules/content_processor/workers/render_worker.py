@@ -44,6 +44,7 @@ from src.modules.content_processor.governor.block_classifier import classify_res
 from src.modules.content_processor.governor.escalation import ActionKind
 from src.modules.content_processor.governor.gates import detect_gates
 from src.modules.content_processor.provenance import stamp_blocks
+from src.modules.content_processor.scheduler.capture_journal import CaptureJournal
 from src.modules.content_processor.verify.gaps import gap_for_gate, gap_id_for
 from src.modules.content_processor.verify.reconcile import reconcile_source_vs_rendered
 from src.modules.content_processor.workers.ports import LedgerPort
@@ -102,12 +103,14 @@ class RenderWorker:
         explorer_factory: Callable[[InteractionPolicy], Explorer] | None = None,
         asset_store_for: Callable[[str], AssetStore | None] | None = None,
         render_retry_delays_s: tuple[float, ...] = RENDER_RETRY_DELAYS_S,
+        journal: CaptureJournal | None = None,
     ) -> None:
         """Bind the worker to one run.
 
         `asset_store_for(url)` returns the group-scoped asset store for a page, or None when
         the page is not in a grouped template (see scheduler.grouping). Without it, rendering
-        is unchanged.
+        is unchanged. `journal` holds the run's saved responses: a render is saved as it
+        arrives, and one saved by a stopped attempt is used instead of opening the page.
         """
         self._explorer_factory = explorer_factory or _default_explorer
         self._ledger = ledger
@@ -120,6 +123,7 @@ class RenderWorker:
         self._snapshots: list[tuple[str, list[ContentBlock]]] = []
         self._asset_store_for = asset_store_for
         self._retry_delays = render_retry_delays_s
+        self._journal = journal
 
     async def run_until_idle(
         self,
@@ -192,12 +196,18 @@ class RenderWorker:
             left = page_cap - (time.perf_counter() - render_started) - _HOOK_MARGIN_S
             holder["result"] = await explorer.explore(page, time_left_s=left if page_cap else None)
 
-        store = self._asset_store_for(url) if self._asset_store_for is not None else None
-        if store is None:
-            result = await self._renderer.render(url, on_page=explore_hook)
+        tier = str(self._renderer.tier_name)
+        saved = self._journal.find_render(url, tier) if self._journal is not None else None
+        if saved is not None:
+            result = saved.result
+            exploration = saved.exploration
         else:
-            result = await self._renderer.render(url, on_page=explore_hook, asset_store=store)
-        exploration = holder.get("result")
+            store = self._asset_store_for(url) if self._asset_store_for is not None else None
+            if store is None:
+                result = await self._renderer.render(url, on_page=explore_hook)
+            else:
+                result = await self._renderer.render(url, on_page=explore_hook, asset_store=store)
+            exploration = holder.get("result")
         if not result.rendered:
             action = host_state.record_transient_failure()
             self._ledger.save_host_state(tenant, host_state)
@@ -238,6 +248,8 @@ class RenderWorker:
             final_url=result.final_url,
             body_size=len(result.dom_html),
         )
+        if self._journal is not None and saved is None and block.kind is BlockKind.NONE:
+            self._journal.save_render(result, exploration, tier)
         if block.kind not in (BlockKind.NONE, BlockKind.SOFT_404):
             action = host_state.record_block(block.kind)
             self._ledger.save_host_state(tenant, host_state)
@@ -317,6 +329,8 @@ class RenderWorker:
             "elapsed_ms": round(result.elapsed_ms),
             "tier": self._renderer.tier_name,
         }
+        if result.captured_earlier_at is not None:
+            summary["replayed_capture_at"] = str(result.captured_earlier_at)
         self._ledger.record_summary(resource_id, "render", summary)
         self._ledger.record_summary(resource_id, "explore", explore_facts)
 
@@ -445,6 +459,9 @@ class RenderWorker:
         state_unverified = 0
         revealed_text = ""
         states = exploration.states if exploration is not None else []
+        if exploration is not None:
+            # A site-wide panel not opened here was opened and captured on earlier pages.
+            revealed_text = "\n".join(exploration.site_wide_panels)
         for st in states:
             dom_ref = self._evidence.put(st.dom_html, "text/html")
             self._evidence.put(st.inner_text.encode("utf-8"), "text/plain")
@@ -529,6 +546,7 @@ class RenderWorker:
                     "unsafe_requests": exploration.unsafe_requests,
                     "unexplored_action_kinds": exploration.unexplored_action_kinds,
                     "elapsed_s": exploration.elapsed_s,
+                    "site_wide_skipped": exploration.site_wide_skipped,
                     "error": exploration.error,
                     "unvisited": [
                         {"kind": c.kind, "label": c.label, "reason": c.reason}

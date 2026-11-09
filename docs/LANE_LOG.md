@@ -962,3 +962,13 @@ git worktree add ../content-processor-lane4 -b lane/L4-verify
 - **Live check:** the stored GEP blog page now classifies NONE (was INTERACTIVE_CAPTCHA).
 - **Tests:** `test_block_classifier.py` +9 (widget on a content page for each vendor, 64 KB prefix of a 309 KB page, walls by status 403/429, title, text and minimal content); `test_fixture_manifest.py` unchanged and passing.
 - **Checks:** `ruff`, `mypy` on the changed files; `pytest tests/modules/content_processor` passed. Two timing-based tests (`test_run_queue`, `test_explorer`) failed once each in earlier runs under load and passed on the rerun. The full `scripts/verify.ps1` gate was not run.
+
+## [2026-11-09] Resumable scrapes and faster exploring
+
+- **Branch / worktree:** `feat/resumable-scrapes` at `../content-processor-resume`, from main `067ba73`.
+- **What landed:** `scheduler/capture_journal.py` (per-run journal of downloads and renders, written atomically as they arrive and replayed without a request, 7-day limit, damaged captures dropped); `ScrapeRunner.resume` and `POST /api/projects/{p}/sites/{s}/runs/{r}/resume` with a Continue button; `--exit-with-parent` so a batch stops when the app is gone; `scheduler/site_controls.py` and `StateExplorer(site_memory=)` (a control seen on 2 pages with the same kind, label, context hash and outcome is excluded as `site_wide_control:...`; controls whose text or result varies are always explored); `DocWorker(parallel_tasks=)` with a serialized ledger proxy (4 in project scrapes); `Add comment` labels are site utilities; distinct queue times (`ScrapeRunner._queue_time`).
+- **Live checks:** local fixture scrape killed midway: batch gone in 0.4 s, on rerun 20 downloads and 5 renders replayed, no already-rendered page requested again. 8 real GEP pages: exploring 30 s to 15 s from the third page, page render 36 s to 20 s, 202 controls skipped per page, article word counts identical.
+- **Found by the kill test:** a pending `stdin` read makes every later process start hang on Windows, so the parent is watched by process handle instead.
+- **Environment:** bundled Playwright Chromium no longer fires `requestAnimationFrame` on this machine, so every click times out; real Chrome (what scrapes use) is fine. `test_site_controls.py` uses Chrome; `test_explorer.py` and other `channel=None` browser tests need a look.
+- **Open contract requests:** none.
+- **Blocked on:** nothing. Parallel browser pages (the third speed option) deliberately not built: wait until GEP has shown it handles the current rate.

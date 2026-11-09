@@ -14,6 +14,7 @@ in-memory ledger and Postgres.
 from __future__ import annotations
 
 import json
+import os
 from collections import Counter
 from collections.abc import Sequence
 from pathlib import Path
@@ -70,9 +71,12 @@ def write_run_outputs(
     out.parent.mkdir(parents=True, exist_ok=True)
     summary = badge_summary(records)
     records_path = records_path_for(out)
-    with records_path.open("w", encoding="utf-8") as handle:
+    # Swapped in whole: a stop while writing must not leave a file that looks finished.
+    partial = records_path.with_name(records_path.name + ".part")
+    with partial.open("w", encoding="utf-8") as handle:
         for record in records:
             handle.write(record.model_dump_json() + "\n")
+    os.replace(partial, records_path)
 
     resources = reader.list_resources(run_id)
     content_path = out.with_suffix(".content.jsonl")

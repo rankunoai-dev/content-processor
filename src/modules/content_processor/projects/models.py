@@ -34,6 +34,7 @@ __all__ = [
 RunStatus = Literal["queued", "ready", "running", "finished", "failed", "cancelled", "interrupted"]
 # `ready`: its turn came and it waits for the person who asked to be emailed to start it.
 RUN_ACTIVE: frozenset[str] = frozenset({"queued", "ready", "running"})
+RUN_RESUMABLE: frozenset[str] = frozenset({"cancelled", "failed", "interrupted"})
 OnTurn = Literal["auto", "notify"]
 SiteRole = Literal["client", "competitor"]
 KnowledgeStatus = Literal["", "building", "ready", "failed", "skipped"]
@@ -112,6 +113,9 @@ class RunState(StrictModel):
     reports_ready: bool = False
     knowledge_status: KnowledgeStatus = ""
     knowledge_message: str = ""
+    resume_count: int = Field(
+        default=0, ge=0, description="times a person continued this scrape after it stopped"
+    )
     # -- the shared queue (one scrape at a time on the whole instance) ----------
     on_turn: OnTurn = Field(
         default="auto",

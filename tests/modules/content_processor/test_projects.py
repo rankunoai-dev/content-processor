@@ -504,6 +504,27 @@ def test_cancel_and_delete_need_the_owner(app_env):
     assert client.get("/api/projects").json() == []
 
 
+def test_a_stopped_run_is_continued_by_its_owner(app_env):
+    client, store, runner, batches, _ = app_env
+    project_id, token = _create(client)
+    site = f"/api/projects/{project_id}/sites/flynn-s"
+    _post(client, f"{site}/urls", {"text": "https://flynns.com/1\nhttps://flynns.com/2"}, token)
+    batches.gate = threading.Event()
+    run = _post(client, f"{site}/runs", {}, token).json()
+    resume = f"{site}/runs/{run['run_id']}/resume"
+    assert _post(client, resume, {}, token).status_code == 409, "it is still running"
+    assert _post(client, f"{site}/runs/{run['run_id']}/cancel", {}, token).status_code == 200
+    batches.gate.set()
+    assert runner.wait_idle(20)
+    assert store.run(project_id, "flynn-s", run["run_id"]).status == "cancelled"
+
+    assert _post(client, resume, {}).status_code == 401, "only with the project's password"
+    assert _post(client, resume, {}, token).status_code == 200
+    assert runner.wait_idle(20)
+    assert store.run(project_id, "flynn-s", run["run_id"]).status == "finished"
+    assert _post(client, resume, {}, token).status_code == 409, "a finished run has nothing left"
+
+
 def test_a_run_left_running_resumes_after_a_restart(tmp_path: Path):
     store = ProjectStore(tmp_path)
     batches = FakeBatches()

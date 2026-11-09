@@ -1462,7 +1462,10 @@ export const PROJECTS = {
     `Scrapes all ${n.toLocaleString()} addresses in batches of 25. Pages scraped before and unchanged since are reused, so a repeat scrape is quicker. Free access only.`,
   noUrls: 'Add web addresses first.',
   cancel: 'Cancel',
-  cancelConfirm: 'Stop this scrape? Batches already finished are kept.',
+  cancelConfirm: 'Stop this scrape? Everything captured so far is kept, and you can continue it later.',
+  resume: 'Continue',
+  resumeHelp:
+    'Continue from where it stopped. Pages already captured are not requested again; pages that ended blocked or failed get one more try.',
   progress: (done: number, total: number) => `${done.toLocaleString()} of ${total.toLocaleString()} pages done`,
   batches: (done: number, total: number) => `Batch ${Math.min(done + 1, total)} of ${total}`,
   history: 'Earlier scrapes',

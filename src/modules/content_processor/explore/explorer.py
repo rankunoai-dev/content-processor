@@ -28,8 +28,8 @@ import contextlib
 import hashlib
 import re
 import time
-from collections.abc import Awaitable, Callable
-from typing import Any, get_args
+from collections.abc import Awaitable, Callable, Mapping
+from typing import Any, Protocol, get_args
 from urllib.parse import urlsplit
 
 from playwright.async_api import Error as PlaywrightError
@@ -70,7 +70,7 @@ from src.modules.content_processor.explore.model import (
 )
 from src.modules.content_processor.explore.scroll import explore_scroll_surfaces
 
-__all__ = ["IMPLEMENTED_ACTIONS", "StateExplorer"]
+__all__ = ["IMPLEMENTED_ACTIONS", "SiteMemory", "StateExplorer"]
 
 _logger = get_logger("content_processor.explore")
 
@@ -89,6 +89,13 @@ _ACTION_FOR_KIND: dict[str, str] = {
     "facet": "apply_facet",
 }
 _ITERATIVE = frozenset({"carousel", "load_more", "pagination"})
+# Only one-shot controls can be site-wide; carousels and pagination depend on the page.
+_REMEMBERED_KINDS = frozenset({"disclosure", "accordion", "tab", "hover", "dialog", "find_reveal"})
+_REPEATABLE_GAPS = frozenset(
+    {"click_failed", "navigates_away", "never_visible", "unsafe_side_effect"}
+)
+SITE_WIDE_REASON = "site_wide_control:repeats_unchanged_across_pages"
+_NOTHING_NEW = "no_new_text"
 _SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 # Non-GET requests to these are telemetry or consent logging: blocked, never charged
 # to the control being clicked (they also fire late, after the action that caused them).
@@ -167,7 +174,8 @@ SITE_UTILITIES = (
 )
 _UTILITY_LABEL = re.compile(
     r"^(sign ?in|log ?in|login|sign ?up|register|my account|account|language|country|region|"
-    r"select (a )?(language|country|region)|chat( with us)?|live chat)$",
+    r"select (a )?(language|country|region)|chat( with us)?|live chat|"
+    r"(add|post|leave|write)( a| your)? (comment|reply)( ?\+)?)$",
     re.IGNORECASE,
 )
 
@@ -181,6 +189,34 @@ DISCOVER_JS = (
   };
   const labelOf = (el) => (el.getAttribute('aria-label') || el.innerText || el.textContent || '')
     .trim().replace(/\\s+/g, ' ').slice(0, 80);
+  const hashOf = (s) => {
+    let a = 0xdeadbeef;
+    let b = 0x41c6ce57;
+    for (let i = 0; i < s.length; i += 1) {
+      const c = s.charCodeAt(i);
+      a = Math.imul(a ^ c, 2654435761);
+      b = Math.imul(b ^ c, 1597334677);
+    }
+    return (b >>> 0).toString(16) + ':' + (a >>> 0).toString(16) + ':' + s.length;
+  };
+  const squash = (s) => (s || '').replace(/\\s+/g, ' ').trim();
+  // What identifies a control beyond its label: the panel it opens, or the text around it.
+  const contextOf = (el) => {
+    const id = (el.getAttribute('aria-controls') || '').split(/\\s+/)[0];
+    const panel = id ? document.getElementById(id) : null;
+    if (panel) {
+      const text = squash(panel.textContent);
+      return text ? { ctx: hashOf(text), panel: text.slice(0, 4000) } : { ctx: '', panel: '' };
+    }
+    const own = squash(el.textContent).length;
+    let node = el.parentElement;
+    for (let i = 0; i < 6 && node && node !== document.body; i += 1) {
+      const text = squash(node.textContent);
+      if (text.length > own + 20) { return { ctx: hashOf(text), panel: '' }; }
+      node = node.parentElement;
+    }
+    return { ctx: '', panel: '' };
+  };
   const CHROME = '"""
     + THIRD_PARTY_CHROME
     + """';
@@ -192,11 +228,12 @@ DISCOVER_JS = (
   let next = Number(body.getAttribute('data-cp-ctl-next') || '0');
   const out = [];
   const tag = (el, kind, extra) => {
+    const context = el.hasAttribute('data-cp-ctl') ? { ctx: '', panel: '' } : contextOf(el);
     if (!el.hasAttribute('data-cp-ctl')) {
       el.setAttribute('data-cp-ctl', String(next));
       next += 1;
     }
-    out.push(Object.assign({
+    out.push(Object.assign({}, context, {
       id: el.getAttribute('data-cp-ctl'),
       kind,
       label: labelOf(el),
@@ -275,6 +312,18 @@ MAX_FACET_LINKS = 200
 """Filter links recorded as follow-ups per page; the rest are listed, not followed."""
 
 
+class SiteMemory(Protocol):
+    """Controls learned from a run's earlier pages (see `scheduler.site_controls`)."""
+
+    def is_site_wide(self, fingerprint: str) -> bool:
+        """True when the control repeated unchanged on enough other pages."""
+        ...
+
+    def record(self, page_url: str, outcomes: Mapping[str, str]) -> None:
+        """Remember what each control did on this page."""
+        ...
+
+
 class StateExplorer:
     """Explores one page's states within policy and budgets."""
 
@@ -286,8 +335,13 @@ class StateExplorer:
         click_timeout_s: float = 3.0,
         settle_max_s: float = 3.0,
         settle_poll_s: float = 0.25,
+        site_memory: SiteMemory | None = None,
     ) -> None:
-        """Bind the explorer to a scope's interaction policy."""
+        """Bind the explorer to a scope's interaction policy.
+
+        `site_memory` lets controls that repeat unchanged across a site's pages be left
+        alone after the first pages; without it every page is explored in full.
+        """
         self._policy = policy
         self._allowed = set(policy.allowed)
         self._budget = policy.max_actions_per_url
@@ -306,6 +360,11 @@ class StateExplorer:
         self._background: set[str] = set()
         self._acting = False
         self._last_error = ""
+        self._site_memory = site_memory
+        self._fingerprints: dict[str, str] = {}
+        self._revealed: dict[str, str] = {}
+        self._site_panels: list[str] = []
+        self._site_skipped = 0
 
     async def explore(self, page: Any, *, time_left_s: float | None = None) -> ExplorationResult:
         """Explore the page. Never raises; failures are recorded on the result.
@@ -328,6 +387,10 @@ class StateExplorer:
         self._iterations.clear()
         self._carousel_seen.clear()
         self._followups.clear()
+        self._fingerprints.clear()
+        self._revealed.clear()
+        self._site_panels.clear()
+        self._site_skipped = 0
 
         async def guard(route: Route, request: Request) -> None:
             if request.method.upper() not in _SAFE_METHODS:
@@ -366,6 +429,8 @@ class StateExplorer:
         result.unsafe_requests = unsafe
         result.followup_urls = list(dict.fromkeys(self._followups))
         result.composition = dict(self._composition)
+        result.site_wide_skipped = self._site_skipped
+        result.site_wide_panels = list(self._site_panels)
         result.elapsed_s = round(time.perf_counter() - started, 3)
         return result
 
@@ -514,6 +579,7 @@ class StateExplorer:
             text, dom = await self._capture(page)
             key = _digest(text)
             fresh = key not in seen_states
+            self._revealed[target.control_id] = _new_lines_digest(text, last_text)
             if fresh:
                 seen_states.add(key)
                 state = new_state(
@@ -549,6 +615,7 @@ class StateExplorer:
             else:
                 rec.reason = "not_reached"
         result.controls = [records[i] for i in order]
+        self._remember(page, records)
         mark_responsive_duplicates(result.controls)
 
     async def _calibrate(self, page: Any) -> None:
@@ -1019,6 +1086,40 @@ class StateExplorer:
             order.append(cid)
             self._info[cid] = dict(item)
             self._classify(rec, item)
+            self._apply_site_memory(rec, item)
+
+    def _apply_site_memory(self, rec: ControlRecord, item: dict[str, Any]) -> None:
+        """Leave a control alone if the run learned it repeats unchanged across the site."""
+        context = str(item.get("ctx") or "")
+        if self._site_memory is None or not context or rec.kind not in _REMEMBERED_KINDS:
+            return
+        if rec.status != "pending" and rec.reason != "navigates_away":
+            return
+        fingerprint = _digest(f"{rec.kind}|{' '.join(rec.label.casefold().split())}|{context}")
+        if not self._site_memory.is_site_wide(fingerprint):
+            self._fingerprints[rec.control_id] = fingerprint
+            return
+        rec.status, rec.reason = "excluded", SITE_WIDE_REASON
+        self._site_skipped += 1
+        panel = str(item.get("panel") or "")
+        if panel:
+            self._site_panels.append(panel)
+
+    def _remember(self, page: Any, records: dict[str, ControlRecord]) -> None:
+        """Tell the site memory what each control did on this page."""
+        if self._site_memory is None:
+            return
+        outcomes: dict[str, str] = {}
+        for control_id, fingerprint in self._fingerprints.items():
+            rec = records[control_id]
+            if rec.status == "visited":
+                outcome = self._revealed.get(control_id)
+            else:
+                head = (rec.reason or "").split(":")[0]
+                outcome = head if rec.status == "unvisited" and head in _REPEATABLE_GAPS else None
+            if outcome is not None:
+                outcomes[fingerprint] = outcome
+        self._site_memory.record(str(page.url), outcomes)
 
     def _classify(self, rec: ControlRecord, item: dict[str, Any]) -> None:  # noqa: C901
         """Decide the initial status of a newly discovered control."""
@@ -1181,6 +1282,13 @@ class StateExplorer:
         text = str(await page.evaluate(_BODY_TEXT))
         dom = (await page.content()).encode("utf-8")
         return text, dom
+
+
+def _new_lines_digest(after: str, before: str) -> str:
+    """A digest of the lines an action added to the page (what it revealed)."""
+    known = {" ".join(line.split()) for line in before.splitlines()}
+    new = {" ".join(line.split()) for line in after.splitlines()} - known - {""}
+    return _digest("\n".join(sorted(new))) if new else _NOTHING_NEW
 
 
 def _click_cause(exc: Exception) -> str:

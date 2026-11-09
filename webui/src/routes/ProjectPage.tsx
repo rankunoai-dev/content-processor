@@ -638,6 +638,40 @@ function UrlsPanel({ project, site, token }: { project: Project; site: Site; tok
   );
 }
 
+const CAN_CONTINUE: ReadonlySet<RunState['status']> = new Set(['cancelled', 'failed', 'interrupted']);
+
+/** Continue a stopped scrape: what it already captured is not requested again. */
+function ContinueRun({
+  project,
+  run,
+  token,
+  blocked,
+}: {
+  project: Project;
+  run: RunState;
+  token: string | null;
+  blocked: boolean;
+}) {
+  const id = project.project_id;
+  const { message } = AntApp.useApp();
+  const resume = useProjectChange(id, () => projectsApi.resume(id, run.site_id, run.run_id, token));
+  return (
+    <Guarded unlocked={token !== null}>
+      <Tooltip title={PROJECTS.resumeHelp}>
+        <Button
+          size="small"
+          icon={<PlayCircleOutlined />}
+          disabled={token === null || blocked}
+          loading={resume.isPending}
+          onClick={() => resume.mutate(undefined, { onError: (e) => void message.error(e.message) })}
+        >
+          {PROJECTS.resume}
+        </Button>
+      </Tooltip>
+    </Guarded>
+  );
+}
+
 function ActiveRun({ project, run, token }: { project: Project; run: RunState; token: string | null }) {
   const id = project.project_id;
   const { message } = AntApp.useApp();
@@ -808,6 +842,14 @@ function ScrapePanel({
                   <Button type="link" onClick={() => onOpenReports(r.run_id)}>
                     {PROJECTS.download}
                   </Button>
+                ) : null,
+            },
+            {
+              title: '',
+              key: 'continue',
+              render: (_, r: RunState) =>
+                CAN_CONTINUE.has(r.status) ? (
+                  <ContinueRun project={project} run={r} token={token} blocked={Boolean(active)} />
                 ) : null,
             },
           ]}

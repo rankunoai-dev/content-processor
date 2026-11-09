@@ -201,7 +201,10 @@ def _kinds(stages: Iterable[StageName]) -> list[TaskKind]:
 
 
 async def _drive_stage(stage: Stage, opts: RunOptions, meter: BudgetMeter | None) -> int:
-    """Run one stage; with a meter, one task at a time so the budget is checked before each."""
+    """Run one stage; with a meter, in small steps so the budget is checked between them.
+
+    A step is one task, or as many as the stage works on at once.
+    """
     if meter is None:
         return await stage.run_until_idle(
             max_tasks=opts.max_tasks_per_stage,
@@ -210,11 +213,13 @@ async def _drive_stage(stage: Stage, opts: RunOptions, meter: BudgetMeter | None
             max_wait_s=opts.max_wait_s,
         )
     done = 0
+    step = max(1, int(getattr(stage, "concurrent_tasks", 1)))
     while meter.exceeded() is None:
         if opts.max_tasks_per_stage is not None and done >= opts.max_tasks_per_stage:
             break
+        left = None if opts.max_tasks_per_stage is None else opts.max_tasks_per_stage - done
         got = await stage.run_until_idle(
-            max_tasks=1,
+            max_tasks=step if left is None else min(step, left),
             idle_polls=opts.idle_polls,
             poll_s=opts.poll_s,
             max_wait_s=min(opts.max_wait_s, meter.remaining_runtime_s()),

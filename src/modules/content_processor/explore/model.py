@@ -111,6 +111,15 @@ class ExplorationResult(StrictModel):
         default_factory=list,
         description="Allowed by policy but not implemented yet; discovery cannot close",
     )
+    site_wide_skipped: int = Field(
+        default=0,
+        ge=0,
+        description="Controls left alone because they repeat unchanged across the site",
+    )
+    site_wide_panels: list[str] = Field(
+        default_factory=list,
+        description="Text of the panels those controls open, already in the page's source",
+    )
     error: str | None = None
 
     @property

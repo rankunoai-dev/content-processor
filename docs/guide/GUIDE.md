@@ -1,6 +1,6 @@
 # Content Processor: A Plain-Language Guide
 
-Last updated: 9 November 2026 · Code version: main with CAPTCHA boxes on forms no longer counting as blocks, theme CSV export and the scrape queue for Claude
+Last updated: 9 November 2026 · Code version: main with scrapes that continue from where they stopped, faster scraping of a site's repeating menus and images read several at a time
 
 ## 1. What this is, in one paragraph
 
@@ -122,11 +122,15 @@ Shop pages hide content behind choices. Two extra explorations can be switched o
 
 Choices beyond the limit are reported as gaps, so the page shows as "partly captured" rather than complete. To switch them on, add "select_variant" and/or "apply_facet" to the job's list of allowed interactions; the limits can be changed in the same place.
 
+**A site's menu is explored only on the first pages.** The header menu is the same on every page, so clicking through it again on each of thousands of pages only wastes time, and the items that cannot be clicked used to make every page look "partly captured". Now, during a project scrape, the engine remembers what each control did. When a control has been seen on two different pages with the same label, the same surrounding text and the same result, later pages leave it alone and list it as "site-wide control". A control is explored on every page if its text differs from page to page (an answer written for that page) or if clicking it gave different results on different pages (a panel filled in after the click). "Add comment" buttons are treated as site tools, not content. On GEP's real pages this took a page in the browser from about 36 seconds to about 20, with the same article text word for word. The first two pages of each scrape are still explored in full, so they can show as "partly captured" because of the menu.
+
 The engine then compares what the browser shows with what the raw HTML contained, so content that appears only after loading, or disappears, is noticed.
 
 If the browser cannot open a page (for example it does not load within 30 seconds because the network or the website is slow), the engine tries again by itself: after 30 seconds, then 90 seconds, then 3 minutes, four tries in all. A slow spell usually lasts minutes, so tries a few seconds apart would all fail together. A page that still cannot be opened keeps the text read from its HTML and is marked "partly captured", never dropped.
 
 ### Step 7: Documents and images
+
+During a project scrape, four documents or images are read at a time instead of one. This is work on your own computer: it sends nothing to the website.
 
 Linked PDFs, Word, Excel and PowerPoint files, and images are downloaded too (one link deep). PDFs are read including tables that continue across pages, form fields, comments and hidden layers. Scanned pages and images are read with OCR (optical character recognition: software that reads text from pictures). The OCR engine is Tesseract, which runs on the local machine for free, with 25 core languages (including English, Hindi, Gujarati, Tamil, Arabic, Chinese, Japanese and the main European languages).
 
@@ -182,7 +186,7 @@ The engine is becoming one app with several modules. Module 1, the Content Scrap
 
 1. **Create a project**: a project name, your name, the client's name and a password (at least 8 characters). The password is stored only in scrambled form and cannot be read back. The form also asks **who the client competes with**: every module compares the client with its competitors, so if none is named it asks once more, and you can add them now or create the project without them (the Research tab suggests competitors later, see Step 19).
 2. **Add the web addresses**: paste them (one per line) or import a file from your computer (.txt, .csv or Excel .xlsx; addresses are found in any column). Every address is checked: duplicates, addresses already in the list and unusable lines (for example ftp:// or text that is not an address) are counted and shown with the reason, never dropped silently.
-3. **Start scraping**: one button. The addresses are worked in batches of 25, each in its own process so one crashed browser cannot stop the app; pages that did not finish are tried again, up to three times. The progress (pages done, batch, results so far) updates by itself, and a scrape can be cancelled. Pages captured before and unchanged since are reused (see the URL history), so a repeat scrape is quicker. Free access only.
+3. **Start scraping**: one button. The addresses are worked in batches of 25, each in its own process so one crashed browser cannot stop the app; pages that did not finish are tried again, up to three times. The progress (pages done, batch, results so far) updates by itself, and a scrape can be cancelled. **A stopped scrape continues where it stopped.** Every download and every page opened in the browser is saved the moment it arrives. If a scrape is cancelled, fails, or the app or computer stops, press **Continue** next to it (a scrape caught by an app restart continues by itself). Finished pages are not repeated and what was already captured is not requested again, even in the batch that was cut off; the page is still read and checked by the current code and keeps the time it was really captured. Pages that ended blocked or failed get one more try when you press Continue, and the better result is kept. Errors and cut-off downloads are not saved, a saved response older than 7 days is requested again, and saved responses are removed when the scrape finishes. The same saved copies mean an image used across a whole site is downloaded once per scrape, not once per batch. Pages captured before and unchanged since are reused (see the URL history), so a repeat scrape is quicker. Free access only.
 4. **Download the reports**: every scrape keeps its own reports. Each file is listed with what it is ("Start here: every page with its content…"), and all of them can be downloaded at once as a zip.
 
 **Several websites per project.** A project holds the client's website and any number of competitor websites (name and address each), entered when the project is created or added later. Each website is kept completely apart: its own address list, scrapes, reports and searchable knowledge. Addresses of several websites can be added in one list: each goes to the website of its domain, and addresses of a website that is not in the project are listed so it can be added as a competitor. "Scrape all websites" scrapes each website on its own.
@@ -480,6 +484,7 @@ A project's **Downloads** tab lists every report at once (project overview with 
 
 | Date | Significant change |
 |---|---|
+| 2026-11-09 | A stopped scrape continues where it stopped: every response is saved as it arrives and is not requested again, with a Continue button for cancelled, failed or interrupted scrapes. Scrapes are faster: a site's repeating menus are explored only on the first pages (a GEP page in the browser went from about 36 to about 20 seconds with identical article text) and four images are read at a time. |
 | 2026-11-09 | A CAPTCHA box on a page's form no longer makes the page "blocked"; only a real challenge page does (an error answer, a "prove you are human" page, or a page with almost nothing else on it). |
 | 2026-11-09 | Claude Desktop can export every page of a theme as a CSV file (export_theme_pages_csv) and check the scrape queue (get_scrape_queue): what is running, waiting or ready, with progress. Both only read; neither starts or stops a scrape. |
 | 2026-11-09 | Claude Desktop can list every page of a theme in full (new tool get_theme_pages): the theme is chosen by its id or name, and nothing is cut short. It reads the project's saved theme map and does not touch the web app or running scrapes. |

@@ -788,6 +788,17 @@ def register_project_routes(
         run_state(project_id, site_id, run_id)
         return runner.cancel(project_id, site_id, run_id)
 
+    @app.post("/api/projects/{project_id}/sites/{site_id}/runs/{run_id}/resume")
+    def resume_run(
+        project_id: str, site_id: str, run_id: str, token: TokenHeader = None
+    ) -> RunState:
+        require_token(project_id, token)
+        run_state(project_id, site_id, run_id)
+        try:
+            return runner.resume(project_id, site_id, run_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from None
+
     @app.get("/api/projects/{project_id}/sites/{site_id}/runs/{run_id}/downloads")
     def downloads(project_id: str, site_id: str, run_id: str) -> list[ReportFile]:
         run_state(project_id, site_id, run_id)

@@ -38,7 +38,9 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 import sys
+import threading
 import time
 from collections import Counter
 from collections.abc import Callable, Sequence
@@ -53,8 +55,9 @@ from src.integrations.evidence_store import EvidenceStore, LocalEvidenceStore
 from src.integrations.http_client import FetchLimits, HttpFetcher
 from src.integrations.impersonated_client import ImpersonatedFetcher, impersonation_available
 from src.modules.analyst.commands import register as register_analyst_commands
-from src.modules.content_processor.contracts import RunScope
+from src.modules.content_processor.contracts import InteractionPolicy, RunScope
 from src.modules.content_processor.enums import AccessTier, tier_rank
+from src.modules.content_processor.explore import StateExplorer
 from src.modules.content_processor.export.bundle import write_run_reports
 from src.modules.content_processor.export.commands import register as register_report_command
 from src.modules.content_processor.export.decisions import (
@@ -99,8 +102,13 @@ from src.modules.content_processor.scheduler.budget import (
     MeteredFetcher,
     MeteredRenderer,
 )
+from src.modules.content_processor.scheduler.capture_journal import CaptureJournal
 from src.modules.content_processor.scheduler.grouping import RunGroups
 from src.modules.content_processor.scheduler.reports import badge_summary, records_path_for
+from src.modules.content_processor.scheduler.site_controls import (
+    SITE_CONTROLS_FILE,
+    SiteControlMemory,
+)
 from src.modules.content_processor.scope.frontier import FrontierPlan, build_frontier
 from src.modules.content_processor.scope.ssrf import EgressDecision, IpClass, check_host
 from src.modules.content_processor.workers.doc_worker import DocWorker
@@ -115,6 +123,9 @@ from src.modules.theming.commands import register as register_theming_commands
 __all__ = ["main"]
 
 _logger = get_logger("content_processor.cli")
+EXIT_PARENT_GONE = 75
+DOC_PARALLEL_TASKS = 4
+"""Images and documents read at once. They are local work: no request reaches a site."""
 TOOL_VERSIONS = {"engine": "0.2.0", "cli": "L6-1"}
 ALL_STAGES: tuple[StageName, ...] = ("fetch", "render", "docs")
 
@@ -279,6 +290,7 @@ async def _drive(
     reap: Any = None,
     baseline: Baseline | None = None,
     group_assets: bool = False,
+    journal: CaptureJournal | None = None,
 ) -> RunExecution:
     """Build the workers for the requested stages, drive them, close everything.
 
@@ -320,12 +332,20 @@ async def _drive(
             baseline=baseline,
             approvals=approvals,
             browser_handoff="render" in stage_names,
+            journal=journal,
         )
     if "render" in stage_names:
         renderer = MeteredRenderer(build_renderer(scope), meter)
+        site_memory = (
+            None if journal is None else SiteControlMemory(journal.root / SITE_CONTROLS_FILE)
+        )
+
+        def make_explorer(policy: InteractionPolicy) -> StateExplorer:
+            return StateExplorer(policy, site_memory=site_memory)
 
         def make_render_worker() -> Stage:
             return RenderWorker(
+                explorer_factory=make_explorer,
                 ledger=ledger,
                 renderer=renderer,
                 evidence=evidence,
@@ -333,6 +353,7 @@ async def _drive(
                 run_id=run_id,
                 worker_id=f"{worker_prefix}-render",
                 asset_store_for=grouping.asset_store_for if grouping is not None else None,
+                journal=journal,
             )
 
         render_stage = LazyRenderStage(ledger, renderer, make_render_worker, run_id=run_id)
@@ -345,6 +366,7 @@ async def _drive(
             worker_id=f"{worker_prefix}-docs",
             ocr_languages=scope.ocr_languages,
             locale=scope.locale,
+            parallel_tasks=DOC_PARALLEL_TASKS,
         )
     try:
         return await execute_run(
@@ -568,6 +590,8 @@ async def _dryrun_with(
     if baseline is None:
         baseline, baseline_source = _history_baseline(args, history, evidence)
     _apply_skip_plan(args, baseline)
+    journal_root = getattr(args, "capture_journal", None)
+    journal = CaptureJournal(Path(journal_root), evidence) if journal_root else None
     execution = await _drive(
         ledger,
         scope=scope,
@@ -578,10 +602,12 @@ async def _dryrun_with(
         worker_prefix="dry",
         baseline=baseline,
         group_assets=getattr(args, "group_assets", False),
+        journal=journal,
     )
     report = {
         "run_id": run_id,
         "mode": "dryrun_memory_ledger",
+        "capture_journal": dict(journal.stats) if journal is not None else None,
         "paid_tiers": paid_tier_status(scope),
         "baseline": _baseline_info(baseline, baseline_source),
         "scheduled": len(plan.entries),
@@ -606,8 +632,47 @@ async def _dryrun_with(
     return 0
 
 
+def _wait_for_process_end(pid: int) -> None:
+    """Return when the process `pid`, this process's parent, has ended."""
+    if os.name == "nt":
+        import ctypes  # noqa: PLC0415 - Windows only
+
+        synchronize, wait_forever = 0x00100000, 0xFFFFFFFF
+        kernel32 = getattr(ctypes, "windll").kernel32  # noqa: B009 - absent elsewhere
+        kernel32.OpenProcess.restype = ctypes.c_void_p
+        kernel32.WaitForSingleObject.argtypes = [ctypes.c_void_p, ctypes.c_ulong]
+        handle = kernel32.OpenProcess(synchronize, False, pid)
+        if handle:
+            kernel32.WaitForSingleObject(handle, wait_forever)
+        return
+    while os.getppid() == pid:
+        time.sleep(2.0)
+
+
+def _exit_when_parent_stops() -> None:
+    """Stop this process when the app that started it is gone.
+
+    Otherwise a batch outlives a stopped app and, when the app resumes the scrape, the
+    same pages are requested twice at once. Saved responses are written atomically.
+
+    The parent's process is watched, not a pipe on stdin: on Windows a pending read of
+    stdin makes starting any further program from this process hang.
+    """
+    parent = os.getppid()
+
+    def watch() -> None:
+        try:
+            _wait_for_process_end(parent)
+        finally:
+            os._exit(EXIT_PARENT_GONE)
+
+    threading.Thread(target=watch, name="parent-watch", daemon=True).start()
+
+
 def cmd_dryrun(args: argparse.Namespace) -> int:
     """Run a scope end to end with an in-memory ledger and write the reports."""
+    if getattr(args, "exit_with_parent", False):
+        _exit_when_parent_stops()
     return asyncio.run(_dryrun(args))
 
 
@@ -787,6 +852,17 @@ def _add_drive_options(p: argparse.ArgumentParser) -> None:
         default=None,
         help="JSON file: {'urls': [...], 'reason': '...'} of pages a recrawl plan says are not "
         "due; their previous capture is carried forward without a request",
+    )
+    p.add_argument(
+        "--capture-journal",
+        default=None,
+        help="folder of this run's saved responses: each is saved as it arrives, and a page "
+        "a stopped attempt already captured is not requested again",
+    )
+    p.add_argument(
+        "--exit-with-parent",
+        action="store_true",
+        help="stop when the program that started this one is gone",
     )
     p.add_argument(
         "--group-assets",

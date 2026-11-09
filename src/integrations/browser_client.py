@@ -14,6 +14,7 @@ import asyncio
 import contextlib
 import time
 from collections.abc import Awaitable, Callable
+from datetime import datetime
 from typing import Any, Protocol
 from urllib.parse import urlsplit
 
@@ -331,6 +332,8 @@ class RenderResult(StrictModel):
     overlay_html: str = ""
     elapsed_ms: float = 0.0
     transport_error: str | None = None
+    captured_earlier_at: datetime | None = None
+    """Set when this came from a stopped attempt's saved responses: the browser did not run."""
 
     @property
     def rendered(self) -> bool:

@@ -420,6 +420,9 @@ export const projectsApi = {
   queue: (signal?: AbortSignal) => get<SharedQueue>('/api/queue', signal),
   cancel: (id: string, site: string, run: string, token: string | null) =>
     post<RunState>(`${runPath(id, site, run)}/cancel`, {}, token),
+  /** Continue a stopped scrape: nothing already saved is requested again. */
+  resume: (id: string, site: string, run: string, token: string | null) =>
+    post<RunState>(`${runPath(id, site, run)}/resume`, {}, token),
   reports: (id: string, site: string, run: string, signal?: AbortSignal) =>
     get<ReportFile[]>(`${runPath(id, site, run)}/downloads`, signal),
   reportUrl: (id: string, site: string, run: string, file: string) =>

@@ -15,9 +15,10 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import multiprocessing
+import threading
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, cast
 
 from src.core.logger import get_logger
 from src.integrations.evidence_store import EvidenceStore
@@ -120,6 +121,25 @@ def _extract_office_safely(
         return f"parse:{exc}"
 
 
+class _SerialLedger:
+    """A ledger whose calls run one at a time, for workers sharing it across threads."""
+
+    def __init__(self, ledger: LedgerPort) -> None:
+        self._ledger = ledger
+        self._lock = threading.Lock()
+
+    def __getattr__(self, name: str) -> Any:
+        target = getattr(self._ledger, name)
+        if not callable(target):
+            return target
+
+        def call(*args: Any, **kwargs: Any) -> Any:
+            with self._lock:
+                return target(*args, **kwargs)
+
+        return call
+
+
 def _sha(*parts: str) -> str:
     return hashlib.sha256("|".join(parts).encode()).hexdigest()
 
@@ -141,9 +161,16 @@ class DocWorker:
         ocr_runner: Any = None,
         osd_runner: Any = None,
         locale: str | None = None,
+        parallel_tasks: int = 1,
     ) -> None:
-        """Bind the worker to one run. `isolate=False` runs adapters in-process (tests)."""
-        self._ledger = ledger
+        """Bind the worker to one run. `isolate=False` runs adapters in-process (tests).
+
+        `parallel_tasks` is how many documents and images are read at once.
+        """
+        self.concurrent_tasks = max(1, parallel_tasks)
+        self._ledger: LedgerPort = (
+            cast(LedgerPort, _SerialLedger(ledger)) if self.concurrent_tasks > 1 else ledger
+        )
         self._evidence = evidence
         self._run_id = run_id
         self._worker_id = worker_id
@@ -169,23 +196,32 @@ class DocWorker:
         processed = 0
         idle = 0
         waited = 0.0
-        while max_tasks is None or processed < max_tasks:
-            task = self._ledger.lease(self._worker_id, _KINDS, run_id=self._run_id)
-            if task is None:
-                if self._ledger.pending_count(_KINDS, run_id=self._run_id) == 0:
-                    idle += 1
-                    if idle >= idle_polls:
-                        break
-                elif waited >= max_wait_s:
-                    _logger.warning("doc_loop_gave_up_waiting", extra={"waited_s": waited})
+        running: set[asyncio.Future[None]] = set()
+        while True:
+            while len(running) < self.concurrent_tasks and (
+                max_tasks is None or processed + len(running) < max_tasks
+            ):
+                task = self._ledger.lease(self._worker_id, _KINDS, run_id=self._run_id)
+                if task is None:
                     break
-                waited += poll_s
-                await asyncio.sleep(poll_s)
+                idle = 0
+                waited = 0.0
+                running.add(asyncio.ensure_future(asyncio.to_thread(self.process, task)))
+            if running:
+                done, running = await asyncio.wait(running, return_when=asyncio.FIRST_COMPLETED)
+                processed += len(done)
                 continue
-            idle = 0
-            waited = 0.0
-            await asyncio.to_thread(self.process, task)
-            processed += 1
+            if max_tasks is not None and processed >= max_tasks:
+                break
+            if self._ledger.pending_count(_KINDS, run_id=self._run_id) == 0:
+                idle += 1
+                if idle >= idle_polls:
+                    break
+            elif waited >= max_wait_s:
+                _logger.warning("doc_loop_gave_up_waiting", extra={"waited_s": waited})
+                break
+            waited += poll_s
+            await asyncio.sleep(poll_s)
         return processed
 
     def process(self, task: Task) -> None:

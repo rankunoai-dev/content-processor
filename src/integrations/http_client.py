@@ -19,6 +19,7 @@ from abc import ABC, abstractmethod
 from collections.abc import AsyncGenerator, AsyncIterator, Callable, Iterable, Sequence
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, Literal, Protocol
 from urllib.parse import urljoin, urlsplit
 
@@ -97,6 +98,8 @@ class FetchResult(StrictModel):
     egress_denied: str | None = None
     spend_refused: str | None = None
     """A paid tier refused to make the request (cap, approval or kill switch); no bytes sent."""
+    captured_earlier_at: datetime | None = None
+    """Set when this came from a stopped attempt's saved responses: no request was sent."""
 
     @property
     def acquired(self) -> bool:

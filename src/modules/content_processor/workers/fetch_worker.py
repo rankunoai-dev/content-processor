@@ -67,6 +67,7 @@ from src.modules.content_processor.recrawl import (
     decide_change,
     extract_page_dates,
 )
+from src.modules.content_processor.scheduler.capture_journal import CaptureJournal
 from src.modules.content_processor.scope.followups import (
     FollowupCandidate,
     anchor_hints,
@@ -149,6 +150,7 @@ class FetchWorker:
         baseline: Baseline | None = None,
         approvals: Callable[[str], Approval | None] | None = None,
         browser_handoff: bool = False,
+        journal: CaptureJournal | None = None,
     ) -> None:
         """Bind the worker to one run.
 
@@ -169,6 +171,8 @@ class FetchWorker:
             approvals: `host -> active paid-tier approval` (A-8). An approved
                 host's ceiling rises to its approved tier (never past the
                 scope's); every other host stays at the free tiers.
+            journal: The run's saved responses. Each download is saved as it arrives,
+                and one saved by a stopped attempt is used instead of a new request.
         """
         self._ledger = ledger
         self._fetcher = fetcher
@@ -186,6 +190,7 @@ class FetchWorker:
         self._baseline = baseline
         self._approvals = approvals
         self._priors: dict[str, UrlRecord] = {}
+        self._journal = journal
 
     # -- loop ---------------------------------------------------------------
 
@@ -331,11 +336,32 @@ class FetchWorker:
             return
         # A capture too old to reuse is still compared, but fetched in full.
         validators = conditional_headers(prior) if self._may_reuse(prior) else {}
-        result = await (
-            fetcher.fetch(requested_url, headers=validators)
-            if validators
-            else fetcher.fetch(requested_url)
+        saved = (
+            self._journal.find_fetch(
+                requested_url,
+                [t.value for t in sorted(self._fetchers, key=tier_rank, reverse=True)],
+            )
+            if self._journal is not None
+            else None
         )
+        if saved is not None:
+            # A stopped attempt already downloaded this: no request, and the tier and
+            # the time reported are the ones that really produced these bytes.
+            fetcher = self._fetchers[AccessTier(saved.tier)]
+            result = saved.result
+            self._ledger.record_summary(
+                resource.resource_id,
+                "fetch_replay",
+                {"captured_at": str(result.captured_earlier_at), "tier": saved.tier},
+            )
+        else:
+            result = await (
+                fetcher.fetch(requested_url, headers=validators)
+                if validators
+                else fetcher.fetch(requested_url)
+            )
+            if self._journal is not None:
+                self._journal.save_fetch(result, fetcher.tier_name)
         resource.final_url = result.final_url
         resource.redirect_chain = [
             RedirectHop(
@@ -395,7 +421,9 @@ class FetchWorker:
             body_size=len(result.body),
         )
         resource.block_verdict = block
-        resource.acquired_at = datetime.now(UTC)
+        if block.kind is not BlockKind.NONE and self._journal is not None:
+            self._journal.forget_fetch(requested_url, fetcher.tier_name)
+        resource.acquired_at = result.captured_earlier_at or datetime.now(UTC)
         # The tier that produced these bytes. The host may already *want* a higher
         # tier; until a fetcher for it exists, that is a pending escalation, not a fact.
         resource.acquired_at_tier = AccessTier(fetcher.tier_name)

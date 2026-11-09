@@ -34,6 +34,7 @@ and batch attempts that already finished are not repeated.
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 import sys
 import threading
@@ -49,12 +50,14 @@ from src.core.logger import get_logger
 from src.modules.content_processor.knowledge.federated import space_namespace
 from src.modules.content_processor.projects.models import (
     RUN_ACTIVE,
+    RUN_RESUMABLE,
     OnTurn,
     ProjectRecord,
     RunState,
 )
 from src.modules.content_processor.projects.notify import Notifier, check_email, hide_email
 from src.modules.content_processor.projects.store import ProjectNotFoundError, ProjectStore
+from src.modules.content_processor.scheduler.capture_journal import saved_capture_count
 
 __all__ = [
     "ATTEMPTS",
@@ -73,10 +76,13 @@ _logger = get_logger("content_processor.projects.runner")
 BATCH_SIZE = 25
 ATTEMPTS = 3
 MAX_WAIT_S = 360
+CANCELLED_MESSAGE = "Cancelled; finished batches and saved pages are kept. It can be continued."
 FINISHED_BADGES = frozenset(
     {"VERIFIED_WITHIN_SCOPE", "PARTIAL", "NEEDS_REVIEW", "BLOCKED", "FAILED", "EXCLUDED"}
 )
 DEFAULT_TENANT = "rankuno-dev"
+RETRIED_ON_RESUME = frozenset({"BLOCKED", "FAILED"})
+"""Given one more try when a person continues a stopped scrape."""
 SECONDS_PER_URL = 30.0  # wait estimates before any scrape has finished on this instance
 READY_HOURS = 72.0
 
@@ -120,6 +126,8 @@ def build_scope(
 
 
 SKIP_FILE = "skip_fetch.json"
+CAPTURES_DIR = "captures"
+"""The run's saved responses (see `scheduler.capture_journal`); removed when it finishes."""
 
 
 def subprocess_command(scope: Path, out: Path, cancel: threading.Event) -> int:
@@ -131,6 +139,7 @@ def subprocess_command(scope: Path, out: Path, cancel: threading.Event) -> int:
     log = out.with_suffix(".log")
     skip = scope.parent / SKIP_FILE
     extra = ["--skip-fetch", str(skip)] if skip.is_file() else []
+    extra += ["--capture-journal", str(scope.parent / CAPTURES_DIR), "--exit-with-parent"]
     with log.open("w", encoding="utf-8") as sink:
         process = subprocess.Popen(  # noqa: S603 - fixed argv, no shell
             [
@@ -149,6 +158,7 @@ def subprocess_command(scope: Path, out: Path, cancel: threading.Event) -> int:
                 *extra,
             ],
             cwd=REPO_ROOT,
+            stdin=subprocess.DEVNULL,
             stdout=sink,
             stderr=subprocess.STDOUT,
         )
@@ -163,13 +173,25 @@ def subprocess_command(scope: Path, out: Path, cancel: threading.Event) -> int:
 
 
 def _records(path: Path) -> dict[str, dict[str, object]]:
+    """A batch attempt's records by URL; a damaged line counts as a page not done."""
     out: dict[str, dict[str, object]] = {}
     if path.is_file():
-        for line in path.read_text(encoding="utf-8").splitlines():
-            if line.strip():
+        for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+            if not line.strip():
+                continue
+            try:
                 record = json.loads(line)
                 out.setdefault(str(record["requested_url"]), record)
+            except (ValueError, KeyError, TypeError):
+                _logger.warning("batch_record_damaged", extra={"file": path.name})
     return out
+
+
+def _rank(badge: object) -> int:
+    """Which of two results for a page to keep: captured, then ended badly, then nothing."""
+    if badge not in FINISHED_BADGES:
+        return 0
+    return 1 if badge in RETRIED_ON_RESUME else 2
 
 
 @dataclass(frozen=True)
@@ -221,8 +243,20 @@ class ScrapeRunner:
         self._cancel: dict[str, threading.Event] = {}
         self._thread: threading.Thread | None = None
         self._lock = threading.Lock()
+        self._badge_cache: dict[Path, tuple[tuple[int, int], dict[str, object]]] = {}
+        self._last_created = datetime.min.replace(tzinfo=UTC)
 
     # -- queue ----------------------------------------------------------------
+
+    def _queue_time(self) -> datetime:
+        """Now, always later than the last scrape queued: the clock can repeat a value.
+
+        A restart rebuilds the queue in this order, so two scrapes must never tie.
+        """
+        with self._lock:
+            now = max(datetime.now(UTC), self._last_created + timedelta(microseconds=1))
+            self._last_created = now
+        return now
 
     def start(self) -> None:
         """Start the worker thread and pick up runs left queued or running last time."""
@@ -285,7 +319,7 @@ class ScrapeRunner:
             raise ValueError(f"Add at least one URL to {site.name} before starting.")
         if any(r.status in RUN_ACTIVE for r in self._store.runs(project_id, site_id)):
             raise ValueError(f"A scrape of {site.name} is already queued or running.")
-        now = datetime.now(UTC)
+        now = self._queue_time()
         run_id = f"{site_id}_{now:%Y%m%d-%H%M%S}"
         # Two scrapes of one website started within the same second get distinct names.
         suffix = 1
@@ -368,6 +402,35 @@ class ScrapeRunner:
             self._store.save_run(state)
             with self._cond:
                 self._pending.discard((project_id, site_id, run_id))
+        return state
+
+    def resume(self, project_id: str, site_id: str, run_id: str) -> RunState:
+        """Continue a stopped scrape from where it stopped.
+
+        Finished batches are not repeated and responses already saved are not requested
+        again; pages that ended blocked or failed get one more try.
+        """
+        state = self._store.run(project_id, site_id, run_id)
+        if state.status not in RUN_RESUMABLE:
+            raise ValueError("Only a cancelled, failed or interrupted scrape can be continued.")
+        if any(r.status in RUN_ACTIVE for r in self._store.runs(project_id, site_id)):
+            raise ValueError("A scrape of this website is already queued or running.")
+        with self._cond:
+            if (project_id, site_id, run_id) == self._current:
+                raise ValueError("This scrape is still stopping; try again in a moment.")
+            self._cancel[run_id] = threading.Event()
+        saved = saved_capture_count(self._store.run_dir(project_id, site_id, run_id) / CAPTURES_DIR)
+        state = state.model_copy(
+            update={
+                "status": "queued",
+                "finished_at": None,
+                "resume_count": state.resume_count + 1,
+                "message": f"Continuing from where it stopped; {saved:,} saved responses "
+                "will be reused.",
+            }
+        )
+        self._store.save_run(state)
+        self._enqueue(state)
         return state
 
     def start_ready(self, project_id: str, site_id: str, run_id: str) -> RunState:
@@ -632,12 +695,16 @@ class ScrapeRunner:
         )
         self._store.save_run(state)
 
+        # Each time a person continues the scrape it gets a fresh set of attempts.
+        first = self._attempts * state.resume_count + 1
+        attempts = first + self._attempts - 1
+        retry_since = first if state.resume_count else None
         for number, batch in enumerate(batches, 1):
-            for attempt in range(1, self._attempts + 1):
+            for attempt in range(first, attempts + 1):
                 if cancel.is_set():
-                    self._finish(state, "cancelled", "Cancelled; finished batches are kept.")
+                    self._finish(state, "cancelled", CANCELLED_MESSAGE)
                     return
-                left = self._unfinished(folder, number, batch)
+                left = self._unfinished(folder, number, batch, attempts, retry_since=retry_since)
                 if not left:
                     break
                 out = folder / f"b{number}_a{attempt}.json"
@@ -663,16 +730,16 @@ class ScrapeRunner:
                 )
                 code = self._command(scope, out, cancel)
                 if cancel.is_set():
-                    self._finish(state, "cancelled", "Cancelled; finished batches are kept.")
+                    self._finish(state, "cancelled", CANCELLED_MESSAGE)
                     return
                 _logger.info(
                     "project_batch_done",
                     extra={"run_id": run_id, "batch": number, "attempt": attempt, "code": code},
                 )
-                state = self._progress(state, folder, batches, done_through=number - 1)
-            state = self._progress(state, folder, batches, done_through=number)
+                state = self._progress(state, folder, batches, attempts, done_through=number - 1)
+            state = self._progress(state, folder, batches, attempts, done_through=number)
 
-        merged = self._merge(folder, run_id, batches)
+        merged = self._merge(folder, run_id, batches, attempts)
         if not merged.read_text(encoding="utf-8").strip():
             logs = sorted(p.name for p in folder.glob("b*_a*.log"))
             self._finish(
@@ -705,6 +772,7 @@ class ScrapeRunner:
             update={"knowledge_status": "ready" if built else "failed", "knowledge_message": note}
         )
         self._finish(state, "finished", "Done.")
+        shutil.rmtree(folder / CAPTURES_DIR, ignore_errors=True)  # its records are written
 
     def _finish(self, state: RunState, status: str, message: str) -> None:
         self._store.save_run(
@@ -718,30 +786,76 @@ class ScrapeRunner:
             )
         )
 
-    def _batch_records(self, folder: Path, number: int) -> dict[str, dict[str, object]]:
-        """Best record per URL across the batch's attempts (a finished one wins)."""
+    def _badges(self, path: Path) -> dict[str, object]:
+        """URL to badge of one attempt's file, read once however often it is asked for."""
+        try:
+            stat = path.stat()
+        except OSError:
+            return {}
+        stamp = (stat.st_mtime_ns, stat.st_size)
+        cached = self._badge_cache.get(path)
+        if cached is not None and cached[0] == stamp:
+            return cached[1]
+        badges = {url: record.get("badge") for url, record in _records(path).items()}
+        self._badge_cache[path] = (stamp, badges)
+        return badges
+
+    def _batch_badges(self, folder: Path, number: int, attempts: int) -> dict[str, object]:
+        """Best badge per URL across the batch's attempts."""
+        best: dict[str, object] = {}
+        for attempt in range(1, attempts + 1):
+            for url, badge in self._badges(folder / f"b{number}_a{attempt}.records.jsonl").items():
+                if url not in best or _rank(badge) > _rank(best[url]):
+                    best[url] = badge
+        return best
+
+    def _batch_records(
+        self, folder: Path, number: int, attempts: int
+    ) -> dict[str, dict[str, object]]:
+        """Best record per URL across the batch's attempts."""
         best: dict[str, dict[str, object]] = {}
-        for attempt in range(1, self._attempts + 1):
+        for attempt in range(1, attempts + 1):
             for url, record in _records(folder / f"b{number}_a{attempt}.records.jsonl").items():
-                if url not in best or (
-                    best[url].get("badge") not in FINISHED_BADGES
-                    and record.get("badge") in FINISHED_BADGES
-                ):
+                if url not in best or _rank(record.get("badge")) > _rank(best[url].get("badge")):
                     best[url] = record
         return best
 
-    def _unfinished(self, folder: Path, number: int, batch: Sequence[str]) -> list[str]:
-        got = self._batch_records(folder, number)
-        return [u for u in batch if got.get(u, {}).get("badge") not in FINISHED_BADGES]
+    def _unfinished(
+        self,
+        folder: Path,
+        number: int,
+        batch: Sequence[str],
+        attempts: int,
+        *,
+        retry_since: int | None = None,
+    ) -> list[str]:
+        """Pages still to do; after a person continues, blocked and failed ones get one more try."""
+        got = self._batch_badges(folder, number, attempts)
+        retried: set[str] = set()
+        if retry_since is not None:
+            for attempt in range(retry_since, attempts + 1):
+                retried |= set(self._badges(folder / f"b{number}_a{attempt}.records.jsonl"))
+        return [
+            u
+            for u in batch
+            if got.get(u) not in FINISHED_BADGES
+            or (retry_since is not None and got.get(u) in RETRIED_ON_RESUME and u not in retried)
+        ]
 
     def _progress(
-        self, state: RunState, folder: Path, batches: Sequence[Sequence[str]], *, done_through: int
+        self,
+        state: RunState,
+        folder: Path,
+        batches: Sequence[Sequence[str]],
+        attempts: int,
+        *,
+        done_through: int,
     ) -> RunState:
         results: Counter[str] = Counter()
         for number, batch in enumerate(batches, 1):
-            got = self._batch_records(folder, number)
+            got = self._batch_badges(folder, number, attempts)
             for url in batch:
-                badge = got.get(url, {}).get("badge")
+                badge = got.get(url)
                 if badge in FINISHED_BADGES:
                     results[str(badge)] += 1
         state = state.model_copy(
@@ -754,16 +868,18 @@ class ScrapeRunner:
         self._store.save_run(state)
         return state
 
-    def _merge(self, folder: Path, run_id: str, batches: Sequence[Sequence[str]]) -> Path:
+    def _merge(
+        self, folder: Path, run_id: str, batches: Sequence[Sequence[str]], attempts: int
+    ) -> Path:
         """One records file: each supplied URL's best record, then the pages found on them."""
         supplied: dict[str, dict[str, object]] = {}
         found: dict[str, dict[str, object]] = {}
         seeds = {u for batch in batches for u in batch}
         for number in range(1, len(batches) + 1):
-            for url, record in self._batch_records(folder, number).items():
+            for url, record in self._batch_records(folder, number, attempts).items():
                 if url in seeds:
                     supplied[url] = record
-            for attempt in range(1, self._attempts + 1):
+            for attempt in range(1, attempts + 1):
                 for url, record in _records(folder / f"b{number}_a{attempt}.records.jsonl").items():
                     if url not in seeds:
                         found.setdefault(url, record)
