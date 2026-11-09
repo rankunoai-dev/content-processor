@@ -47,6 +47,7 @@ def fake_dns(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
         ("http://localhost:11434/v1", True, "local or private address"),
         ("http://192.168.1.50:11434/v1", True, "local or private address"),
         ("http://10.0.0.8:11434/v1", True, "local or private address"),
+        ("http://100.75.85.16:11434/v1", True, "local or private address"),
         ("http://ollama.office.lan:11434/v1", True, "in-house server"),
         ("http://gpu.vpn.internal:11434/v1", True, "in-house server"),
         ("https://ollama.example.com/v1", False, "set CP_ALLOW_REMOTE_MODEL_ENDPOINT=true"),

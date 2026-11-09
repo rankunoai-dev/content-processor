@@ -120,6 +120,7 @@ def _resolves_private(host: str) -> bool:
         return all(
             ipaddress.ip_address(a.split("%")[0]).is_loopback
             or ipaddress.ip_address(a.split("%")[0]).is_private
+            or ipaddress.ip_address(a.split("%")[0]) in ipaddress.ip_network('100.64.0.0/10')
             for a in addresses
         )
     except ValueError:
@@ -176,7 +177,8 @@ def is_local_endpoint(url: str) -> bool:
         address = ipaddress.ip_address(host)
     except ValueError:
         return False
-    return address.is_loopback or address.is_private
+    _TAILSCALE = ipaddress.ip_network('100.64.0.0/10')
+    return address.is_loopback or address.is_private or address in _TAILSCALE
 
 
 def _parse(content: str, model: str) -> NliVerdict | None:
