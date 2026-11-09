@@ -52,7 +52,13 @@ def test_catalog_lists_every_built_tool_read_only_with_a_project() -> None:
     defs = definitions()
     names = [d.name for d in defs]
     built = [n for n, s in TOOLS.items() if s.built]
-    assert names == ["list_projects", *built, "present_answer", "check_deliverable"]
+    assert names == [
+        "list_projects",
+        *built,
+        "get_theme_pages",
+        "present_answer",
+        "check_deliverable",
+    ]
     assert len(built) == 17
     for d in defs[1:]:
         assert d.input_schema["required"][0] == "project_id"
@@ -135,7 +141,8 @@ def test_mcp_protocol_end_to_end(themed: World, tmp_path: Path) -> None:
         return [t.name for t in tools.tools], json.loads(text), wrong_text, bool(wrong.is_error)
 
     names, theme, wrong_text, wrong_error = anyio.run(scenario)
-    assert names[0] == "list_projects" and "check_deliverable" in names and len(names) == 20
+    assert names[0] == "list_projects" and "check_deliverable" in names and len(names) == 21
+    assert "get_theme_pages" in names
     assert theme["tool"] == "get_theme_map" and theme["data"]
     assert wrong_error and "unknown tool" in wrong_text
 
@@ -202,6 +209,7 @@ def test_a_scoped_catalog_lists_only_that_module() -> None:
         "list_projects",
         "get_offering_catalog",
         "get_theme_map",
+        "get_theme_pages",
         "present_answer",
         "check_deliverable",
     ]

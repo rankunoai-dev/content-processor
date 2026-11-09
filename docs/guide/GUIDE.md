@@ -1,6 +1,6 @@
 # Content Processor: A Plain-Language Guide
 
-Last updated: 9 November 2026 · Code version: main after the CPU fallback model for meaning, in-house and cloud model servers, Semrush pacing and fair budget split, keyword gaps by the client's position, smart recrawl and richer change alerts, downloads in every module (Excel, CSV and Word, and everything in one zip), suggested competitors (asked for at project creation, found in the search data), the full page-by-page report in project reports, project reports (duplication and contradictions by topic across all of the client's websites), Claude Desktop connectors per module, the home screen with module tiles, the shared scrape queue, the Claude Desktop connection (a read-only MCP server) and the "Open in Claude.ai" button · Maintained by every session that adds a significant feature (see "Keeping this guide current" at the end)
+Last updated: 9 November 2026 · Code version: main with the get_theme_pages tool for Claude
 
 ## 1. What this is, in one paragraph
 
@@ -478,6 +478,7 @@ A project's **Downloads** tab lists every report at once (project overview with 
 
 | Date | Significant change |
 |---|---|
+| 2026-11-09 | Claude Desktop can list every page of a theme in full (new tool get_theme_pages): the theme is chosen by its id or name, and nothing is cut short. It reads the project's saved theme map and does not touch the web app or running scrapes. |
 | 2026-11-09 | Meaning without a model server: when Ollama is not available, search and the knowledge base use a small multilingual model on this computer's processor (downloaded once, free, offline) before falling back to word matching; a store is rebuilt by itself when a better model arrives and never downgraded; search says per website which model answered. John Hancock: 1,308 sections in 23 seconds. |
 | 2026-11-05 | Model servers: an in-house Ollama is accepted by its private address or by a name that points only to private addresses; the company's own cloud server is accepted only when switched on and over https (plain http to the internet is always refused, with the reason); an optional access key for servers behind a sign-in gateway. |
 | 2026-11-05 | Semrush pulls are paced (one call every half second across the app, waiting and retrying when Semrush asks to slow down, without paying twice), share the pull budget fairly between websites, and reuse websites pulled in the last 14 days instead of paying again (a checkbox pulls everything again). |

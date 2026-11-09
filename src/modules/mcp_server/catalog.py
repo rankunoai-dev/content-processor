@@ -204,6 +204,42 @@ def definitions(scope: Scope = None) -> list[ToolDef]:
                 key,
             )
         )
+    if scope is None or "themes" in scope:
+        out.append(
+            ToolDef(
+                "get_theme_pages",
+                "Themes: Get theme pages",
+                "[Themes] Every page of one theme of the project, in full (no truncation): URL, "
+                "title, website, role, page type, funnel stage and words. Give the project_id "
+                "and the theme id or name as get_theme_map lists them. Use it to list all the "
+                "URLs of a theme. (read-only)",
+                {
+                    "type": "object",
+                    "properties": {
+                        "project_id": {
+                            "type": "string",
+                            "description": "The project, from list_projects",
+                            "minLength": 1,
+                            "maxLength": 80,
+                        },
+                        "theme": {
+                            "type": "string",
+                            "description": "The theme id (th-...) or its name, from get_theme_map",
+                            "minLength": 1,
+                            "maxLength": 200,
+                        },
+                        "website": {
+                            "type": "string",
+                            "description": "Optional: one website only, such as johnhancock.com",
+                            "maxLength": 200,
+                        },
+                    },
+                    "required": ["project_id", "theme"],
+                    "additionalProperties": False,
+                },
+                "themes",
+            )
+        )
     from src.modules.mcp_server.templates import TYPES, PresentInput
 
     out.append(

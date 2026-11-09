@@ -939,3 +939,11 @@ git worktree add ../content-processor-lane4 -b lane/L4-verify
 - **Not done:** the live Postgres spaces are still on their old model; the next scrape's index upgrades them automatically (or run `cli index` on the latest run). No local fallback for the chat model (answers, labels, contradiction judge); duplicates and topic drift by meaning are the next steps.
 - **Tests:** `test_cpu_fallback.py` 6 (padding keeps similarity, failures give None, kinds and ranks, auto picks the CPU model when the server is down and hashing with the reason otherwise, missing fastembed said, search notes per website); `test_knowledge_vector.py` upgrade replaces the old mismatch test (better model rebuilds, worse refused).
 - **Fix found on the way:** `MonitorWatcher` never passed its injected sitemap client to `recrawl_project` (an edit from 2026-11-04 did not apply after formatting), so `test_watcher_follows_the_plan` fetched real sitemaps and waited about 60 s; production was unaffected (the real client is the default). Now passed through; with outside network blocked the whole suite (browser files aside) makes no connection, and the monitoring tests run in 3.7 s. Main's `test_cli_index_refusals` fails only in the main folder because its `.env` names a Postgres server (without pgvector); the test assumes none.
+
+## [2026-11-09] Branch feat/theme-pages-tool: get_theme_pages for Claude Desktop
+
+- **Branch / worktree:** `feat/theme-pages-tool` at `../content-processor-themepages`, from main `7761060`.
+- **What landed:** `mcp_server/theme_pages.py` (answers in the stdio MCP server, reading the app's existing `GET /api/projects/{id}/themes`); catalog entry `get_theme_pages` in the Themes module (project_id, theme id or name, optional website); server routing for local tools.
+- **No app change:** the web app and its running scrapes are not touched; only the Claude Desktop MCP server process needs to be restarted to pick up the tool.
+- **Gate:** ruff, `mypy --strict`, and the full test suite pass (MCP tests updated for the new tool count).
+- **Verified on live data:** John Hancock monthly distributions theme = 79 pages; premium dividend fund notices = 130 pages; both complete.
