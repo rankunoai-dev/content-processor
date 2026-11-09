@@ -392,6 +392,7 @@ class FetchWorker:
             body_prefix=result.body[:65536],
             requested_mime_family=expected[0],
             final_url=result.final_url,
+            body_size=len(result.body),
         )
         resource.block_verdict = block
         resource.acquired_at = datetime.now(UTC)

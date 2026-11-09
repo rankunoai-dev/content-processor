@@ -236,6 +236,7 @@ class RenderWorker:
             body_prefix=result.dom_html[:65536],
             requested_mime_family="text/html",
             final_url=result.final_url,
+            body_size=len(result.dom_html),
         )
         if block.kind not in (BlockKind.NONE, BlockKind.SOFT_404):
             action = host_state.record_block(block.kind)

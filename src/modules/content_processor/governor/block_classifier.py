@@ -3,6 +3,11 @@
 HTTP 200 is never a pass. The classifier looks at status, headers, cookies and
 the first bytes of the body, and returns a `BlockVerdict` whose evidence list
 names the exact signals that fired, so the ledger can show why.
+
+A CAPTCHA script (reCAPTCHA, hCaptcha, Turnstile) is not a block by itself: many
+sites protect their contact or newsletter forms with one, on every page. It counts
+as a challenge only when the response is an error, the page asks the visitor to
+prove they are human, or the page has almost no content of its own.
 """
 
 from __future__ import annotations
@@ -42,19 +47,34 @@ _BODY_SIGNALS: tuple[tuple[str, BlockKind, str], ...] = (
     ("cloudflare", BlockKind.JS_CHALLENGE, r"just a moment|cf-chl|challenge-platform|cf_chl_opt"),
     ("cloudflare", BlockKind.FINGERPRINT, r"attention required!|error code:?\s*10(06|08|10|20)"),
     ("cloudflare", BlockKind.RATE, r"error code:?\s*1015"),
-    ("cloudflare", BlockKind.INTERACTIVE_CAPTCHA, r"challenges\.cloudflare\.com/turnstile"),
     ("akamai", BlockKind.FINGERPRINT, r"access denied.{0,200}reference #18\."),
     ("human_perimeterx", BlockKind.JS_CHALLENGE, r"px-captcha|\"blockScript\"|_pxAppId"),
     ("datadome", BlockKind.JS_CHALLENGE, r"geo\.captcha-delivery\.com|\"dd\"\s*:\s*\{"),
     ("imperva", BlockKind.JS_CHALLENGE, r"incapsula incident id|_incapsula_resource"),
     ("kasada", BlockKind.JS_CHALLENGE, r"kpsdk"),
     ("anubis", BlockKind.JS_CHALLENGE, r"making sure you're not a bot|anubis"),
-    ("recaptcha", BlockKind.INTERACTIVE_CAPTCHA, r"google\.com/recaptcha|grecaptcha"),
-    ("hcaptcha", BlockKind.INTERACTIVE_CAPTCHA, r"hcaptcha\.com"),
     ("generic", BlockKind.FINGERPRINT, r"unusual traffic|automated access|bot detection"),
     ("generic", BlockKind.GEO_GATE, r"not available in your (country|region)"),
     ("generic", BlockKind.AUTH_WALL, r"<form[^>]+(login|signin|sign-in)"),
 )
+
+# (vendor, body regex): CAPTCHA widgets, a challenge only with one of the conditions below.
+_CAPTCHA_WIDGETS: tuple[tuple[str, str], ...] = (
+    ("cloudflare", r"challenges\.cloudflare\.com/turnstile"),
+    ("recaptcha", r"google\.com/recaptcha|grecaptcha"),
+    ("hcaptcha", r"hcaptcha\.com"),
+)
+_HUMAN_CHECK = re.compile(
+    r"verify (that )?you are (a )?human|are you (a )?(human|robot)|"
+    r"confirm (that )?you are (a )?human|(you are|you're|i am|i'm) not a robot|"
+    r"attention required|complete the security check|checking your browser",
+    re.IGNORECASE,
+)
+MINIMAL_TEXT_CHARS = 2000
+"""A page with less visible text than this has no content of its own besides a CAPTCHA."""
+_SCRIPT_STYLE = re.compile(r"<(script|style|noscript).*?</\s*>", re.IGNORECASE | re.DOTALL)
+_TAG = re.compile(r"<[^>]+>")
+_TITLE = re.compile(r"<title[^>]*>([^<]*)", re.IGNORECASE)
 
 _SOFT404_BODY = re.compile(
     r"page (you requested )?(was |could )?not (be )?found|404|no longer available|"
@@ -79,6 +99,25 @@ def _cookie_names(headers: dict[str, str]) -> list[str]:
     return names
 
 
+def _visible_text(html: str) -> str:
+    return " ".join(_TAG.sub(" ", _SCRIPT_STYLE.sub(" ", html)).split())
+
+
+def _captcha_challenge(status: int, body: str, *, whole_body: bool) -> str | None:
+    """Why a page carrying a CAPTCHA widget is a challenge; None when it is real content."""
+    if status >= 400:
+        return f"status:{status}"
+    title = _TITLE.search(body)
+    if title and _HUMAN_CHECK.search(title.group(1)):
+        return "title:human_check"
+    text = _visible_text(body)
+    if _HUMAN_CHECK.search(text[:5000]):
+        return "text:human_check"
+    if whole_body and len(text) < MINIMAL_TEXT_CHARS:
+        return f"minimal_content:{len(text)}_chars"
+    return None
+
+
 def classify_response(
     *,
     status: int,
@@ -86,6 +125,7 @@ def classify_response(
     body_prefix: bytes,
     requested_mime_family: str = "text/html",
     final_url: str | None = None,
+    body_size: int | None = None,
 ) -> BlockVerdict:
     """Classify one HTTP response.
 
@@ -95,6 +135,8 @@ def classify_response(
         body_prefix: First bytes of the body (up to 64 KB is enough).
         requested_mime_family: What the caller expected (e.g. `application/pdf`).
         final_url: URL after redirects, used to detect login redirects.
+        body_size: Size of the whole body in bytes, when only a prefix is passed (a
+            large page is never "minimal content").
 
     Returns:
         A verdict with `kind == NONE` only when nothing fired.
@@ -128,6 +170,16 @@ def classify_response(
     for v, k, pattern in _BODY_SIGNALS:
         if re.search(pattern, body_lc):
             fire(v, k, f"body:{pattern[:40]}", 0.8)
+
+    for v, pattern in _CAPTCHA_WIDGETS:
+        if re.search(pattern, body_lc):
+            whole = body_size is None or body_size <= min(len(body_prefix), 65536)
+            why = _captcha_challenge(status, body, whole_body=whole)
+            if why is None:
+                evidence.append(f"captcha_widget_on_content_page:{v}")
+            else:
+                fire(v, BlockKind.INTERACTIVE_CAPTCHA, f"captcha:{v}:{why}", 0.8)
+            break
 
     if status == 402:
         fire("unknown", BlockKind.PAY_PER_CRAWL, "status:402", 0.95)

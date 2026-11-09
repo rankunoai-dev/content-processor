@@ -100,3 +100,79 @@ def test_turnstile_is_interactive_captcha():
     body = b'<html><script src="https://challenges.cloudflare.com/turnstile/v0/api.js"></script></html>'
     v = classify_response(status=403, headers={"server": "cloudflare"}, body_prefix=body)
     assert v.kind is BlockKind.INTERACTIVE_CAPTCHA
+
+
+def _content_page(widget: str) -> bytes:
+    """A real article (like GEP's blog) whose footer form loads a CAPTCHA widget."""
+    article = (
+        "<p>" + "Omnichannel transformation helps pharma companies reach doctors. " * 80 + "</p>"
+    )
+    return (
+        "<!doctype html><html><head><title>A Guide to Omnichannel Transformation | GEP Blog</title>"
+        f'<script src="{widget}"></script></head><body><article><h1>Omnichannel</h1>{article}'
+        '</article><form class="newsletter"><div class="g-recaptcha"></div></form></body></html>'
+    ).encode()
+
+
+@pytest.mark.parametrize(
+    "widget",
+    [
+        "https://www.google.com/recaptcha/api.js?render=explicit",
+        "https://js.hcaptcha.com/1/api.js",
+        "https://challenges.cloudflare.com/turnstile/v0/api.js",
+    ],
+)
+def test_captcha_widget_on_a_content_page_is_not_a_block(widget: str):
+    v = classify_response(
+        status=200, headers={"content-type": "text/html"}, body_prefix=_content_page(widget)
+    )
+    assert v.kind is BlockKind.NONE
+    assert any(e.startswith("captcha_widget_on_content_page") for e in v.evidence)
+
+
+def test_large_page_cut_to_its_first_64kb_is_not_minimal():
+    # A page whose first 64 KB is scripts and styles: little text in the prefix, but
+    # the whole page is 300 KB, so it is not a CAPTCHA wall.
+    head = b"<html><head><script src='https://www.google.com/recaptcha/api.js'></script><style>"
+    prefix = (head + b"x" * 70000)[:65536]
+    v = classify_response(status=200, headers={}, body_prefix=prefix, body_size=309_000)
+    assert v.kind is BlockKind.NONE
+    v = classify_response(
+        status=200, headers={}, body_prefix=prefix[:2000] + b"</style></head></html>"
+    )
+    assert v.kind is BlockKind.INTERACTIVE_CAPTCHA, "the same page when that is all there is"
+
+
+@pytest.mark.parametrize(
+    ("status", "body", "why"),
+    [
+        (403, _content_page("https://www.google.com/recaptcha/api.js"), "status:403"),
+        (429, _content_page("https://www.google.com/recaptcha/api.js"), "status:429"),
+        (
+            200,
+            b"<html><head><title>Verify you are human</title>"
+            b"<script src='https://www.google.com/recaptcha/api.js'></script></head><body>"
+            + b"<p>Some text.</p>" * 400
+            + b"</body></html>",
+            "title:human_check",
+        ),
+        (
+            200,
+            b"<html><head><script src='https://js.hcaptcha.com/1/api.js'></script></head><body>"
+            b"<h1>Please confirm you are not a robot</h1>"
+            b"<div class='h-captcha'></div></body></html>",
+            "text:human_check",
+        ),
+        (
+            200,
+            b"<html><head><script src='https://www.google.com/recaptcha/api.js'></script></head>"
+            b"<body><div class='g-recaptcha'></div></body></html>",
+            "minimal_content",
+        ),
+    ],
+)
+def test_captcha_wall_is_still_a_challenge(status: int, body: bytes, why: str):
+    v = classify_response(status=status, headers={}, body_prefix=body, body_size=len(body))
+    assert v.kind in (BlockKind.INTERACTIVE_CAPTCHA, BlockKind.RATE)
+    if v.kind is BlockKind.INTERACTIVE_CAPTCHA:
+        assert any(why in e for e in v.evidence), v.evidence
