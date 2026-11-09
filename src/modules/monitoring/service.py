@@ -202,7 +202,12 @@ class MonitorWatcher:
             ):
                 if settings.smart_recrawl:
                     recrawl_project(
-                        self.projects, self.runner, pid, trigger="scheduled", now=moment
+                        self.projects,
+                        self.runner,
+                        pid,
+                        trigger="scheduled",
+                        http=self.http,
+                        now=moment,
                     )
                 else:
                     try:
