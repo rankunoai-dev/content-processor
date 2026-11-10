@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from src.modules.content_processor.adapters.html_source import (
     SourceExtraction,
     extract_html_source,
@@ -11,6 +13,7 @@ from src.modules.content_processor.adapters.html_source import (
 )
 from src.modules.content_processor.enums import ContentLayer
 from src.modules.content_processor.export.content import whole_content
+from src.modules.content_processor.recrawl.decide import content_fingerprint
 
 PAGES = Path(__file__).resolve().parents[3] / "fixtures" / "pages"
 
@@ -136,6 +139,83 @@ def test_links_assets_and_action_detection():
     assert ("script", "http://t/app.js") in kinds
     assert ex.structured_data == ['{"@type":"Thing"}']
     assert "Chart of fees" in _texts(ex, ContentLayer.ACCESSIBILITY_ONLY)
+
+
+def _one_paragraph(cls: str) -> SourceExtraction:
+    html = (
+        f"<html><body><main><div class='{cls}'><p>Article paragraph text.</p></div></main>"
+        "</body></html>"
+    ).encode()
+    return extract_html_source(html, base_url="http://t/", evidence_id="e", resource_id="r")
+
+
+def _paragraph_block(ex: SourceExtraction):
+    return next(b for b in ex.blocks if b.normalized_text == "Article paragraph text.")
+
+
+@pytest.mark.parametrize(
+    "cls",
+    [
+        "blog-inner",
+        "blog-index",
+        "catalog-info",
+        "catalogInfo",
+        "BlogIndex",
+        "signing-ceremony",
+        "weblog-intro",
+    ],
+)
+def test_class_names_that_merely_contain_log_in_are_not_site_chrome(cls: str):
+    block = _paragraph_block(_one_paragraph(cls))
+    assert block.role == "main" and block.layer is ContentLayer.RENDERED_VISIBLE, cls
+
+
+@pytest.mark.parametrize(
+    "cls",
+    ["login-form", "site-login", "account-login", "gds-NavigationSignIn", "LoginBox", "sign_in"],
+)
+def test_sign_in_class_names_are_site_chrome(cls: str):
+    assert _paragraph_block(_one_paragraph(cls)).role == "chrome", cls
+
+
+@pytest.mark.parametrize(
+    "cls",
+    [
+        "article-chatbots",
+        "post-gdprcompliance",
+        "mychatbot-article",
+        "driftwood-gallery",
+        "tawkward",
+    ],
+)
+def test_class_names_that_merely_contain_a_vendor_word_stay_content(cls: str):
+    block = _paragraph_block(_one_paragraph(cls))
+    assert block.layer is ContentLayer.RENDERED_VISIBLE, cls
+
+
+@pytest.mark.parametrize(
+    "cls",
+    [
+        "gdpr-banner",
+        "chatbot-widget",
+        "intercom-container",
+        "CybotCookiebotDialog",
+        "jh-webchat",
+        "drift-frame-controller",
+        "hubspotMessagesIframeContainer",
+    ],
+)
+def test_third_party_widget_class_names_are_chrome(cls: str):
+    assert _paragraph_block(_one_paragraph(cls)).layer is ContentLayer.THIRD_PARTY_CHROME, cls
+
+
+def test_container_class_name_does_not_change_the_content_fingerprint():
+    # A wrongly demoted container used to drop the text from the fingerprint, so a
+    # recrawl could call a changed page "unchanged" and reuse the previous extraction.
+    plain = content_fingerprint(_one_paragraph("article").blocks)
+    assert plain is not None
+    assert content_fingerprint(_one_paragraph("blog-inner").blocks) == plain
+    assert content_fingerprint(_one_paragraph("catalog-info").blocks) == plain
 
 
 def test_duplicate_blocks_are_linked_not_dropped():

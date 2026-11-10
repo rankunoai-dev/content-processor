@@ -55,8 +55,11 @@ _BODY_SIGNALS: tuple[tuple[str, BlockKind, str], ...] = (
     ("anubis", BlockKind.JS_CHALLENGE, r"making sure you're not a bot|anubis"),
     ("generic", BlockKind.FINGERPRINT, r"unusual traffic|automated access|bot detection"),
     ("generic", BlockKind.GEO_GATE, r"not available in your (country|region)"),
-    ("generic", BlockKind.AUTH_WALL, r"<form[^>]+(login|signin|sign-in)"),
 )
+# No body pattern for login forms: a header sign-in box, a WordPress `#loginform`
+# or a `newsletter-signin` class sits on ordinary article pages. An auth wall is an
+# HTTP 401, a redirect to a login URL, or `gates.login_wall` (password input and
+# almost no main text).
 
 # (vendor, body regex): CAPTCHA widgets, a challenge only with one of the conditions below.
 _CAPTCHA_WIDGETS: tuple[tuple[str, str], ...] = (
@@ -72,16 +75,20 @@ _HUMAN_CHECK = re.compile(
 )
 MINIMAL_TEXT_CHARS = 2000
 """A page with less visible text than this has no content of its own besides a CAPTCHA."""
-_SCRIPT_STYLE = re.compile(r"<(script|style|noscript).*?</\s*>", re.IGNORECASE | re.DOTALL)
+_SCRIPT_STYLE = re.compile(r"<(script|style|noscript)\b.*?</\1\s*>", re.IGNORECASE | re.DOTALL)
 _TAG = re.compile(r"<[^>]+>")
 _TITLE = re.compile(r"<title[^>]*>([^<]*)", re.IGNORECASE)
 
+# Both are whole-word matches: "Terrorism insurance", "Trial and error" and a street
+# number ending in 404 are not error pages. A soft 404 needs the title AND the body.
 _SOFT404_BODY = re.compile(
-    r"page (you requested )?(was |could )?not (be )?found|404|no longer available|"
+    r"page (you requested )?(was |could )?not (be )?found|\b404\b|no longer available|"
     r"this page doesn.t exist|oops!? .{0,40}(wrong|missing)",
     re.IGNORECASE,
 )
-_SOFT404_TITLE = re.compile(r"<title>[^<]*(not found|404|error)[^<]*</title>", re.IGNORECASE)
+_SOFT404_TITLE = re.compile(
+    r"<title[^>]*>[^<]*\b(404|not found|page not found)\b[^<]*</title>", re.IGNORECASE
+)
 _LOGIN_PATH = re.compile(r"/(login|signin|sign-in|auth|sso)(/|\?|$)", re.IGNORECASE)
 
 
@@ -126,6 +133,7 @@ def classify_response(
     requested_mime_family: str = "text/html",
     final_url: str | None = None,
     body_size: int | None = None,
+    rendered: bool = False,
 ) -> BlockVerdict:
     """Classify one HTTP response.
 
@@ -137,6 +145,10 @@ def classify_response(
         final_url: URL after redirects, used to detect login redirects.
         body_size: Size of the whole body in bytes, when only a prefix is passed (a
             large page is never "minimal content").
+        rendered: The bytes are a browser's DOM after scripts ran. Server HTML with
+            a CAPTCHA script and almost no text is a JavaScript app shell until the
+            browser has tried it (JS_CHALLENGE, so the hand-off runs); the same
+            emptiness in a rendered DOM is a CAPTCHA wall (INTERACTIVE_CAPTCHA).
 
     Returns:
         A verdict with `kind == NONE` only when nothing fired.
@@ -177,6 +189,8 @@ def classify_response(
             why = _captcha_challenge(status, body, whole_body=whole)
             if why is None:
                 evidence.append(f"captcha_widget_on_content_page:{v}")
+            elif why.startswith("minimal_content") and not rendered:
+                fire(v, BlockKind.JS_CHALLENGE, f"captcha:{v}:{why}:app_shell", 0.8)
             else:
                 fire(v, BlockKind.INTERACTIVE_CAPTCHA, f"captcha:{v}:{why}", 0.8)
             break
@@ -189,14 +203,22 @@ def classify_response(
         fire("generic", BlockKind.GEO_GATE, "status:451", 0.9)
     elif status == 401:
         fire("generic", BlockKind.AUTH_WALL, "status:401", 0.9)
-    elif status in (403, 406) and kind is BlockKind.NONE:
+    elif status in (404, 410):
+        # A hard "not found" is never content, whatever the title says.
+        fire("generic", BlockKind.SOFT_404, f"status:{status}", 0.9)
+    elif status in (400, 405):
+        # The server refused the request itself: nothing to keep, retry later.
+        fire("generic", BlockKind.TRANSPORT, f"status:{status}", 0.5)
+    # A weak hint (a vendor cookie at 0.35) must not decide an error status: a plain
+    # 500 on an Akamai-fronted host is a server error, not a JS challenge.
+    elif status in (403, 406) and confidence < 0.5:
         fire(vendor or "generic", BlockKind.FINGERPRINT, f"status:{status}", 0.6)
-    elif status == 503 and kind is BlockKind.NONE:
+    elif status == 503 and confidence < 0.5:
         fire("generic", BlockKind.TRANSPORT, "status:503", 0.5)
-    elif status >= 500 and kind is BlockKind.NONE:
+    elif status >= 500 and confidence < 0.5:
         fire("generic", BlockKind.TRANSPORT, f"status:{status}", 0.5)
 
-    if final_url and _LOGIN_PATH.search(final_url) and kind is BlockKind.NONE:
+    if final_url and _LOGIN_PATH.search(final_url) and confidence < 0.5:
         fire("generic", BlockKind.AUTH_WALL, "redirect:login_path", 0.7)
 
     html_returned = content_type.startswith(_HTML_TYPES) or body_lc.lstrip().startswith(
@@ -216,7 +238,8 @@ def classify_response(
         if title_hit and body_hit:
             fire("generic", BlockKind.SOFT_404, "soft404:title+body", 0.75)
         elif title_hit:
-            fire("generic", BlockKind.SOFT_404, "soft404:title", 0.5)
+            # Title alone is a hint for the ledger, never a verdict.
+            evidence.append("soft404:title_only")
 
     # Weak cookie-only evidence with a clean 2xx and a non-challenge body is not a block.
     if kind is not BlockKind.NONE and confidence < 0.5 and status < 400:

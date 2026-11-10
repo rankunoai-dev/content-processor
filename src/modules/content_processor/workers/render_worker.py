@@ -249,6 +249,7 @@ class RenderWorker:
             requested_mime_family="text/html",
             final_url=result.final_url,
             body_size=len(result.dom_html),
+            rendered=True,
         )
         if self._journal is not None and saved is None and block.kind is BlockKind.NONE:
             self._journal.save_render(result, exploration, tier)

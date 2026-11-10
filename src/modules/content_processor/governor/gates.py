@@ -83,6 +83,14 @@ _PAYWALL = re.compile(
     re.IGNORECASE,
 )
 _WS = re.compile(r"\s+")
+# A control the visitor must press to get past a gate (age / audience confirmation).
+_CONFIRM_CONTROL = "button, input[type=submit], input[type=button], a[role=button], [role=button]"
+_OVERLAY_CANDIDATES = "dialog, [role=dialog], [aria-modal=true], div, section, aside, form"
+# Elements that bound "the part of the page a form belongs to" (lead-gen walls).
+_SECTION_TAGS = frozenset(
+    {"section", "article", "aside", "main", "body", "dialog", "footer", "header", "nav"}
+)
+_GATE_MARK = "data-cp-gate-form"
 
 
 class GateFinding(StrictModel):
@@ -129,6 +137,54 @@ def _form_cta(form: Node) -> str:
         else:
             parts.append(_text(node))
     return " ".join(p for p in parts if p)
+
+
+def _form_section_text(form: Node) -> str:
+    """Text of the part of the page the form belongs to.
+
+    The nearest sectioning ancestor (or overlay) of the form, without any sibling
+    sections inside it: a contact form in its own `<section>` at the foot of an
+    article is judged on that section, not on the article that happens to say
+    "download our report" a thousand words earlier.
+    """
+    section = form.parent
+    while section is not None and section.tag not in _SECTION_TAGS and not _is_overlay(section):
+        section = section.parent
+    if section is None:
+        return _text(form)
+    form.attrs[_GATE_MARK] = "1"
+    try:
+        clone = HTMLParser(section.html or "")
+    finally:
+        del form.attrs[_GATE_MARK]
+    scope = clone.body or clone.root
+    if scope is None:
+        return _text(form)
+    others = ", ".join(sorted(_SECTION_TAGS - {"body"}))
+    while True:
+        sibling = next(
+            (
+                n
+                for n in scope.css(others)
+                if n.attributes.get(_GATE_MARK) is None and n.css_first(f"[{_GATE_MARK}]") is None
+            ),
+            None,
+        )
+        if sibling is None:
+            break
+        sibling.decompose()
+    return _text(scope)
+
+
+def _overlay_with(tree: HTMLParser, pattern: re.Pattern[str]) -> tuple[Node, re.Match[str]] | None:
+    """The first overlay whose text matches `pattern` and that carries a confirm control."""
+    for node in tree.css(_OVERLAY_CANDIDATES):
+        if not _is_overlay(node):
+            continue
+        hit = pattern.search(_text(node)[:6000])
+        if hit and node.css_first(_CONFIRM_CONTROL) is not None:
+            return node, hit
+    return None
 
 
 def _main_text(tree: HTMLParser) -> str:
@@ -209,16 +265,19 @@ def detect_gates(dom_html: bytes, inner_text: str = "") -> list[GateFinding]:
             )
         )
 
-    # Lead-generation wall: email input + download/access CTA + asset vocabulary.
+    # Lead-generation wall: email input + download/access CTA + asset vocabulary, all
+    # in the form's own section (a contact form under a long article is not a wall
+    # because the article mentions a report).
     for form in tree.css("form"):
         inputs = form.css("input")
         if not any(_is_email_input(i) for i in inputs):
             continue
         cta = _form_cta(form)
         around = _text(form)
+        section_text = _form_section_text(form)
         cta_hit = _DOWNLOAD_CTA.search(cta) or _DOWNLOAD_CTA.search(around)
-        gate_hit = _GATE_PHRASES.search(page_text)
-        asset_hit = _ASSET_WORDS.search(page_text)
+        gate_hit = _GATE_PHRASES.search(section_text)
+        asset_hit = _ASSET_WORDS.search(section_text)
         newsletter_only = _NEWSLETTER_CTA.search(cta) and not cta_hit
         if newsletter_only or not asset_hit or not (cta_hit or gate_hit):
             continue
@@ -289,14 +348,18 @@ def detect_gates(dom_html: bytes, inner_text: str = "") -> list[GateFinding]:
             )
             break
 
-    # Age / audience gate.
-    age = _AGE_GATE.search(page_text[:6000])
-    if age:
+    # Age / audience gate: the question sits in a dialog or overlay with a button to
+    # confirm. The same words in a footer disclaimer ("intended for healthcare
+    # professionals") do not stand between the visitor and the page.
+    gate = _overlay_with(tree, _AGE_GATE)
+    if gate is not None:
+        node, age = gate
         findings.append(
             GateFinding(
                 kind="age_or_audience_gate",
                 severity="blocks_main_content" if main_words < 200 else "partial",
-                evidence=[f"phrase:{age.group(0)[:50]}"],
+                evidence=[f"phrase:{age.group(0)[:50]}", "overlay:confirm_control"],
+                selector_hint=_selector(node),
                 main_word_count=main_words,
             )
         )

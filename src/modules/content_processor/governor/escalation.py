@@ -6,6 +6,11 @@ methods. Every transition returns an `Action` the caller must honour.
 Paid tiers (T4+) are never entered automatically: when a block would need one,
 the machine returns `NEEDS_APPROVAL` with the proposed tier and the host stays
 at its ceiling until an operator raises it for that host with a cost cap.
+
+Escalation is per URL first: one blocked page is retried one tier up on its own.
+The whole host moves up only after `HOST_ESCALATION_DISTINCT_URLS` different
+URLs have blocked at the current tier within the run, so two 403s on one page do
+not send every other page of the site through the browser.
 """
 
 from __future__ import annotations
@@ -24,10 +29,12 @@ from src.modules.content_processor.enums import (
 
 __all__ = [
     "FREE_TIER_CEILING",
+    "HOST_ESCALATION_DISTINCT_URLS",
     "Action",
     "ActionKind",
     "CircuitState",
     "HostAccessState",
+    "escalates",
     "initial_host_ceiling",
 ]
 
@@ -52,6 +59,8 @@ def initial_host_ceiling(scope_ceiling: AccessTier) -> AccessTier:
 
 ESCALATION_COOLDOWN = timedelta(seconds=60)
 DECAY_AFTER_CLEAN = 200
+HOST_ESCALATION_DISTINCT_URLS = 3
+"""Distinct URLs that must block at a tier, within one run, before the whole host moves up."""
 CONSECUTIVE_FAILURES_TO_OPEN = 5
 RATE_WINDOW = timedelta(minutes=10)
 RATE_HITS_TO_OPEN = 3
@@ -100,6 +109,11 @@ _TERMINAL_BLOCKED = frozenset({BlockKind.AUTH_WALL, BlockKind.PAYWALL, BlockKind
 _EXCLUDED = frozenset({BlockKind.LEGAL, BlockKind.PAY_PER_CRAWL, BlockKind.AI_OPTOUT})
 
 
+def escalates(kind: BlockKind) -> bool:
+    """True for the block kinds a higher tier may get past (they count towards host escalation)."""
+    return kind in _NEXT_FOR_KIND
+
+
 @dataclass
 class HostAccessState:
     """Mutable per-host state. Persisted by the ledger between calls."""
@@ -118,8 +132,8 @@ class HostAccessState:
     def _now(self, now: datetime | None) -> datetime:
         return now or datetime.now(UTC)
 
-    def _next_tier(self, target: AccessTier | None) -> AccessTier | None:
-        current = tier_rank(self.tier)
+    def _next_tier(self, target: AccessTier | None, at_tier: AccessTier) -> AccessTier | None:
+        current = tier_rank(at_tier)
         candidate = tier_rank(target) if target is not None else current + 1
         candidate = max(candidate, current + 1)
         if candidate >= len(TIER_ORDER):
@@ -163,9 +177,33 @@ class HostAccessState:
         backoff = timedelta(seconds=min(60, 2**self.consecutive_failures))
         return Action(ActionKind.BACKOFF, self.tier, now + backoff, "transient")
 
-    def record_block(self, kind: BlockKind, now: datetime | None = None) -> Action:
-        """A classified block at the current tier. Decides escalate/blocked/excluded."""
+    def record_block(
+        self,
+        kind: BlockKind,
+        now: datetime | None = None,
+        *,
+        at_tier: AccessTier | None = None,
+        distinct_urls: int = HOST_ESCALATION_DISTINCT_URLS,
+    ) -> Action:
+        """A classified block. Decides escalate/blocked/excluded.
+
+        Args:
+            kind: The block kind the classifier returned.
+            now: Clock, for tests.
+            at_tier: The tier the blocked request ran at (a URL already escalated
+                on its own may be above the host tier). Defaults to the host tier.
+            distinct_urls: How many different URLs, this one included, have blocked
+                at `at_tier` in this run. Below `HOST_ESCALATION_DISTINCT_URLS` the
+                returned ESCALATE applies to this URL only (reason
+                `escalate_url_on:...`) and the host tier stays; at or above it the
+                host moves (reason `escalate_on:...`). Callers that do not count,
+                such as the render worker, keep the host-level behaviour.
+        """
         now = self._now(now)
+        at_tier = at_tier or self.tier
+        if kind is BlockKind.SOFT_404:
+            # A missing page says nothing about the host: no backoff, no breaker count.
+            return Action(ActionKind.CONTINUE, self.tier, reason="not_found")
         self.clean_streak = 0
         self.block_score = min(1.0, self.block_score + 0.25)
 
@@ -178,10 +216,10 @@ class HostAccessState:
             if len(self.rate_hits) >= RATE_HITS_TO_OPEN:
                 return self._open_circuit(now, "rate_limited_repeatedly")
             return Action(ActionKind.BACKOFF, self.tier, now + timedelta(seconds=30), "rate")
-        if kind in (BlockKind.TRANSPORT, BlockKind.SOFT_404, BlockKind.WRONG_PAYLOAD):
+        if kind in (BlockKind.TRANSPORT, BlockKind.WRONG_PAYLOAD):
             return self.record_transient_failure(now)
 
-        target = self._next_tier(_NEXT_FOR_KIND.get(kind))
+        target = self._next_tier(_NEXT_FOR_KIND.get(kind), at_tier)
         if target is None:
             return Action(ActionKind.BLOCKED, self.tier, reason="no_higher_tier")
         if tier_rank(target) > tier_rank(self.ceiling):
@@ -195,6 +233,15 @@ class HostAccessState:
                     proposed_tier=target,
                 )
             return Action(ActionKind.BLOCKED, self.tier, reason=f"ceiling:{self.ceiling}")
+        url_only = distinct_urls < HOST_ESCALATION_DISTINCT_URLS
+        if url_only or tier_rank(target) <= tier_rank(self.tier):
+            # One page blocked: retry that page one tier up; the host is unchanged.
+            return Action(
+                ActionKind.ESCALATE,
+                target,
+                now + ESCALATION_COOLDOWN,
+                f"escalate_url_on:{kind.value}",
+            )
         self.tier = target
         self.session_generation += 1
         self.consecutive_failures = 0

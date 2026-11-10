@@ -136,22 +136,41 @@ _ICON_CLASS = re.compile(
     r"icon-[\w-]+|glyphicon[\w-]*|bi|bi-[\w-]+|ms-Icon[\w-]*)(\s|$)",
     re.IGNORECASE,
 )
+# Class and id names are matched one token at a time, on word boundaries: the start
+# or end of the token, a `-` or `_`, or a camelCase edge. `blog-inner`, `blog-index`
+# and `catalog-info` contain "log-in" but are not sign-in boxes; `login-form`,
+# `site-login` and `gds-NavigationSignIn` are.
+_WORD_START = r"(?:^|[-_]|(?<=[a-z0-9])(?=[A-Z]))"
+_WORD_END = r"(?:[-_]|$|(?=[A-Z]))"
 _THIRD_PARTY = re.compile(
-    r"intercom|drift-|hubspot-messages|crisp-client|tawk|zendesk|livechat|olark|"
-    r"webchat|web-chat|chatbot|chat-?widget|virtual-?assistant|"
-    r"cookie-?banner|cookie-?consent|cc-window|onetrust|osano|cookiebot|gdpr|consent-banner|"
-    r"adsbygoogle|ad-slot|google_ads|dfp-|trustpilot|yotpo-|bazaarvoice",
-    re.IGNORECASE,
+    _WORD_START
+    + r"(?i:intercom|drift|hubspot[-_]?messages|crisp[-_]?client|tawk|zendesk|live[-_]?chat|"
+    r"olark|web[-_]?chat|chatbot|chat[-_]?widget|virtual[-_]?assistant|"
+    r"cookie[-_]?banner|cookie[-_]?consent|cc-window|onetrust|osano|cookiebot|gdpr|"
+    r"consent[-_]?banner|adsbygoogle|ad[-_]?slot|google_ads|dfp|trustpilot|yotpo|bazaarvoice)"
+    + _WORD_END
 )
 # First-party site utilities: sign-in and account menus, the utility bar, language,
 # country and region selectors. Their text is site chrome (role "chrome"): kept in
 # the full content after the menus, never in the article text, matching or claims.
 _UTILITY = re.compile(
-    r"sign-?in|log-?in|login|account-?menu|my-?account|navigationutilities|utility-?nav|"
-    r"utility-?bar|language-?(?:selector|switch|picker)|country-?(?:selector|picker)|"
-    r"region-?(?:selector|picker)|locale-?(?:selector|switch|picker)",
-    re.IGNORECASE,
+    _WORD_START
+    + r"(?i:sign[-_]?in|log[-_]?in|account[-_]?menu|my[-_]?account|navigation[-_]?utilities|"
+    r"utility[-_]?nav|utility[-_]?bar|language[-_]?(?:selector|switch|picker)|"
+    r"country[-_]?(?:selector|picker)|region[-_]?(?:selector|picker)|"
+    r"locale[-_]?(?:selector|switch|picker))" + _WORD_END
 )
+
+
+def _ident_tokens(attrs: dict[str, str | None]) -> list[str]:
+    """The element's id and class names, one token each."""
+    return f"{attrs.get('id') or ''} {attrs.get('class') or ''}".split()
+
+
+def _names_match(pattern: re.Pattern[str], attrs: dict[str, str | None]) -> bool:
+    return any(pattern.search(token) for token in _ident_tokens(attrs))
+
+
 _FORM_CHOICE_TAGS = frozenset({"select", "option", "optgroup", "datalist"})
 _HIDDEN_STYLE = re.compile(
     r"display\s*:\s*none|visibility\s*:\s*hidden|opacity\s*:\s*0(?![.\d])|"
@@ -547,9 +566,7 @@ class _Walker:
             role = "aside"
         elif tag == "header" and parent.role == "unknown":
             role = "chrome"
-        if tag in _FORM_CHOICE_TAGS or _UTILITY.search(
-            f"{attrs.get('id') or ''} {attrs.get('class') or ''}"
-        ):
+        if tag in _FORM_CHOICE_TAGS or _names_match(_UTILITY, attrs):
             # dropdown choices and site utilities are not page content
             role = "chrome"
 
@@ -569,7 +586,7 @@ class _Walker:
                 layer, label = ContentLayer.COLLAPSED_PUBLISHED, "hidden=until-found"
             elif hidden_attr is not None or _HIDDEN_STYLE.search(style):
                 layer, label = ContentLayer.HIDDEN, "hidden_attr_or_style"
-            elif _THIRD_PARTY.search(ident):
+            elif _names_match(_THIRD_PARTY, attrs):
                 layer, label = ContentLayer.THIRD_PARTY_CHROME, ident.strip()[:60]
             elif _ICON_CLASS.search(attrs.get("class") or "") and tag in ("i", "span", "em", "b"):
                 layer, label = ContentLayer.ICON_ARTIFACT, (attrs.get("class") or "")[:60]
