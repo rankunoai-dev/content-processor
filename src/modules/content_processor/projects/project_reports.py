@@ -21,7 +21,11 @@ nothing is scraped again:
 - `manifest.json`: which scrape of which website was used, and the counts.
 
 Bundles live in `<project>/reports/<stamp>/`; every build is kept. Builds run in the
-background (`start_project_reports`), one at a time per project.
+background (`start_project_reports`), one at a time per project, each in its own
+process (`report_command.build_subprocess`, the `cli project-report` command) so
+the web server's memory does not grow with the largest project; the child's
+stderr tail is kept next to the bundles (`reports/<stamp>.log`, or
+`reports/failed-<started>.log` when the build failed).
 """
 
 from __future__ import annotations
@@ -35,7 +39,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from src.modules.content_processor.analysis.overlap import find_overlaps, r2a_table, r2b_table
 from src.modules.content_processor.analysis.topics import (
@@ -58,6 +62,9 @@ from src.modules.content_processor.export.tabular import (
 )
 from src.modules.content_processor.projects.models import ProjectRecord, RunState, SiteRecord
 from src.modules.content_processor.projects.store import ProjectStore
+
+if TYPE_CHECKING:
+    from src.modules.content_processor.projects.report_command import Builder, BuildOutcome
 
 __all__ = [
     "ProjectReport",
@@ -438,10 +445,14 @@ def start_project_reports(
     include_competitors: bool = False,
     built_by: str = "",
     wait: bool = False,
+    build: Builder | None = None,
 ) -> BuildStatus:
     """Build in the background (large websites take minutes); `wait` builds right away.
 
-    Raises `ValueError` when no client website has a finished scrape or a build runs.
+    The build itself runs in a child process (`build`, by default
+    `report_command.build_subprocess` with the `CP_PROJECT_REPORT_TIMEOUT_S` limit);
+    this thread only waits for it and records how it went. Raises `ValueError` when
+    no client website has a finished scrape or a build runs.
     """
     project = store.get(project_id)
     if not any(s.role == "client" and s.records for s in report_sources(store, project)):
@@ -456,29 +467,54 @@ def start_project_reports(
             msg = "A project report is already being built for this project."
             raise ValueError(msg)
         _STATUS[project_id] = status
+    if build is None:
+        from src.modules.content_processor.projects.report_command import build_subprocess
+
+        builder: Builder = build_subprocess
+    else:
+        builder = build
 
     def run() -> None:
         try:
-            build_project_reports(
-                store, project_id, include_competitors=include_competitors, built_by=built_by
-            )
+            outcome = builder(store.root, project_id, include_competitors, built_by)
+            _keep_log(_reports_root(store, project_id), status.started_at, outcome)
+            error = "" if outcome.ok else f"The report could not be built: {outcome.reason}"
         except Exception as exc:  # noqa: BLE001 - shown to the person who asked
-            with _LOCKS_GUARD:
-                _STATUS[project_id] = BuildStatus(
-                    building=False,
-                    started_at=status.started_at,
-                    include_competitors=include_competitors,
-                    error=f"The report could not be built: {str(exc)[:300]}",
-                )
-            return
+            error = f"The report could not be built: {str(exc)[:300]}"
         with _LOCKS_GUARD:
-            _STATUS.pop(project_id, None)
+            if not error:
+                _STATUS.pop(project_id, None)
+                return
+            _STATUS[project_id] = BuildStatus(
+                building=False,
+                started_at=status.started_at,
+                include_competitors=include_competitors,
+                error=error,
+            )
 
     if wait:
         run()
     else:
         threading.Thread(target=run, name=f"project-reports-{project_id}", daemon=True).start()
     return status
+
+
+def _keep_log(root: Path, started_at: datetime, outcome: BuildOutcome) -> Path | None:
+    """Write the child's stderr tail next to the bundles; None when there is nothing to say."""
+    if outcome.ok and not outcome.stderr.strip():
+        return None
+    stamp = outcome.stamp
+    name = f"{stamp}.log" if outcome.ok and stamp else f"failed-{started_at:%Y%m%d-%H%M%S}.log"
+    root.mkdir(parents=True, exist_ok=True)
+    path = root / name
+    head = (
+        f"project report build started {started_at.isoformat()}; "
+        f"exit code {outcome.returncode}"
+        + ("; stopped after the time limit" if outcome.timed_out else "")
+        + "\n\n"
+    )
+    path.write_text(head + outcome.stderr, encoding="utf-8")
+    return path
 
 
 def project_reports(store: ProjectStore, project_id: str) -> list[ProjectReport]:

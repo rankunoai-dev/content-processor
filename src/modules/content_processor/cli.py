@@ -78,6 +78,9 @@ from src.modules.content_processor.knowledge.kb_commands import register as regi
 from src.modules.content_processor.ledger.memory import MemoryLedger
 from src.modules.content_processor.ledger.tasks import TaskLedger, new_run_id
 from src.modules.content_processor.planner import fetch_tasks_for
+from src.modules.content_processor.projects.report_command import (
+    register as register_project_report_command,
+)
 from src.modules.content_processor.recrawl import (
     Baseline,
     HistoryBaseline,
@@ -954,6 +957,7 @@ def main(argv: list[str] | None = None) -> int:
     p_records.set_defaults(func=cmd_records)
 
     register_report_command(sub)
+    register_project_report_command(sub)
     register_paid_commands(sub)
     register_stamp_command(sub)
     register_history_command(sub)

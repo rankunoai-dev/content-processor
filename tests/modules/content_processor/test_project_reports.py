@@ -9,14 +9,17 @@ from __future__ import annotations
 
 import io
 import json
+import subprocess
 import time
 import zipfile
 from datetime import UTC, datetime
 from pathlib import Path
+from unittest import mock
 
 import pytest
 from fastapi.testclient import TestClient
 
+from src.core.config import REPO_ROOT
 from src.modules.content_processor.analysis.topics import (
     Topic,
     facts_from_records,
@@ -38,6 +41,7 @@ from src.modules.content_processor.projects.project_reports import (
     start_project_reports,
     zip_project_report,
 )
+from src.modules.content_processor.projects.report_command import BuildOutcome, build_subprocess
 from src.modules.content_processor.projects.runner import ScrapeRunner
 from src.modules.content_processor.projects.security import TokenSigner
 from src.modules.content_processor.projects.store import ProjectStore, SiteSpec
@@ -526,16 +530,62 @@ def test_builds_run_in_the_background_one_at_a_time(tmp_path: Path):
     finally:
         module._STATUS.pop(project_id, None)
 
-    def broken(*_a: object, **_k: object) -> None:
-        raise OSError("disk full")
+    def broken(*_a: object) -> BuildOutcome:
+        return BuildOutcome(returncode=1, stderr="Traceback ...\nOSError: disk full\n")
 
-    original = module.build_project_reports
-    module.build_project_reports = broken  # type: ignore[assignment]
-    try:
-        start_project_reports(store, project_id, wait=True)
-    finally:
-        module.build_project_reports = original
+    start_project_reports(store, project_id, wait=True, build=broken)
     failed = build_status(project_id)
     assert failed is not None and not failed.building
-    assert failed.error == "The report could not be built: disk full"
+    assert failed.error == "The report could not be built: OSError: disk full"
+    [log] = (store.project_dir(project_id) / "reports").glob("failed-*.log")
+    assert "exit code 1" in log.read_text("utf-8") and "disk full" in log.read_text("utf-8"), (
+        "the child's stderr tail is kept next to the bundles"
+    )
     module._STATUS.pop(project_id, None)
+
+    def slow(*_a: object) -> BuildOutcome:
+        return BuildOutcome(returncode=-1, stderr="", timed_out=True)
+
+    start_project_reports(store, project_id, wait=True, build=slow)
+    stopped = build_status(project_id)
+    assert stopped is not None and stopped.error == (
+        "The report could not be built: it took too long and was stopped"
+    )
+    module._STATUS.pop(project_id, None)
+    assert len(project_reports(store, project_id)) == 1, "log files are never listed as bundles"
+
+
+def test_the_build_runs_in_its_own_process(tmp_path: Path):
+    """The web server never loads a project's pages: a child process does, with a time limit."""
+    store = ProjectStore(tmp_path)
+    project_id = _project(store)
+    _scraped(store, project_id)
+    calls: list[list[str]] = []
+
+    def fake_run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        calls.append(argv)
+        assert kwargs["timeout"] == 123.0 and kwargs["cwd"] == REPO_ROOT
+        return subprocess.CompletedProcess(argv, 0, stdout=b'{"stamp": "x"}\n', stderr=b"")
+
+    with mock.patch.object(subprocess, "run", fake_run):
+        outcome = build_subprocess(tmp_path, project_id, True, "G", timeout_s=123.0)
+    assert outcome.ok and outcome.stamp == "x"
+    assert calls[0][1:4] == ["-m", "src.modules.content_processor.cli", "project-report"]
+    assert "--include-competitors" in calls[0] and calls[0][calls[0].index("--project") + 1] == (
+        project_id
+    )
+
+    def too_slow(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        raise subprocess.TimeoutExpired(argv, 1.0, stderr=b"still comparing pages")
+
+    with mock.patch.object(subprocess, "run", too_slow):
+        stopped = build_subprocess(tmp_path, project_id, False, "", timeout_s=1.0)
+    assert stopped.timed_out and not stopped.ok and stopped.stderr == "still comparing pages"
+
+    # The real child: the CLI command builds the bundle and prints its stamp.
+    real = build_subprocess(tmp_path, project_id, False, "G")
+    assert real.ok, real.stderr
+    assert [r.stamp for r in project_reports(store, project_id)] == [real.stamp]
+    assert project_reports(store, project_id)[0].manifest["built_by"] == "G"
+    missing = build_subprocess(tmp_path, "no-such-project", False, "")
+    assert not missing.ok and missing.returncode == 2 and "no-such-project" in missing.reason
