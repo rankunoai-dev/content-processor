@@ -60,6 +60,33 @@ jobs:
       - name: Tests with coverage (floor 85%)
         run: pytest --cov=src --cov-report=term
 
+  webui:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: webui
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: webui/package-lock.json
+
+      - name: Node packages
+        run: npm ci
+
+      - name: Types
+        run: npx tsc -b
+
+      - name: Tests
+        run: npx vitest run
+
+      - name: Build
+        run: npx vite build
+
   ledger-integration:
     runs-on: ubuntu-24.04
     timeout-minutes: 20

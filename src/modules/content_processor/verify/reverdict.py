@@ -14,7 +14,6 @@ added, and a record without such a gap is left untouched byte for byte.
 from __future__ import annotations
 
 import json
-import os
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
@@ -24,6 +23,7 @@ from src.integrations.evidence_store import EvidenceStore
 from src.modules.content_processor.contracts import Gap, Resource, UrlRecord
 from src.modules.content_processor.enums import EntityStatus
 from src.modules.content_processor.governor.gates import detect_gates
+from src.modules.content_processor.scheduler.capture_journal import write_durably
 from src.modules.content_processor.verify.gaps import GATE_STATUS, strictest_status
 from src.modules.content_processor.verify.record import VERIFY_VERSION, status_vector_for
 from src.modules.content_processor.verify.rules import is_pixel_frame
@@ -218,9 +218,9 @@ def reverdict_file(
             rewritten.append(line)
     out.files += 1
     if touched:
-        tmp = path.with_suffix(path.suffix + ".part")
-        tmp.write_text("\n".join(rewritten) + "\n", encoding="utf-8")
-        os.replace(tmp, path)
+        # Written whole and swapped in, with the retry a reader that holds the file open
+        # for a moment on Windows needs: the app reads these files while it runs.
+        write_durably(path, ("\n".join(rewritten) + "\n").encode("utf-8"))
         _logger.info("records_reverdicted", extra={"path": str(path), "changed": out.changed})
     return out
 
