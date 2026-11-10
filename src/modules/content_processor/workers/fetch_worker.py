@@ -894,7 +894,10 @@ class FetchWorker:
         """
         status = result.http_status or 0
         suspect = status < 400
-        reasons = ["soft_404_suspected"] if suspect else [f"not_found:http_{status}"]
+        # "soft_404_suspected" is the token verification, reports and the UI know; a
+        # hard 404/410 says so first.
+        reasons = [] if suspect else [f"not_found:http_{status}"]
+        reasons.append("soft_404_suspected")
         if suspect and result.sniffed_mime == "text/html":
             extraction = extract_html_source(
                 result.body,
@@ -915,7 +918,7 @@ class FetchWorker:
                 resource_id=resource.resource_id,
                 gap_type=GapType.SOFT_404_SUSPECTED,
                 status=EntityStatus.EXTRACTED_UNVERIFIED,
-                reason=reasons[0],
+                reason="soft_404_suspected",
                 evidence_ids=(
                     [f"evidence:{resource.payload_sha256}"] if resource.payload_sha256 else []
                 ),

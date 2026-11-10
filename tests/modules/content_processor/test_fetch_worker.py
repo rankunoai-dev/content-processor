@@ -313,7 +313,7 @@ async def test_hard_404_ends_with_a_gap_and_no_content(worker_env):
     res = await _run(ledger, worker, "http://testserver/pages/does_not_exist")
     assert res.http_status == 404
     assert res.status is EntityStatus.EXTRACTED_UNVERIFIED
-    assert res.status_reason == "not_found:http_404"
+    assert res.status_reason == "not_found:http_404;soft_404_suspected"
     assert res.block_verdict is not None and res.block_verdict.kind.value == "SOFT_404"
     assert res.resource_id not in ledger.blocks
     assert [g.gap_type.value for g in ledger.get_gaps(res.resource_id)] == ["SOFT_404_SUSPECTED"]
