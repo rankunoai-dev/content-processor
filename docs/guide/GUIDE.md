@@ -128,9 +128,11 @@ The engine then compares what the browser shows with what the raw HTML contained
 
 If the browser cannot open a page (for example it does not load within 30 seconds because the network or the website is slow), the engine tries again by itself: after 30 seconds, then 90 seconds, then 3 minutes, four tries in all. A slow spell usually lasts minutes, so tries a few seconds apart would all fail together. A page that still cannot be opened keeps the text read from its HTML and is marked "partly captured", never dropped.
 
+**What is not counted as missing content.** Three things used to make almost every page of a real site "partly captured" although the article itself was complete, and no longer do: the invisible frames that tag managers and advertising pixels add to every page (hidden frames, and frames whose address is a known tag manager or pixel, are never content); the choices inside a drop-down list, which a browser lists one per line but which are form furniture, not text the page says (a country picker alone is 200 lines); and SVG logos, which are drawings written as text files, not pictures, so they are read as text and never sent to the picture reader. On GEP's live scrape the tag-manager frame alone had marked 466 of 466 pages "partly captured".
+
 ### Step 7: Documents and images
 
-During a project scrape, four documents or images are read at a time instead of one. This is work on your own computer: it sends nothing to the website.
+During a project scrape, four documents or images are read at a time instead of one (the number is a setting, `CP_DOC_PARALLEL_TASKS`, so a small server can run one at a time). This is work on your own computer: it sends nothing to the website.
 
 Linked PDFs, Word, Excel and PowerPoint files, and images are downloaded too (one link deep). PDFs are read including tables that continue across pages, form fields, comments and hidden layers. Scanned pages and images are read with OCR (optical character recognition: software that reads text from pictures). The OCR engine is Tesseract, which runs on the local machine for free, with 25 core languages (including English, Hindi, Gujarati, Tamil, Arabic, Chinese, Japanese and the main European languages).
 
@@ -160,6 +162,8 @@ The engine also recognises "gates" on a page: lead-generation forms in front of 
 ### Step 9: The verdict
 
 All gaps for a page are combined into one verdict using the strict order in section 3. A page is VERIFIED only when nothing stands in the way. The detailed status is always kept alongside, so a verdict never hides the reasons behind it.
+
+**Re-scoring without a new scrape.** When a rule turns out to have raised a false alarm, the pages already scraped do not have to be fetched again: the command `reverdict` reads a run's stored records, removes the gaps the corrected rules would no longer raise (and re-runs the gate rules on each page's stored copy), and derives the verdict again. Nothing is ever added, a page is never upgraded past what its stored evidence supports, and the record says it was re-scored. A page that ran out of time ("budget exhausted") is never reused as a baseline for a later scrape.
 
 ### Step 10: The reports
 
@@ -484,6 +488,7 @@ A project's **Downloads** tab lists every report at once (project overview with 
 
 | Date | Significant change |
 |---|---|
+| 2026-11-10 | Tag-manager and pixel frames, drop-down choices and SVG logos no longer make a page "partly captured"; a `reverdict` command re-scores the pages already scraped without fetching them again. The number of images read at once is a setting (`CP_DOC_PARALLEL_TASKS`). Web UI types, tests and build now run in CI. |
 | 2026-11-09 | A stopped scrape continues where it stopped: every response is saved as it arrives and is not requested again, with a Continue button for cancelled, failed or interrupted scrapes. Scrapes are faster: a site's repeating menus are explored only on the first pages (a GEP page in the browser went from about 36 to about 20 seconds with identical article text) and four images are read at a time. |
 | 2026-11-09 | A CAPTCHA box on a page's form no longer makes the page "blocked"; only a real challenge page does (an error answer, a "prove you are human" page, or a page with almost nothing else on it). |
 | 2026-11-09 | Claude Desktop can export every page of a theme as a CSV file (export_theme_pages_csv) and check the scrape queue (get_scrape_queue): what is running, waiting or ready, with progress. Both only read; neither starts or stops a scrape. |
