@@ -76,6 +76,7 @@ from src.modules.content_processor.governor.spend import approvals_lookup
 from src.modules.content_processor.knowledge.commands import register as register_stamp_command
 from src.modules.content_processor.knowledge.kb_commands import register as register_kb_commands
 from src.modules.content_processor.ledger.memory import MemoryLedger
+from src.modules.content_processor.ledger.serial import serial_ledger
 from src.modules.content_processor.ledger.tasks import TaskLedger, new_run_id
 from src.modules.content_processor.planner import fetch_tasks_for
 from src.modules.content_processor.projects.report_command import (
@@ -315,6 +316,9 @@ async def _drive(
     budget meter (K9), seeded with the bytes the ledger already recorded for
     this run (a resumed durable run).
     """
+    # Documents are read in worker threads while pages are fetched and rendered on the
+    # loop: one lock in front of the ledger keeps every call serial (ledger/serial.py).
+    ledger = serial_ledger(ledger)
     seed = sum(r.payload_bytes or 0 for r in ledger.list_resources(run_id))
     meter = BudgetMeter(scope.budgets, seed_bytes=seed)
     # Grouping reads page bodies for analysis; it uses the raw store so it does not draw on the
@@ -375,8 +379,9 @@ async def _drive(
 
         render_stage = LazyRenderStage(ledger, renderer, make_render_worker, run_id=run_id)
         stages["render"] = render_stage
+    docs: DocWorker | None = None
     if "docs" in stage_names:
-        stages["docs"] = DocWorker(
+        docs = DocWorker(
             ledger=ledger,
             evidence=evidence,
             run_id=run_id,
@@ -386,6 +391,7 @@ async def _drive(
             # Local work (no request reaches a site); CP_DOC_PARALLEL_TASKS caps it per machine.
             parallel_tasks=get_settings().cp_doc_parallel_tasks,
         )
+        stages["docs"] = docs
     try:
         return await execute_run(
             ledger,
@@ -399,6 +405,8 @@ async def _drive(
     finally:
         if render_stage is not None:
             await render_stage.close()
+        if docs is not None:
+            docs.close()
         for fetcher in (t1, *escalation):
             await fetcher.aclose()
 
@@ -478,6 +486,7 @@ def _options(args: argparse.Namespace, stages: list[StageName]) -> RunOptions:
         max_tasks_per_stage=getattr(args, "max_tasks", None),
         max_rounds=getattr(args, "max_rounds", 10),
         max_wait_s=getattr(args, "max_wait", 360.0),
+        overlap_docs=not getattr(args, "sequential_stages", False),
     )
 
 
@@ -902,6 +911,11 @@ def _add_drive_options(p: argparse.ArgumentParser) -> None:
     )
     p.add_argument("--max-tasks", type=int, default=None, help="per stage, single round")
     p.add_argument("--max-rounds", type=int, default=10)
+    p.add_argument(
+        "--sequential-stages",
+        action="store_true",
+        help="read documents only after fetch and render finish (default: alongside them)",
+    )
     p.add_argument(
         "--max-wait",
         type=float,

@@ -7,7 +7,9 @@ that nothing survives the process. Never use it for a run whose results matter.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
+import functools
+import threading
+from collections.abc import Callable, Iterable, Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -41,7 +43,13 @@ def _layer_counts(blocks: Sequence[ContentBlock]) -> dict[str, int]:
 
 
 class MemoryLedger:
-    """Process-local ledger with host slots, delays and events."""
+    """Process-local ledger with host slots, delays and events.
+
+    Every public method runs under one re-entrant lock (see the end of this
+    module): the run engine reads documents in worker threads while fetch and
+    render use the ledger on the event loop, and plain dicts must never be
+    iterated while another thread adds to them.
+    """
 
     def __init__(
         self,
@@ -51,6 +59,7 @@ class MemoryLedger:
         max_concurrency: int = 1,
     ) -> None:
         """Create an empty ledger with the politeness defaults of playbook T1."""
+        self._lock = threading.RLock()
         self._tasks: dict[int, Task] = {}
         self._next_id = 1
         self._ceiling = ceiling
@@ -440,3 +449,19 @@ class MemoryLedger:
                 if e.entity_type == "host"
             ],
         }
+
+
+def _serialized(fn: Callable[..., Any]) -> Callable[..., Any]:
+    @functools.wraps(fn)
+    def locked(self: MemoryLedger, *args: Any, **kwargs: Any) -> Any:
+        with self._lock:
+            return fn(self, *args, **kwargs)
+
+    return locked
+
+
+for _name, _member in list(vars(MemoryLedger).items()):
+    # Every method except the constructor takes the ledger lock; the lock is re-entrant,
+    # so methods that call each other (complete -> _release) stay correct.
+    if callable(_member) and _name != "__init__" and not _name.startswith("__"):
+        setattr(MemoryLedger, _name, _serialized(_member))

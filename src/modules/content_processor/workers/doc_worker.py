@@ -53,6 +53,7 @@ from src.modules.content_processor.enums import (
     GapType,
     TaskKind,
 )
+from src.modules.content_processor.ledger.serial import SerialLedger
 from src.modules.content_processor.provenance import stamp_blocks
 from src.modules.content_processor.workers.ports import LedgerPort
 
@@ -165,11 +166,16 @@ class DocWorker:
     ) -> None:
         """Bind the worker to one run. `isolate=False` runs adapters in-process (tests).
 
-        `parallel_tasks` is how many documents and images are read at once.
+        `parallel_tasks` is how many documents and images are read at once
+        (`CP_DOC_PARALLEL_TASKS`); extraction never contacts a site, so this does
+        not touch the per-host pace. A ledger the run already serialised
+        (`ledger/serial.py`) is used as it is; any other is wrapped here.
         """
         self.concurrent_tasks = max(1, parallel_tasks)
         self._ledger: LedgerPort = (
-            cast(LedgerPort, _SerialLedger(ledger)) if self.concurrent_tasks > 1 else ledger
+            cast(LedgerPort, _SerialLedger(ledger))
+            if self.concurrent_tasks > 1 and not isinstance(ledger, SerialLedger)
+            else ledger
         )
         self._evidence = evidence
         self._run_id = run_id
@@ -182,6 +188,9 @@ class DocWorker:
         self._osd_runner = osd_runner
         self._locale = locale
 
+    def close(self) -> None:
+        """Release what the worker holds (nothing yet; isolation children come later)."""
+
     # -- loop ---------------------------------------------------------------
 
     async def run_until_idle(
@@ -192,7 +201,12 @@ class DocWorker:
         poll_s: float = 1.0,
         max_wait_s: float = 300.0,
     ) -> int:
-        """Process tasks until none remain or none become ready within `max_wait_s`."""
+        """Process tasks until none remain or none become ready within `max_wait_s`.
+
+        Up to `concurrent_tasks` tasks run at once, each in a worker thread; the
+        ledger calls are serialised (see `__init__`), and `MemoryLedger` locks
+        itself as well, so fetch and render may use the same ledger meanwhile.
+        """
         processed = 0
         idle = 0
         waited = 0.0

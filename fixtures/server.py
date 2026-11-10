@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import io
 import re
 from pathlib import Path
 
@@ -308,6 +309,39 @@ def docs_hub() -> Response:
 def annual_report_pdf() -> Response:
     """A PDF with a real text layer."""
     return Response(content=_ANNUAL_REPORT_PDF, media_type="application/pdf")
+
+
+def _poster_png() -> bytes:
+    """A 480x160 PNG with large printed text: an embedded image the doc worker must OCR."""
+    from PIL import Image, ImageDraw, ImageFont
+
+    image = Image.new("RGB", (480, 160), "white")
+    draw = ImageDraw.Draw(image)
+    draw.text((24, 52), "ANNUAL SALE 50% OFF", fill="black", font=ImageFont.load_default(size=40))
+    buf = io.BytesIO()
+    image.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+_POSTER_PNG = _poster_png()
+
+
+@app.get("/poster-hub")
+def poster_hub() -> Response:
+    """Embeds a text-bearing image and links the text PDF (OCR plus PDF extraction)."""
+    return HTMLResponse(
+        "<!doctype html><html><head><title>Offers</title></head><body><main>"
+        "<h1>Offers</h1><p>This season's poster and the report it refers to.</p>"
+        '<img src="/files/poster.png" alt="Poster">'
+        '<a href="/files/annual-report.pdf">Annual report (PDF)</a>'
+        "</main></body></html>"
+    )
+
+
+@app.get("/files/poster.png")
+def poster_png() -> Response:
+    """The poster image with printed text."""
+    return Response(content=_POSTER_PNG, media_type="image/png")
 
 
 # -- Recrawl fixture: a page whose freshness a test controls ---------------------------

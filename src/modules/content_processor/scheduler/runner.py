@@ -1,20 +1,25 @@
 """Drive the workers of one run until its queue drains (P-1, Lane L6).
 
 The same engine runs a dry run (in-memory ledger) and a durable run
-(Postgres `TaskLedger`): it only talks to the shared `LedgerPort`. Stages run
-in rounds (fetch, then render, then documents) because later stages create
-work for earlier ones (depth-1 follow-ups found in a rendered page are new
-FETCH tasks). A run stops when nothing is left, when a round makes no
-progress (everything still pending is held by Retry-After, a host delay or an
-open circuit), at the round cap, or when a run budget is reached (K9: runtime,
-requests, bytes, evidence bytes; see `scheduler/budget.py`). On a budget stop
-the run's open tasks are cancelled and each affected resource ends
-`BUDGET_EXHAUSTED` with a BUDGET_STOPPED gap, so its URL reads PARTIAL with
-the reason. The stop reason is reported, never hidden.
+(Postgres `TaskLedger`): it only talks to the shared `LedgerPort`. Fetch and
+render run in rounds (fetch, then render) because later stages create work for
+earlier ones (depth-1 follow-ups found in a rendered page are new FETCH tasks).
+Documents and images (EXTRACT_DOC, EXTRACT_IMAGE) send nothing to a site, so by
+default they are read in parallel with those rounds, as soon as a fetch hands
+them over, instead of waiting for the last render (`RunOptions.overlap_docs`;
+False keeps the older fetch -> render -> docs rounds). A run stops when nothing
+is left, when a round makes no progress on either chain (everything still
+pending is held by Retry-After, a host delay or an open circuit), at the round
+cap, or when a run budget is reached (K9: runtime, requests, bytes, evidence
+bytes; see `scheduler/budget.py`). On a budget stop the run's open tasks are
+cancelled and each affected resource ends `BUDGET_EXHAUSTED` with a
+BUDGET_STOPPED gap, so its URL reads PARTIAL with the reason. The stop reason
+is reported, never hidden.
 """
 
 from __future__ import annotations
 
+import asyncio
 import time
 from collections.abc import Callable, Collection, Iterable, Mapping
 from typing import Any, Literal, Protocol
@@ -53,6 +58,7 @@ StageName = Literal["fetch", "render", "docs"]
 StopReason = Literal[
     "drained", "no_progress_tasks_held", "max_rounds", "task_cap", "budget_exhausted"
 ]
+RunMode = Literal["sequential", "overlapped"]
 STAGE_ORDER: tuple[StageName, ...] = ("fetch", "render", "docs")
 STAGE_KINDS: dict[StageName, tuple[TaskKind, ...]] = {
     "fetch": (TaskKind.FETCH,),
@@ -128,6 +134,14 @@ class RunOptions(StrictModel):
             "render retry schedule (30, 90, 180 s) so unattended runs do not stop mid-retry."
         ),
     )
+    overlap_docs: bool = Field(
+        default=True,
+        description=(
+            "Read documents and images while pages are still being fetched and rendered. "
+            "Extraction sends nothing to a site, so the per-host pace is unchanged; False "
+            "drives the stages one after another (fetch, render, docs) in rounds."
+        ),
+    )
 
 
 class RunExecution(StrictModel):
@@ -140,6 +154,9 @@ class RunExecution(StrictModel):
     open_tasks_after: int = Field(ge=0, description="Pending or leased tasks of the run's stages")
     stop_reason: StopReason
     elapsed_s: float = Field(ge=0.0)
+    mode: RunMode = Field(
+        default="sequential", description="Whether documents were read alongside fetch/render"
+    )
     budget_exhausted: BudgetName | None = None
     budget_usage: dict[str, dict[str, float]] | None = None
     budget_closed_out: int = Field(default=0, ge=0, description="Resources ended BUDGET_EXHAUSTED")
@@ -200,14 +217,21 @@ def _kinds(stages: Iterable[StageName]) -> list[TaskKind]:
     return [k for s in STAGE_ORDER if s in set(stages) for k in STAGE_KINDS[s]]
 
 
-async def _drive_stage(stage: Stage, opts: RunOptions, meter: BudgetMeter | None) -> int:
-    """Run one stage; with a meter, in small steps so the budget is checked between them.
+async def _drive_stage(
+    stage: Stage, opts: RunOptions, meter: BudgetMeter | None, *, limit: int | None = None
+) -> int:
+    """Run one stage until it is idle; return how many tasks it processed.
 
-    A step is one task, or as many as the stage works on at once.
+    `limit` caps this call (the per-stage task cap less what earlier calls did).
+    With a meter the stage runs in small steps so the budget is checked between
+    them; a step is one task, or `stage.concurrent_tasks` for a worker that
+    reads several documents at once (those tasks send nothing to a site, so the
+    overshoot a step can cause is local work only).
     """
+    cap = opts.max_tasks_per_stage if limit is None else limit
     if meter is None:
         return await stage.run_until_idle(
-            max_tasks=opts.max_tasks_per_stage,
+            max_tasks=cap,
             idle_polls=opts.idle_polls,
             poll_s=opts.poll_s,
             max_wait_s=opts.max_wait_s,
@@ -215,11 +239,10 @@ async def _drive_stage(stage: Stage, opts: RunOptions, meter: BudgetMeter | None
     done = 0
     step = max(1, int(getattr(stage, "concurrent_tasks", 1)))
     while meter.exceeded() is None:
-        if opts.max_tasks_per_stage is not None and done >= opts.max_tasks_per_stage:
+        if cap is not None and done >= cap:
             break
-        left = None if opts.max_tasks_per_stage is None else opts.max_tasks_per_stage - done
         got = await stage.run_until_idle(
-            max_tasks=step if left is None else min(step, left),
+            max_tasks=step if cap is None else min(step, cap - done),
             idle_polls=opts.idle_polls,
             poll_s=opts.poll_s,
             max_wait_s=min(opts.max_wait_s, meter.remaining_runtime_s()),
@@ -290,67 +313,192 @@ async def execute_run(
     opts = options or RunOptions()
     order = [s for s in STAGE_ORDER if s in stages and s in opts.stages]
     kinds = _kinds(order)
-    max_rounds = 1 if opts.max_tasks_per_stage is not None else opts.max_rounds
-    processed: dict[str, int] = dict.fromkeys(order, 0)
     started = time.perf_counter()
-    rounds = 0
-    stop: StopReason = "max_rounds"
-    exhausted: BudgetName | None = None
-    while rounds < max_rounds:
-        if meter is not None and (exhausted := meter.exceeded()) is not None:
-            stop = "budget_exhausted"
-            break
-        rounds += 1
-        if reap is not None:
-            reap()
-        progress = 0
-        for name in order:
-            n = await _drive_stage(stages[name], opts, meter)
-            processed[name] += n
-            progress += n
-            if grouping is not None and name == "fetch":
-                grouping.refresh()
-            if meter is not None and meter.exceeded() is not None:
-                break
-        if meter is not None and (exhausted := meter.exceeded()) is not None:
-            stop = "budget_exhausted"
-            break
-        if ledger.pending_count(kinds, run_id=run_id) == 0:
-            stop = "drained"
-            break
-        if opts.max_tasks_per_stage is not None:
-            stop = "task_cap"
-            break
-        if progress == 0:
-            stop = "no_progress_tasks_held"
-            break
+    drive = _RunDrive(ledger, run_id=run_id, stages=stages, order=order, opts=opts)
+    drive.reap, drive.meter, drive.grouping = reap, meter, grouping
+    if opts.overlap_docs and "docs" in order and len(order) > 1:
+        mode: RunMode = "overlapped"
+        await drive.overlapped()
+    else:
+        mode = "sequential"
+        await drive.sequential()
     closed_out = 0
-    if exhausted is not None:
-        closed_out = _close_out_for_budget(ledger, run_id=run_id, kinds=kinds, which=exhausted)
+    if drive.exhausted is not None:
+        closed_out = _close_out_for_budget(
+            ledger, run_id=run_id, kinds=kinds, which=drive.exhausted
+        )
     open_after = ledger.pending_count(kinds, run_id=run_id) if kinds else 0
     _logger.info(
         "run_execution_finished",
         extra={
             "run_id": run_id,
-            "rounds": rounds,
-            "stop": stop,
+            "rounds": drive.rounds,
+            "stop": drive.stop,
+            "mode": mode,
             "open_after": open_after,
-            "budget_exhausted": exhausted,
+            "budget_exhausted": drive.exhausted,
         },
     )
     return RunExecution(
         run_id=run_id,
         stages=order,
-        rounds=rounds,
-        processed=processed,
+        rounds=drive.rounds,
+        processed=drive.processed,
         open_tasks_after=open_after,
-        stop_reason=stop,
+        stop_reason=drive.stop,
         elapsed_s=round(time.perf_counter() - started, 3),
-        budget_exhausted=exhausted,
+        mode=mode,
+        budget_exhausted=drive.exhausted,
         budget_usage=meter.usage() if meter is not None else None,
         budget_closed_out=closed_out,
         group_stats=grouping.stats() if grouping is not None else None,
     )
+
+
+class _RunDrive:
+    """The state of one `execute_run`: rounds, per-stage counts, stop reason, budget."""
+
+    def __init__(
+        self,
+        ledger: LedgerPort,
+        *,
+        run_id: str,
+        stages: Mapping[StageName, Stage],
+        order: list[StageName],
+        opts: RunOptions,
+    ) -> None:
+        self.ledger = ledger
+        self.run_id = run_id
+        self.stages = stages
+        self.order = order
+        self.opts = opts
+        self.reap: Callable[[], object] | None = None
+        self.meter: BudgetMeter | None = None
+        self.grouping: RunGroups | None = None
+        self.max_rounds = 1 if opts.max_tasks_per_stage is not None else opts.max_rounds
+        self.processed: dict[str, int] = dict.fromkeys(order, 0)
+        self.rounds = 0
+        self.stop: StopReason = "max_rounds"
+        self.exhausted: BudgetName | None = None
+
+    def _budget_hit(self) -> bool:
+        if self.meter is None:
+            return False
+        if (which := self.meter.exceeded()) is not None:
+            self.exhausted = which
+            self.stop = "budget_exhausted"
+            return True
+        return False
+
+    def _pending(self, names: Iterable[StageName]) -> int:
+        kinds = _kinds(names)
+        return self.ledger.pending_count(kinds, run_id=self.run_id) if kinds else 0
+
+    def _remaining(self, name: StageName) -> int | None:
+        cap = self.opts.max_tasks_per_stage
+        return None if cap is None else max(0, cap - self.processed[name])
+
+    async def _round(self, names: list[StageName]) -> int:
+        """One pass over `names` in stage order; return the tasks processed."""
+        self.rounds += 1
+        if self.reap is not None:
+            self.reap()
+        progress = 0
+        for name in names:
+            n = await _drive_stage(
+                self.stages[name], self.opts, self.meter, limit=self._remaining(name)
+            )
+            self.processed[name] += n
+            progress += n
+            if self.grouping is not None and name == "fetch":
+                self.grouping.refresh()
+            if self.meter is not None and self.meter.exceeded() is not None:
+                break
+        return progress
+
+    async def sequential(self) -> None:
+        """Fetch, render and docs one after another, in rounds (the original engine)."""
+        while self.rounds < self.max_rounds:
+            if self._budget_hit():
+                return
+            progress = await self._round(self.order)
+            if self._budget_hit():
+                return
+            if self._pending(self.order) == 0:
+                self.stop = "drained"
+                return
+            if self.opts.max_tasks_per_stage is not None:
+                self.stop = "task_cap"
+                return
+            if progress == 0:
+                self.stop = "no_progress_tasks_held"
+                return
+
+    async def overlapped(self) -> None:
+        """Fetch/render rounds on one chain, documents on another, at the same time.
+
+        The document chain keeps going while the page chain can still hand it
+        work; once the page chain has stopped it finishes what is queued. A round
+        with no page progress stops the run only when the documents made none
+        either in the meantime; the final stop reason covers both chains.
+        """
+        pages: list[StageName] = [s for s in self.order if s != "docs"]
+        page_chain_done = asyncio.Event()
+        docs_progress = 0
+        docs_stop: StopReason | None = None
+
+        async def page_chain() -> None:
+            seen_docs = 0
+            try:
+                while self.rounds < self.max_rounds:
+                    if self._budget_hit():
+                        return
+                    progress = await self._round(pages)
+                    if self._budget_hit():
+                        return
+                    if self._pending(pages) == 0:
+                        self.stop = "drained"
+                        return
+                    if self.opts.max_tasks_per_stage is not None:
+                        self.stop = "task_cap"
+                        return
+                    if progress == 0 and docs_progress == seen_docs:
+                        self.stop = "no_progress_tasks_held"
+                        return
+                    seen_docs = docs_progress
+            finally:
+                page_chain_done.set()
+
+        async def docs_chain() -> None:
+            nonlocal docs_progress, docs_stop
+            passes_after_pages = 0
+            while True:
+                if self.meter is not None and self.meter.exceeded() is not None:
+                    return
+                limit = self._remaining("docs")
+                if limit is not None and limit <= 0:
+                    docs_stop = "task_cap"
+                    return
+                n = await _drive_stage(self.stages["docs"], self.opts, self.meter, limit=limit)
+                self.processed["docs"] += n
+                docs_progress += n
+                if not page_chain_done.is_set():
+                    await asyncio.sleep(self.opts.poll_s)
+                    continue
+                passes_after_pages += 1
+                if self._pending(["docs"]) == 0:
+                    return
+                if n == 0:
+                    docs_stop = "no_progress_tasks_held"  # held by a retry backoff
+                    return
+                if passes_after_pages >= self.max_rounds:
+                    docs_stop = "max_rounds"
+                    return
+
+        await asyncio.gather(page_chain(), docs_chain())
+        if self.exhausted is None and self.stop == "drained" and docs_stop is not None:
+            # The pages finished but documents are still open: say why.
+            self.stop = docs_stop
 
 
 def assemble_run_records(

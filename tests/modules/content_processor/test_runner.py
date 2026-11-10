@@ -2,20 +2,26 @@
 
 from __future__ import annotations
 
+import asyncio
+import io
 import json
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import httpx
 import pytest
+from PIL import Image
 
 from fixtures.server import app
 from src.integrations.evidence_store import LocalEvidenceStore
 from src.integrations.http_client import FetchLimits, HttpFetcher
-from src.modules.content_processor.contracts import Authorization, RunScope, Task
+from src.modules.content_processor.adapters.ocr import OcrResult
+from src.modules.content_processor.contracts import Authorization, Resource, RunScope, Task
 from src.modules.content_processor.enums import (
     AuthorizationKind,
+    EntityStatus,
     PriorityClass,
     TaskKind,
     UrlBadge,
@@ -31,6 +37,7 @@ from src.modules.content_processor.scheduler import (
     write_run_outputs,
 )
 from src.modules.content_processor.scope.frontier import build_frontier
+from src.modules.content_processor.workers.doc_worker import DocWorker
 from src.modules.content_processor.workers.fetch_worker import FetchWorker
 from src.modules.content_processor.workers.ports import RobotsCache
 
@@ -263,6 +270,170 @@ class _FakeDurable:
 )
 def test_foreign_open_tasks(global_open: int, own: dict[str, int], foreign: int):
     assert foreign_open_tasks(_FakeDurable(global_open, own), "r") == foreign  # type: ignore[arg-type]
+
+
+def _png(size: tuple[int, int] = (200, 100)) -> bytes:
+    buf = io.BytesIO()
+    Image.new("RGB", size, "white").save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def _fake_ocr(_img: bytes, *, packs: Any = None, psm: int = 6) -> OcrResult:
+    return OcrResult(text="SALE 50% OFF", confidence=0.9, packs_used=list(packs or ["eng"]))
+
+
+class _SlowRender:
+    """A render stage whose one page takes a while: documents must not wait for it."""
+
+    def __init__(self, ledger: MemoryLedger, hold_s: float) -> None:
+        self.ledger = ledger
+        self.hold_s = hold_s
+        self.finished_at: float | None = None
+
+    async def run_until_idle(self, **_: Any) -> int:
+        task = self.ledger.lease("render", [TaskKind.RENDER], run_id=RUN)
+        if task is None:
+            return 0
+        await asyncio.sleep(self.hold_s)
+        self.ledger.complete(task.id or 0, "render")
+        self.finished_at = time.perf_counter()
+        return 1
+
+
+class _Idle:
+    async def run_until_idle(self, **_: Any) -> int:
+        return 0
+
+
+def _docs_run(tmp_path: Path, name: str, images: int) -> tuple[MemoryLedger, Any, DocWorker]:
+    """A ledger holding one RENDER task and `images` acquired images awaiting extraction."""
+    ledger = MemoryLedger(base_delay_s=0.0)
+    evidence = LocalEvidenceStore(tmp_path / name, "t1")
+    tasks = [
+        Task(
+            run_id=RUN,
+            kind=TaskKind.RENDER,
+            idempotency_key="render-page",
+            host=HOST,
+            priority=PriorityClass.HTML_PAGE,
+            payload={"resource_id": "res-page", "requested_url": "http://x/", "schedule_key": "p"},
+        )
+    ]
+    for i in range(images):
+        ref = evidence.put(_png((200 + i, 100)), "image/png")
+        key = f"http://{HOST}/img{i}.png"
+        ledger.upsert_resource(
+            Resource(
+                resource_id=f"res-img{i}",
+                run_id=RUN,
+                requested_url=key,
+                schedule_key=key,
+                sniffed_mime="image/png",
+                payload_sha256=ref.sha256,
+                status=EntityStatus.IN_PROGRESS,
+            ),
+            HOST,
+        )
+        tasks.append(
+            Task(
+                run_id=RUN,
+                kind=TaskKind.EXTRACT_IMAGE,
+                idempotency_key=f"img{i}",
+                host=HOST,
+                priority=PriorityClass.EMBEDDED_ASSET,
+                payload={"resource_id": f"res-img{i}", "sha256": ref.sha256},
+            )
+        )
+    ledger.enqueue(tasks)
+    docs = DocWorker(
+        ledger=ledger,
+        evidence=evidence,
+        run_id=RUN,
+        worker_id="docs",
+        isolate=False,
+        ocr_runner=_fake_ocr,
+        parallel_tasks=2,
+    )
+    return ledger, evidence, docs
+
+
+def _comparable(records: list[Any]) -> list[dict[str, Any]]:
+    def strip(value: Any) -> Any:
+        if isinstance(value, dict):
+            return {
+                k: strip(v)
+                for k, v in value.items()
+                if k not in ("captured_at", "extracted_at", "at", "tool_versions")
+            }
+        if isinstance(value, list):
+            return [strip(v) for v in value]
+        return value
+
+    return [strip(r.model_dump(mode="json")) for r in records]
+
+
+async def test_documents_are_read_while_a_render_is_still_in_progress(tmp_path: Path):
+    ledger, evidence, docs = _docs_run(tmp_path, "overlap", images=3)
+    render = _SlowRender(ledger, hold_s=1.5)
+    fast = RunOptions(idle_polls=1, poll_s=0.02, max_wait_s=0.2)
+    execution = await execute_run(
+        ledger,
+        run_id=RUN,
+        stages={"fetch": _Idle(), "render": render, "docs": docs},
+        options=fast,
+    )
+    assert execution.stop_reason == "drained" and execution.mode == "overlapped"
+    assert execution.processed == {"fetch": 0, "render": 1, "docs": 3}
+    assert render.finished_at is not None
+    done_at = [
+        e.at.timestamp()
+        for e in ledger.events
+        if e.entity_type == "resource" and e.new_state == "EXTRACTED_UNVERIFIED"
+    ]
+    assert len(done_at) == 3
+    # Wall-clock proof: every image finished before the render released its page.
+    render_done_wall = time.time() - (time.perf_counter() - render.finished_at)
+    assert max(done_at) < render_done_wall
+
+    overlapped = assemble_run_records(
+        ledger, run_id=RUN, plan=None, evidence=evidence, stages_that_will_run=["docs"]
+    )
+    ledger2, evidence2, docs2 = _docs_run(tmp_path, "sequential", images=3)
+    execution2 = await execute_run(
+        ledger2,
+        run_id=RUN,
+        stages={"fetch": _Idle(), "render": _SlowRender(ledger2, 0.0), "docs": docs2},
+        options=fast.model_copy(update={"overlap_docs": False}),
+    )
+    assert execution2.stop_reason == "drained" and execution2.mode == "sequential"
+    sequential = assemble_run_records(
+        ledger2, run_id=RUN, plan=None, evidence=evidence2, stages_that_will_run=["docs"]
+    )
+    assert _comparable(overlapped) == _comparable(sequential)
+
+
+async def test_overlapped_run_reports_no_progress_only_when_both_chains_stall():
+    ledger = MemoryLedger(base_delay_s=0.0)
+    ledger.enqueue(
+        [
+            Task(
+                run_id=RUN,
+                kind=TaskKind.FETCH,
+                idempotency_key="held",
+                host=HOST,
+                priority=PriorityClass.HTML_PAGE,
+                payload={"requested_url": "http://x/", "schedule_key": "http://x/"},
+            )
+        ]
+    )
+    execution = await execute_run(
+        ledger,
+        run_id=RUN,
+        stages={"fetch": _Held(), "docs": _Idle()},
+        options=RunOptions(idle_polls=1, poll_s=0.01, max_wait_s=0.05),
+    )
+    assert execution.stop_reason == "no_progress_tasks_held"
+    assert execution.open_tasks_after == 1 and execution.rounds == 1
 
 
 async def test_write_run_outputs_writes_four_files(tmp_path: Path):
