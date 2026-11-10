@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from src.core.config import reset_settings_cache
 from src.modules.content_processor.contracts import UrlRecord
 from src.modules.content_processor.enums import (
     ContentLayer,
@@ -19,7 +20,7 @@ from src.modules.content_processor.enums import (
 )
 from src.modules.content_processor.export.bundle import write_run_reports
 from src.modules.content_processor.webapi import __main__ as cli
-from src.modules.content_processor.webapi.app import create_app
+from src.modules.content_processor.webapi.app import create_app, origin_allowed
 from src.modules.content_processor.webapi.store import (
     UNCONFIRMED_TEXT,
     RunStore,
@@ -348,7 +349,110 @@ def test_command_line_checks_its_folders(tmp_path: Path, monkeypatch: pytest.Mon
     monkeypatch.setattr(cli.uvicorn, "run", lambda app, **kw: started.update(kw))
     assert cli.main(["--exports", str(tmp_path), "--port", "8799"]) == 0
     assert started == {"host": "127.0.0.1", "port": 8799, "log_level": "warning"}
-    assert cli.parse_args(["--exports", "x"]).port == 8780
+    assert cli.bind_address(cli.parse_args(["--exports", "x"])) == ("127.0.0.1", 8780)
+
+
+def test_bind_address_comes_from_settings_and_flags_win(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A container sets CP_BIND_HOST=0.0.0.0 and the platform's port; flags still override."""
+    assert cli.bind_address(cli.parse_args(["--exports", "x"])) == ("127.0.0.1", 8780)
+    monkeypatch.setenv("CP_BIND_HOST", "0.0.0.0")
+    monkeypatch.setenv("CP_BIND_PORT", "9000")
+    reset_settings_cache()
+    assert cli.bind_address(cli.parse_args(["--exports", "x"])) == ("0.0.0.0", 9000)
+    flags = cli.parse_args(["--exports", "x", "--host", "127.0.0.1", "--port", "8781"])
+    assert cli.bind_address(flags) == ("127.0.0.1", 8781)
+
+
+def test_allowed_hosts_and_origins_come_from_settings(
+    exports: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Deployed behind a public name, the server answers that Host and takes its writes."""
+    public = "http://app.up.railway.app"
+    write = {"X-Requested-With": "content-processor", "Origin": public}
+    before = TestClient(create_app(exports), base_url=public)
+    assert before.get("/api/runs").status_code == 400, "unknown Host headers are refused"
+
+    monkeypatch.setenv("CP_ALLOWED_HOSTS", "127.0.0.1, *.up.railway.app")
+    monkeypatch.setenv("CP_ALLOWED_ORIGINS", "https://editor.example")
+    reset_settings_cache()
+    client = TestClient(create_app(exports), base_url=public)
+    assert client.get("/api/runs").status_code == 200
+    key = client.get("/api/runs/demo/review").json()["items"][0]["url"]
+    body = {"kind": "review", "key": key, "decision": "resolved", "reviewer": "a"}
+    assert client.post("/api/runs/demo/decisions", json=body, headers=write).status_code == 200, (
+        "an allowed host is an allowed origin too"
+    )
+    editor = {**write, "Origin": "https://editor.example"}
+    assert client.post("/api/runs/demo/decisions", json=body, headers=editor).status_code == 200
+    evil = {**write, "Origin": "https://evil.example"}
+    refused = client.post("/api/runs/demo/decisions", json=body, headers=evil)
+    assert refused.status_code == 403 and "own address" in refused.json()["detail"]
+    # Explicit arguments still win over the settings (tests and embedders rely on it).
+    local_only = TestClient(create_app(exports, allowed_hosts=["127.0.0.1"]), base_url=public)
+    assert local_only.get("/api/runs").status_code == 400
+
+
+def test_origin_matching_rules() -> None:
+    assert origin_allowed("http://localhost:8780", ["127.0.0.1", "localhost"])
+    assert origin_allowed("https://a.up.railway.app", ["*.up.railway.app"])
+    assert not origin_allowed("https://up.railway.app", ["*.up.railway.app"])
+    assert origin_allowed("https://x.example", ["*"])
+    assert origin_allowed("https://App.example:8443/", ["https://app.example:8443"])
+    assert not origin_allowed("http://app.example:8443", ["https://app.example:8443"]), (
+        "a full origin must match scheme and port too"
+    )
+    assert not origin_allowed("https://evil.example", ["", "localhost"])
+
+
+def _write_run(folder: Path, name: str, pages: int) -> None:
+    _write(folder / f"{name}.records.jsonl", [_records()[i % 5] for i in range(pages)])
+
+
+def test_run_cache_keeps_only_the_most_recent_runs(tmp_path: Path) -> None:
+    """N+1 runs read through a store capped at N: the heavy cache never exceeds N."""
+    for i in range(5):
+        _write_run(tmp_path, f"run{i}", 3)
+    store = RunStore(tmp_path, max_entries=4)
+    for i in range(5):
+        store.get(f"run{i}")
+    assert len(store.cached_names()) == 4
+    assert store.cached_names() == ["run1", "run2", "run3", "run4"], "run0 was the oldest"
+    store.get("run1")  # a hit makes it the most recently used
+    store.get("run0")  # a miss reparses and now evicts run2
+    assert store.cached_names() == ["run3", "run4", "run1", "run0"]
+    assert RunStore(tmp_path, max_entries=0).max_entries == 1, "at least the current run"
+
+
+def test_run_list_streams_summaries_without_loading_runs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    for i in range(3):
+        _write_run(tmp_path, f"run{i}", 5)
+    monkeypatch.setenv("CP_RUN_CACHE_ENTRIES", "1")
+    reset_settings_cache()
+    app = create_app(tmp_path)
+    store: RunStore = app.state.run_store
+    assert store.max_entries == 1, "the cap comes from CP_RUN_CACHE_ENTRIES"
+    client = TestClient(app, base_url=BASE)
+    listed = client.get("/api/runs").json()["runs"]
+    assert len(listed) == 3
+    assert all(r["page_count"] == 5 and r["badges"]["BLOCKED"] == 1 for r in listed)
+    assert store.cached_names() == [], "listing streams the files; no run is kept in memory"
+
+    assert [s.name for s in store.summaries()] == [r["name"] for r in listed]
+    streamed = store.summary_for("run1")
+    assert streamed == store.summary(store.get("run1")).model_copy(update={"has_reports": False}), (
+        "the streamed numbers equal the ones computed from the parsed run"
+    )
+    assert store.cached_names() == ["run1"]
+    # A second listing reuses the small summaries (no parse) until a file changes.
+    monkeypatch.setattr(
+        "src.modules.content_processor.webapi.store._iter_records",
+        lambda _p: (_ for _ in ()).throw(AssertionError("parsed again")),
+    )
+    assert len(store.summaries()) == 3
+    (tmp_path / "run2_reports").mkdir()
+    assert store.summary_for("run2").has_reports is True, "a new reports folder is noticed"
 
 
 def test_report_folders_from_before_run_names_still_work(exports: Path) -> None:

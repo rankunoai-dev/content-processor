@@ -7,10 +7,13 @@ run's decisions log (`export/decisions.py`). A write is accepted only as
 JSON carrying the `X-Requested-With: content-processor` header (a page on
 another site cannot send it without a cross-origin grant,
 which this server never gives) and, when the browser sends an Origin, only
-from a local host; every other method or path is refused as read-only. The
-server binds 127.0.0.1 (see `__main__`), accepts only
-local Host headers (DNS-rebinding guard) and sends a strict
-Content-Security-Policy. Downloads are limited to the files that exist in the
+from an allowed origin; every other method or path is refused as read-only. The
+server binds `CP_BIND_HOST` (127.0.0.1 unless set; see `__main__`), accepts only
+the Host headers in `CP_ALLOWED_HOSTS` (DNS-rebinding guard; local names unless
+set), accepts changes only from the origins in `CP_ALLOWED_ORIGINS` plus those
+hosts, and sends a strict Content-Security-Policy. Every GET route is open
+(no login): exposing the server beyond one machine needs read access control in
+front of it. Downloads are limited to the files that exist in the
 run's reports folder; a name is matched against the folder listing, never
 joined onto a path, so `..` and absolute paths cannot escape it.
 """
@@ -28,6 +31,7 @@ from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import ValidationError
 
+from src.core.config import get_settings
 from src.modules.content_processor.export.bundle import BUNDLE_FILES, bundle_file_name
 from src.modules.content_processor.export.decisions import (
     Decision,
@@ -67,7 +71,13 @@ from src.modules.content_processor.webapi.store import (
 if TYPE_CHECKING:
     from src.modules.analyst.runs import CardRunner
 
-__all__ = ["DEFAULT_ALLOWED_HOSTS", "WRITE_HEADER", "WRITE_HEADER_VALUE", "create_app"]
+__all__ = [
+    "DEFAULT_ALLOWED_HOSTS",
+    "WRITE_HEADER",
+    "WRITE_HEADER_VALUE",
+    "create_app",
+    "origin_allowed",
+]
 
 WRITE_HEADER = "X-Requested-With"
 WRITE_HEADER_VALUE = "content-processor"
@@ -103,7 +113,8 @@ def create_app(
     exports_dir: Path,
     *,
     static_dir: Path | None = None,
-    allowed_hosts: Sequence[str] = DEFAULT_ALLOWED_HOSTS,
+    allowed_hosts: Sequence[str] | None = None,
+    allowed_origins: Sequence[str] | None = None,
     projects: tuple[ProjectStore, ScrapeRunner, TokenSigner] | None = None,
     knowledge: KnowledgeAccess | None = None,
     analyst: CardRunner | None = None,
@@ -113,8 +124,13 @@ def create_app(
     With `projects` (store, runner, token signer) the app also serves App module 1:
     projects, their URL inventory, scraping runs and their reports. With `analyst`
     as well, it serves the Senior Analyst Action Cards of those projects.
+    `allowed_hosts` and `allowed_origins` default to the settings (`CP_ALLOWED_HOSTS`,
+    `CP_ALLOWED_ORIGINS`), which default to this machine's names.
     """
-    store = RunStore(exports_dir)
+    settings = get_settings()
+    hosts = list(allowed_hosts if allowed_hosts is not None else settings.cp_allowed_hosts)
+    origins = list(allowed_origins if allowed_origins is not None else settings.cp_allowed_origins)
+    store = RunStore(exports_dir, max_entries=settings.cp_run_cache_entries)
     app = FastAPI(
         title="Content processor analyst API",
         version="1.0",
@@ -122,14 +138,15 @@ def create_app(
         redoc_url=None,
         openapi_url="/api/openapi.json",
     )
-    app.add_middleware(TrustedHostMiddleware, allowed_hosts=list(allowed_hosts))
+    app.state.run_store = store  # reachable for tests and operators (cache size)
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=hosts)
 
     @app.middleware("http")
     async def security_headers(
         request: Request, call_next: Callable[[Request], Awaitable[Response]]
     ) -> Response:
         if request.method not in ("GET", "HEAD"):
-            refusal = _write_refusal(request, allowed_hosts)
+            refusal = _write_refusal(request, [*hosts, *origins])
             if refusal is not None:
                 return refusal
         response = await call_next(request)
@@ -150,8 +167,8 @@ def create_app(
 
     @app.get("/api/runs")
     def list_runs() -> RunsResponse:
-        runs = [store.summary(store.get(n)) for n in store.names()]
-        return RunsResponse(exports_dir=str(exports_dir), runs=runs)
+        # Summaries only: the list never loads every run's pages into memory.
+        return RunsResponse(exports_dir=str(exports_dir), runs=store.summaries())
 
     @app.get("/api/runs/{run}/overview")
     def overview(run: str) -> Overview:
@@ -360,12 +377,38 @@ def _mount_web_app(app: FastAPI, static_dir: Path | None) -> None:
         return FileResponse(index, headers={"Cache-Control": "no-cache"})
 
 
-def _write_refusal(request: Request, allowed_hosts: Sequence[str]) -> JSONResponse | None:
+def origin_allowed(origin: str, allowed: Sequence[str]) -> bool:
+    """True when the Origin header matches an allowed entry.
+
+    An entry with a scheme (`https://app.example.com`) must equal the whole origin
+    (scheme, host and port); any other entry is a host name compared with the
+    origin's host, where `*` matches every host and `*.example.com` every subdomain
+    (the same forms `TrustedHostMiddleware` accepts for `CP_ALLOWED_HOSTS`).
+    """
+    host = (urlsplit(origin).hostname or "").lower()
+    whole = origin.strip().lower().rstrip("/")
+    for entry in allowed:
+        pattern = entry.strip().lower().rstrip("/")
+        if not pattern:
+            continue
+        if "://" in pattern:
+            if whole == pattern:
+                return True
+            continue
+        if pattern == "*" or host == pattern:
+            return True
+        if pattern.startswith("*.") and host.endswith(pattern[1:]):
+            return True
+    return False
+
+
+def _write_refusal(request: Request, allowed_origins: Sequence[str]) -> JSONResponse | None:
     """None when this non-GET request is an acceptable write, else the refusal.
 
     Two kinds of write exist: a reviewer decision, and the project changes of App
     module 1 (which also need the project's unlock token, checked by the route).
-    Both must come from this app (the header), as JSON, from a local page. The MCP
+    Both must come from this app (the header), as JSON, from an allowed origin (the
+    server's own addresses unless `CP_ALLOWED_ORIGINS` adds more). The MCP
     server's read-only tool calls are POSTs too; they must not come from any page at
     all (no Origin header), only from the local MCP server process.
     """
@@ -383,6 +426,8 @@ def _write_refusal(request: Request, allowed_hosts: Sequence[str]) -> JSONRespon
     origin = request.headers.get("origin")
     if origin and _MCP_CALL_PATH.match(path):
         return JSONResponse({"detail": "Only the local MCP server may call this."}, status_code=403)
-    if origin and urlsplit(origin).hostname not in set(allowed_hosts):
-        return JSONResponse({"detail": "Changes can only be made locally."}, status_code=403)
+    if origin and not origin_allowed(origin, allowed_origins):
+        return JSONResponse(
+            {"detail": "Changes can only be made from the app's own address."}, status_code=403
+        )
     return None
