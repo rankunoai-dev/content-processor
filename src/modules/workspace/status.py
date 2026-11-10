@@ -40,6 +40,7 @@ def project_statuses(projects: ProjectStore) -> list[dict[str, Any]]:
                 "project_id": pid,
                 "name": record.name,
                 "client": record.client_name,
+                "confidential": record.confidential,
                 "websites": [
                     {"name": s.name, "role": s.role, "addresses": s.domains} for s in record.sites
                 ],

@@ -241,10 +241,7 @@ class McpBridge:
         """Projects with their websites and which results exist, with dates (for `scope`)."""
         from src.modules.workspace.status import project_statuses
 
-        statuses = project_statuses(self.projects)
-        flags = {p.project_id: p.confidential for p in self.projects.projects()}
-        for status in statuses:
-            status["confidential"] = flags.get(str(status.get("project_id")), False)
+        statuses = project_statuses(self.projects)  # each carries `confidential`
         if scope is None:
             return statuses
         keep = set(_COMMON_FIELDS)
