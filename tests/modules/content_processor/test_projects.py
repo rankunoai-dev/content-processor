@@ -235,6 +235,13 @@ def test_an_older_project_becomes_one_client_website(tmp_path: Path):
     assert run.site_id == "flynn-s" and run.status == "finished"
     assert (folder / "urls.json.converted").is_file() and not (folder / "urls.json").exists()
     assert store.get("old-print-abc123").sites == record.sites, "converted once"
+    # a project written before the confidential option existed is not confidential, and
+    # its file now says so
+    assert record.confidential is False
+    saved = json.loads((folder / "project.json").read_text(encoding="utf-8"))
+    assert saved["confidential"] is False
+    assert store.update("old-print-abc123", confidential=True).confidential is True
+    assert store.get("old-print-abc123").confidential is True
 
 
 def test_scope_covers_each_site_free_tiers_only():
@@ -401,6 +408,34 @@ def test_create_with_competitors_and_only_the_password_holder_can_change(app_env
     assert gone.status_code == 200
     client_gone = _post(client, f"/api/projects/{project_id}/sites/flynn-s/delete", {}, token)
     assert client_gone.status_code == 409
+
+
+def test_a_confidential_project_is_created_and_changed_by_the_password_holder(app_env):
+    client, store, _, _, _ = app_env
+    project_id, token = _create(client)
+    assert client.get(f"/api/projects/{project_id}").json()["confidential"] is False
+    change = f"/api/projects/{project_id}/update"
+    assert _post(client, change, {"confidential": True}).status_code == 401
+    changed = _post(client, change, {"confidential": True}, token)
+    assert changed.status_code == 200 and changed.json()["confidential"] is True
+    assert store.get(project_id).confidential is True
+    renamed = _post(client, change, {"name": "Print security 2"}, token).json()
+    assert renamed["name"] == "Print security 2" and renamed["confidential"] is True
+    assert _post(client, change, {"confidential": False}, token).json()["confidential"] is False
+    created = _post(
+        client,
+        "/api/projects",
+        {
+            "name": "Secret launch",
+            "owner_name": "Gaurav",
+            "client_name": "Acme",
+            "password": PASSWORD,
+            "client_website": "acme.example",
+            "confidential": True,
+        },
+    )
+    assert created.status_code == 200 and created.json()["project"]["confidential"] is True
+    assert store.get(created.json()["project"]["project_id"]).confidential is True
 
 
 def test_one_list_for_all_websites_then_scrape_each_on_its_own(app_env):

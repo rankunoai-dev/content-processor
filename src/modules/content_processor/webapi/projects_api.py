@@ -119,6 +119,11 @@ class ProjectOut(StrictModel):
     url_count: int
     sites: list[SiteOut]
     last_run: RunState | None = None
+    confidential: bool = Field(
+        default=False,
+        description="page text from this project is never sent to Claude or shown to Claude "
+        "Desktop; only counts and names",
+    )
 
 
 class SiteIn(StrictModel):
@@ -164,6 +169,11 @@ class ProjectCreate(StrictModel):
         description="the client's other websites or brands (never its competitors)",
     )
     competitors: list[SiteIn] = Field(default_factory=list, max_length=50)
+    confidential: bool = Field(
+        default=False,
+        description="page text from this project is never sent to Claude or shown to Claude "
+        "Desktop; only counts and names",
+    )
 
 
 class StartIn(StrictModel):
@@ -233,10 +243,11 @@ class UrlsRemove(StrictModel):
 
 
 class ProjectUpdate(StrictModel):
-    """Rename the project or its client."""
+    """Rename the project or its client, or mark it confidential (or not)."""
 
     name: str | None = Field(default=None, min_length=1, max_length=120)
     client_name: str | None = Field(default=None, min_length=1, max_length=120)
+    confidential: bool | None = None
 
 
 class ImportOut(StrictModel):
@@ -479,6 +490,7 @@ def register_project_routes(
             url_count=sum(s.url_count for s in sites),
             sites=sites,
             last_run=runs[0] if runs else None,
+            confidential=record.confidential,
         )
 
     def require_token(project_id: str, token: str | None) -> ProjectRecord:
@@ -560,6 +572,7 @@ def register_project_routes(
                 ),
                 client_brands=[b.spec() for b in body.client_brands],
                 competitors=[c.spec() for c in body.competitors],
+                confidential=body.confidential,
             )
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from None
@@ -587,7 +600,14 @@ def register_project_routes(
     @app.post("/api/projects/{project_id}/update")
     def update(project_id: str, body: ProjectUpdate, token: TokenHeader = None) -> ProjectOut:
         require_token(project_id, token)
-        return out(store.update(project_id, name=body.name, client_name=body.client_name))
+        return out(
+            store.update(
+                project_id,
+                name=body.name,
+                client_name=body.client_name,
+                confidential=body.confidential,
+            )
+        )
 
     @app.post("/api/projects/{project_id}/delete")
     def delete(project_id: str, body: Unlock, token: TokenHeader = None) -> dict[str, str]:

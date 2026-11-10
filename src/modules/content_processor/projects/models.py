@@ -77,6 +77,11 @@ class ProjectRecord(StrictModel):
     created_at: datetime
     updated_at: datetime
     sites: list[SiteRecord] = Field(default_factory=list)
+    confidential: bool = Field(
+        default=False,
+        description="page text from this project is never sent to Claude or shown to Claude "
+        "Desktop; only counts and names",
+    )
 
     def main_site(self) -> SiteRecord | None:
         """The client's main website: the first client website."""
