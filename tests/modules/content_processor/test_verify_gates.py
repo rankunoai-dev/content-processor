@@ -139,3 +139,26 @@ def test_password_form_is_reported_once():
     )
     findings = detect_gates(html)
     assert [(f.kind, f.evidence[0]) for f in findings] == [("login_wall", "form:password_input")]
+
+
+def test_a_download_form_beside_a_whole_article_is_an_offer_not_a_wall():
+    """A download form next to a whole article offers another document.
+
+    gep.com blog pages: a HubSpot form 'Download our research' inside <main> next to
+    a 600-word article flagged 55 of 166 pages as walls; the article is all there.
+    """
+    article = " ".join(f"word{n}" for n in range(600))
+    html = f"""<html><body><main><article><h1>Publishers vs agencies</h1><p>{article}</p>
+    </article><aside><div class="hs-form"><h3>Get the research</h3>
+    <form id="hsForm_x"><input type="email" name="email"><button type="submit">Download</button>
+    </form></div></aside></main></body></html>"""
+    assert detect_gates(html.encode("utf-8")) == []
+
+
+def test_a_short_teaser_with_the_same_form_is_still_a_wall():
+    html = """<html><body><main><h1>Market research 2026</h1><p>Our research covers the
+    market in depth. Fill in the form to download the report.</p>
+    <form><input type="email" name="email"><button type="submit">Download</button></form>
+    </main></body></html>"""
+    kinds = [f.kind for f in detect_gates(html.encode("utf-8"))]
+    assert kinds == ["lead_gen_form_wall"]

@@ -215,6 +215,11 @@ def _teaser_words(tree: HTMLParser) -> int:
     return sum(len(s.split()) for s in kept)
 
 
+# A page that publishes this many words of its own text around a download form is
+# an article with an offer beside it, not content behind a form: no wall.
+LEAD_GEN_FULL_ARTICLE_WORDS = 300
+
+
 def detect_gates(dom_html: bytes, inner_text: str = "") -> list[GateFinding]:
     """Detect content gates in a document.
 
@@ -281,6 +286,10 @@ def detect_gates(dom_html: bytes, inner_text: str = "") -> list[GateFinding]:
         newsletter_only = _NEWSLETTER_CTA.search(cta) and not cta_hit
         if newsletter_only or not asset_hit or not (cta_hit or gate_hit):
             continue
+        teaser = _teaser_words(HTMLParser(dom_html))
+        if teaser >= LEAD_GEN_FULL_ARTICLE_WORDS:
+            # The page's own text is a whole article: the form offers another document.
+            continue
         evidence = ["form:email_input"]
         if cta_hit:
             evidence.append(f"cta:{cta_hit.group(0)[:40]}")
@@ -288,7 +297,7 @@ def detect_gates(dom_html: bytes, inner_text: str = "") -> list[GateFinding]:
             evidence.append(f"phrase:{gate_hit.group(0)[:40]}")
         evidence.append(f"asset:{asset_hit.group(0)[:30]}")
         evidence.append(f"main_words={main_words}")
-        evidence.append(f"teaser_words={_teaser_words(HTMLParser(dom_html))}")
+        evidence.append(f"teaser_words={teaser}")
         findings.append(
             GateFinding(
                 kind="lead_gen_form_wall",
