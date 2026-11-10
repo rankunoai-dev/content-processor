@@ -75,7 +75,7 @@ _HUMAN_CHECK = re.compile(
 )
 MINIMAL_TEXT_CHARS = 2000
 """A page with less visible text than this has no content of its own besides a CAPTCHA."""
-_SCRIPT_STYLE = re.compile(r"<(script|style|noscript).*?</\s*>", re.IGNORECASE | re.DOTALL)
+_SCRIPT_STYLE = re.compile(r"<(script|style|noscript)\b.*?</\1\s*>", re.IGNORECASE | re.DOTALL)
 _TAG = re.compile(r"<[^>]+>")
 _TITLE = re.compile(r"<title[^>]*>([^<]*)", re.IGNORECASE)
 

@@ -210,6 +210,38 @@ def test_captcha_widget_on_a_content_page_is_not_a_block(widget: str):
     assert any(e.startswith("captcha_widget_on_content_page") for e in v.evidence)
 
 
+_INLINE_JS = (
+    "<script>window.__cfg = {label: \"I'm not a robot\", "
+    + "x: 1, ".join(["y"] * 600)
+    + "};</script>"
+)
+
+
+def test_script_text_is_not_visible_text_and_never_a_human_check():
+    article = "<p>" + "The article the visitor actually reads. " * 80 + "</p>"
+    body = (
+        "<html><head><title>Guide</title>"
+        '<script src="https://www.google.com/recaptcha/api.js"></script></head><body>'
+        f"{_INLINE_JS}<main>{article}</main></body></html>"
+    ).encode()
+    v = classify_response(status=200, headers={}, body_prefix=body, body_size=len(body))
+    assert v.kind is BlockKind.NONE, v.evidence
+    assert not any("human_check" in e for e in v.evidence)
+
+
+def test_inline_script_does_not_count_towards_minimal_content():
+    # Over 2000 characters of JavaScript and one short line of real text: a shell.
+    body = (
+        "<html><head><title>App</title>"
+        '<script src="https://www.google.com/recaptcha/api.js"></script></head><body>'
+        f"{_INLINE_JS}<style>{'.a{color:red}' * 200}</style><div id='root'>Loading</div>"
+        "</body></html>"
+    ).encode()
+    v = classify_response(status=200, headers={}, body_prefix=body, body_size=len(body))
+    assert v.kind is not BlockKind.NONE
+    assert any("minimal_content" in e for e in v.evidence), v.evidence
+
+
 def test_large_page_cut_to_its_first_64kb_is_not_minimal():
     # A page whose first 64 KB is scripts and styles: little text in the prefix, but
     # the whole page is 300 KB, so it is not a CAPTCHA wall.
