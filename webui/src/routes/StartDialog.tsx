@@ -50,7 +50,8 @@ export function StartDialog({
   onStart: (options: StartOptions) => void;
 }) {
   const [form] = Form.useForm<FormValues>();
-  const queue = useSharedQueue();
+  // The dialog stays mounted while closed: ask for the queue only while it is open.
+  const queue = useSharedQueue(open);
   const [onTurn, setOnTurn] = useState<'auto' | 'notify'>('auto');
   const data = queue.data;
   const ahead = data ? data.running.length + data.waiting.length : 0;

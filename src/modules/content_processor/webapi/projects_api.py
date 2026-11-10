@@ -72,6 +72,7 @@ from src.modules.content_processor.projects.urls import (
     candidates_from_text,
 )
 from src.modules.content_processor.projects.websites import WebsiteGraph
+from src.modules.content_processor.webapi.memo import TimedMemo
 
 __all__ = ["PROJECT_TOKEN_HEADER", "KnowledgeAccess", "register_project_routes"]
 
@@ -702,6 +703,10 @@ def register_project_routes(
         project(project_id)
         return store.runs(project_id)
 
+    # The per-URL rate reads every run file and changes only when a scrape finishes:
+    # every tab polls this route, so read it at most every 30 s (an estimate anyway).
+    rate_memo: TimedMemo[float] = TimedMemo(runner.seconds_per_url, ttl_s=30.0)
+
     @app.get("/api/queue")
     def shared_queue() -> QueueOut:
         running, waiting, ready = runner.queue()
@@ -719,7 +724,7 @@ def register_project_routes(
             running=[item(e) for e in running],
             waiting=[item(e) for e in waiting],
             ready=[item(e) for e in ready],
-            seconds_per_url=round(runner.seconds_per_url(), 1),
+            seconds_per_url=round(rate_memo.get(), 1),
             email_sends=runner.email_sends,
             ready_hours=runner.ready_hours,
         )
