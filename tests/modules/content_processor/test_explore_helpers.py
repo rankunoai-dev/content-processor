@@ -9,6 +9,8 @@ import pytest
 from src.modules.content_processor.contracts import InteractionPolicy
 from src.modules.content_processor.explore import explorer as explorer_module
 from src.modules.content_processor.explore.compose import (
+    COMPOSE_JS,
+    HAS_SHADOW_ROOTS_JS,
     FrameCapture,
     _cdp_html,
     _cdp_text,
@@ -196,6 +198,46 @@ async def test_frames_that_stay_hidden_are_tracking_pixels(monkeypatch) -> None:
     await explorer._frames(_FakePage(), added.append, ExplorationResult())
     assert len(calls) == 2  # one look again, then accepted as hidden
     assert [(c.status, c.reason) for c in added] == [("excluded", "hidden_frame")]
+
+
+class _ProbePage:
+    """A page that answers the shadow-root probe and counts every other script."""
+
+    def __init__(self, roots: bool) -> None:
+        self.roots = roots
+        self.scripts: list[str] = []
+
+    async def evaluate(self, script: str, *_: object) -> object:
+        if script == HAS_SHADOW_ROOTS_JS:
+            return self.roots
+        self.scripts.append(script)
+        if script == COMPOSE_JS:
+            return {"open": 1, "closed": [], "html": "<p>x</p>", "light": "x", "shadowText": "s"}
+        return "text"
+
+    async def content(self) -> str:
+        return "<html></html>"
+
+
+async def test_first_capture_is_skipped_on_a_page_without_shadow_roots(monkeypatch) -> None:
+    async def no_cdp(page: object) -> None:
+        return None
+
+    monkeypatch.setattr(explorer_module, "read_closed_roots", no_cdp)
+    explorer = StateExplorer(InteractionPolicy(), settle_max_s=0, settle_poll_s=0)
+    plain = _ProbePage(roots=False)
+    assert await explorer._shadow_roots(plain) is None
+    assert plain.scripts == [], "no annotate, compose, innerText or DOM read for nothing"
+    assert explorer._composition == {
+        "closed_roots_via_cdp": False,
+        "open_roots": 0,
+        "closed_roots": 0,
+        "closed_roots_read": 0,
+    }
+    shadowed = _ProbePage(roots=True)
+    captured = await explorer._shadow_roots(shadowed)
+    assert captured == ("x\ns", b"<p>x</p>")
+    assert COMPOSE_JS in shadowed.scripts and explorer._composition["open_roots"] == 1
 
 
 class _RoutablePage(_FakePage):

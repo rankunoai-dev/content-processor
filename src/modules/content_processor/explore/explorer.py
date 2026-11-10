@@ -47,6 +47,7 @@ from src.modules.content_processor.explore.compose import (
     ClosedRoot,
     capture_frames,
     compose_page,
+    has_shadow_roots,
     read_closed_roots,
 )
 from src.modules.content_processor.explore.deep import deep
@@ -472,16 +473,10 @@ class StateExplorer:
             seen_states.add(_digest(last_text))
 
         # B-12: the composed tree (shadow roots) is part of every later capture.
-        self._closed = await read_closed_roots(page)
-        self._composition = {
-            "closed_roots_via_cdp": self._closed is not None,
-            "open_roots": 0,
-            "closed_roots": 0,
-            "closed_roots_read": 0,
-        }
-        text, dom = await self._capture(page)
+        composed = await self._shadow_roots(page)
         comp = self._composition
-        if comp["open_roots"] or comp["closed_roots"]:
+        if composed is not None and (comp["open_roots"] or comp["closed_roots"]):
+            text, dom = composed
             unread = comp["closed_roots"] - comp["closed_roots_read"]
             rec = ControlRecord(
                 control_id="shadow:roots",
@@ -1266,6 +1261,25 @@ class StateExplorer:
             else:
                 stable = 0
             previous = point
+
+    async def _shadow_roots(self, page: Any) -> tuple[str, bytes] | None:
+        """Read closed roots over CDP, then capture the composed tree if the page has roots.
+
+        Fills `_composition` either way. The full capture (clear, annotate,
+        compose, text, DOM) is only paid for on a page that has shadow roots; its
+        result was discarded on every other page before, and a later capture
+        re-annotates the page anyway, so skipping it changes nothing recorded.
+        """
+        self._closed = await read_closed_roots(page)
+        self._composition = {
+            "closed_roots_via_cdp": self._closed is not None,
+            "open_roots": 0,
+            "closed_roots": 0,
+            "closed_roots_read": 0,
+        }
+        if not await has_shadow_roots(page):
+            return None
+        return await self._capture(page)
 
     async def _capture(self, page: Any) -> tuple[str, bytes]:
         await page.evaluate(CLEAR_ANNOTATIONS_JS)

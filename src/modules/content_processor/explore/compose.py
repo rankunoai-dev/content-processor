@@ -34,13 +34,21 @@ from src.core.schemas import StrictModel
 
 __all__ = [
     "COMPOSE_JS",
+    "HAS_SHADOW_ROOTS_JS",
     "ClosedRoot",
     "ComposedCapture",
     "FrameCapture",
     "capture_frames",
     "compose_page",
+    "has_shadow_roots",
     "read_closed_roots",
 ]
+
+HAS_SHADOW_ROOTS_JS = """
+() => Array.from(document.querySelectorAll('*')).some(
+  (el) => el.shadowRoot || el.hasAttribute('data-cp-closed'))
+"""
+"""True when the page has an open shadow root or a closed one marked by `read_closed_roots`."""
 
 _CLOSED_MARK = "\u0000cp-closed:{}\u0000"
 _SKIP_TEXT_TAGS = frozenset({"script", "style", "template", "noscript"})
@@ -289,6 +297,15 @@ async def read_closed_roots(page: Any) -> list[ClosedRoot] | None:
     finally:
         with contextlib.suppress(PlaywrightError):
             await cdp.detach()
+
+
+async def has_shadow_roots(page: Any) -> bool:
+    """Cheap probe: does the page have any shadow root at all?
+
+    One element scan, no serialisation; the explorer asks this before paying
+    for a full composed capture that it would discard on a page without roots.
+    """
+    return bool(await page.evaluate(HAS_SHADOW_ROOTS_JS))
 
 
 async def compose_page(target: Any, closed: list[ClosedRoot] | None) -> ComposedCapture | None:
