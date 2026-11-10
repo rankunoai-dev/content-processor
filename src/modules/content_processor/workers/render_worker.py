@@ -21,8 +21,9 @@ from typing import Any, Protocol
 from selectolax.parser import HTMLParser
 
 from src.core.logger import get_logger
-from src.integrations.browser_client import AssetStore, PageHook, RenderResult
+from src.integrations.browser_client import AssetStore, CapturedAsset, PageHook, RenderResult
 from src.integrations.evidence_store import EvidenceStore
+from src.integrations.sniff import sniff_media_type
 from src.modules.content_processor.adapters.html_source import extract_html_source, match_key
 from src.modules.content_processor.contracts import (
     ContentBlock,
@@ -39,19 +40,26 @@ from src.modules.content_processor.enums import (
     ContentLayer,
     EntityStatus,
     GapType,
+    RobotsPolicy,
     TaskKind,
 )
 from src.modules.content_processor.explore import ExplorationResult, StateExplorer
 from src.modules.content_processor.governor.block_classifier import classify_response
 from src.modules.content_processor.governor.escalation import ActionKind
 from src.modules.content_processor.governor.gates import detect_gates
+from src.modules.content_processor.governor.robots import BOT_PRODUCT_NAME, evaluate_robots
+from src.modules.content_processor.ledger.keys import resource_id_for, task_key
 from src.modules.content_processor.provenance import stamp_blocks
 from src.modules.content_processor.scheduler.capture_journal import CaptureJournal
+from src.modules.content_processor.scope.followups import mime_allowed
 from src.modules.content_processor.verify.gaps import gap_for_gate, gap_id_for
 from src.modules.content_processor.verify.reconcile import reconcile_source_vs_rendered
 from src.modules.content_processor.workers.ports import LedgerPort, ready_wait_s
 
-__all__ = ["Explorer", "RenderWorker", "Renderer"]
+__all__ = ["DEFERRED_FETCHES", "Explorer", "RenderWorker", "Renderer"]
+
+DEFERRED_FETCHES = "deferred_fetches"
+"""RENDER payload key: the FETCH tasks of images the browser is expected to capture."""
 
 _logger = get_logger("content_processor.render_worker")
 _HOOK_MARGIN_S = 15.0
@@ -230,6 +238,7 @@ class RenderWorker:
                 self._set_status(
                     task, resource, EntityStatus.PARTIAL, f"render_failed:{result.transport_error}"
                 )
+                self._settle_deferred(task, resource, None)
             return
 
         dom_ref = self._evidence.put(result.dom_html, "text/html")
@@ -275,6 +284,7 @@ class RenderWorker:
                         host_state.tier.value,
                         f"paid_tier_available:{action.proposed_tier.value}",
                     )
+            self._settle_deferred(task, resource, None)
             self._ledger.complete(task.id or 0, self._worker_id)
             return
 
@@ -340,6 +350,7 @@ class RenderWorker:
 
         host_state.record_success()
         self._ledger.save_host_state(tenant, host_state)
+        self._settle_deferred(task, resource, result)
         gates = detect_gates(result.dom_html, result.inner_text)
         gate_status: EntityStatus | None = None
         gate_reasons: list[str] = []
@@ -387,6 +398,189 @@ class RenderWorker:
         status = self._coverage_verdict(resource_id, status, reasons, evidence_ids, ignore=ignore)
         self._set_status(task, resource, status, ";".join(reasons), evidence_ids)
         self._ledger.complete(task.id or 0, self._worker_id)
+
+    # -- images kept from the browser's own loads --------------------------------
+
+    def _settle_deferred(self, task: Task, parent: Resource, result: RenderResult | None) -> None:
+        """Turn the images the browser loaded into resources; download the rest as before.
+
+        The RENDER task carries the FETCH tasks of the page's images. One the browser
+        downloaded (a complete 2xx answer that robots allow and that really is an
+        image) becomes a resource acquired at the browser tier with the same evidence,
+        edge and extraction task a download would have produced. Any other (not loaded,
+        cut short, no robots answer cached, not an image, or a render that failed or was
+        blocked) is handed to the download path unchanged, so nothing is lost.
+        """
+        raw = task.payload.get(DEFERRED_FETCHES) or []
+        if not raw:
+            return
+        deferred = [Task.model_validate(d) for d in raw]
+        fallback: list[Task] = []
+        counts = {"captured": 0, "downloaded_instead": 0, "excluded": 0, "already_known": 0}
+        by_url: dict[str, CapturedAsset] = {}
+        if result is not None:
+            for loaded in result.captured_assets:
+                by_url.setdefault(loaded.requested_url, loaded)
+                by_url.setdefault(loaded.final_url, loaded)
+        for fetch in deferred:
+            url = str(fetch.payload["requested_url"])
+            key = str(fetch.payload["schedule_key"])
+            if self._ledger.get_resource(resource_id_for(self._run_id, key)) is not None:
+                counts["already_known"] += 1  # another page already brought this image in
+                continue
+            asset = by_url.get(url)
+            if asset is None or asset.truncated or not 200 <= asset.status < 300:
+                fallback.append(fetch)
+                continue
+            verdict = self._robots_verdict(fetch.host, url)
+            if verdict is None:
+                fallback.append(fetch)  # robots not read yet for this host: let the download judge
+                continue
+            if not verdict.allowed:
+                self._exclude_asset(fetch, parent, verdict.reason)
+                counts["excluded"] += 1
+                continue
+            sniffed = sniff_media_type(asset.body, asset.content_type.split(";")[0] or None)
+            if not sniffed.startswith("image/"):
+                fallback.append(fetch)  # not the image the page promised (K15): download path
+                continue
+            if not mime_allowed(sniffed, self._scope.allowed_mime_families):
+                self._exclude_asset(fetch, parent, f"mime_not_allowed:{sniffed}")
+                counts["excluded"] += 1
+                continue
+            self._record_asset(fetch, parent, asset, sniffed, result)
+            counts["captured"] += 1
+        if fallback:
+            self._ledger.enqueue_followups(fallback)
+            counts["downloaded_instead"] = len(fallback)
+        self._ledger.record_summary(parent.resource_id, "browser_assets", counts)
+
+    def _robots_verdict(self, host: str, url: str) -> Any:
+        cached = self._ledger.get_robots(self._scope.tenant_id, host)
+        if cached is None:
+            return None
+        verdict = evaluate_robots(
+            url=url,
+            user_agent_token=BOT_PRODUCT_NAME,
+            policy=self._scope.robots_policy or RobotsPolicy.RESPECT,
+            robots_body=cached.body,
+            robots_status=cached.status,
+            exceptions=self._scope.authorization.robots_exceptions,
+        )
+        return None if verdict.source == "unreachable_disallow" else verdict
+
+    def _asset_resource(self, fetch: Task, parent: Resource) -> Resource:
+        key = str(fetch.payload["schedule_key"])
+        depth = int(fetch.payload.get("depth", 1))
+        resource = Resource(
+            resource_id=resource_id_for(self._run_id, key),
+            run_id=self._run_id,
+            requested_url=str(fetch.payload["requested_url"]),
+            schedule_key=key,
+            aliases=[],
+            mandatory=False,
+            attempt=1,
+        )
+        self._ledger.record_summary(
+            resource.resource_id,
+            "discovered_from",
+            {
+                "parent_resource_id": fetch.payload.get("parent_resource_id") or parent.resource_id,
+                "edge_kind": fetch.payload.get("edge_kind"),
+                "depth": depth,
+                "expected_mime": fetch.payload.get("expected_mime"),
+                "expected_mime_source": fetch.payload.get("expected_mime_source"),
+            },
+        )
+        return resource
+
+    def _exclude_asset(self, fetch: Task, parent: Resource, reason: str) -> None:
+        resource = self._asset_resource(fetch, parent)
+        resource.scope_decision = "excluded_by_policy"
+        self._upsert_asset(fetch, resource, EntityStatus.EXCLUDED_BY_POLICY, reason)
+
+    def _record_asset(
+        self,
+        fetch: Task,
+        parent: Resource,
+        asset: CapturedAsset,
+        sniffed: str,
+        result: RenderResult | None,
+    ) -> None:
+        resource = self._asset_resource(fetch, parent)
+        ref = self._evidence.put(asset.body, sniffed)
+        resource.final_url = asset.final_url
+        resource.http_status = asset.status
+        resource.declared_mime = asset.content_type.split(";")[0].strip() or None
+        resource.sniffed_mime = sniffed
+        resource.payload_bytes = len(asset.body)
+        resource.payload_sha256 = ref.sha256
+        leaf = asset.final_url.split("?", 1)[0].rsplit("/", 1)[-1]
+        resource.extension_hint = leaf.rsplit(".", 1)[-1].lower() if "." in leaf else None
+        earlier = result.captured_earlier_at if result is not None else None
+        resource.acquired_at = earlier or datetime.now(UTC)
+        resource.acquired_at_tier = AccessTier(self._renderer.tier_name)
+        self._ledger.record_summary(
+            resource.resource_id,
+            "browser_capture",
+            {"parent_resource_id": parent.resource_id, "tier": self._renderer.tier_name},
+        )
+        owner = next(
+            (
+                r.resource_id
+                for r in self._ledger.list_resources(self._run_id)
+                if r.payload_sha256 == ref.sha256 and r.resource_id != resource.resource_id
+            ),
+            None,
+        )
+        if owner is not None:
+            # Same bytes already acquired under another address: one extraction (A-1).
+            self._upsert_asset(
+                fetch, resource, EntityStatus.EXTRACTED_UNVERIFIED, f"duplicate_payload_of:{owner}"
+            )
+            return
+        self._upsert_asset(
+            fetch, resource, EntityStatus.IN_PROGRESS, "acquired:awaiting_extraction;from_browser"
+        )
+        self._ledger.enqueue_followups(
+            [
+                Task(
+                    run_id=self._run_id,
+                    kind=TaskKind.EXTRACT_IMAGE,
+                    idempotency_key=task_key(
+                        self._run_id, TaskKind.EXTRACT_IMAGE, resource.schedule_key
+                    ),
+                    host=fetch.host,
+                    priority=fetch.priority,
+                    max_attempts=2,
+                    payload={
+                        "resource_id": resource.resource_id,
+                        "sha256": ref.sha256,
+                        "requested_url": resource.requested_url,
+                        "schedule_key": resource.schedule_key,
+                    },
+                )
+            ]
+        )
+
+    def _upsert_asset(
+        self, fetch: Task, resource: Resource, status: EntityStatus, reason: str
+    ) -> None:
+        old = resource.status.value
+        resource.status = status
+        resource.status_reason = reason
+        self._ledger.upsert_resource(resource, fetch.host)
+        self._ledger.append_event(
+            RunEvent(
+                run_id=self._run_id,
+                entity_type="resource",
+                entity_id=resource.resource_id,
+                old_state=old,
+                new_state=status.value,
+                reason=reason,
+                attempt=1,
+            )
+        )
 
     # -- coverage ---------------------------------------------------------------
 

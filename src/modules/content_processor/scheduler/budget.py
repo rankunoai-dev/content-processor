@@ -184,6 +184,7 @@ class MeteredRenderer:
         else:
             result = await self._inner.render(url, on_page=on_page, asset_store=asset_store)
         self._meter.bytes_received += len(result.dom_html) + len(result.screenshot_jpeg)
+        self._meter.bytes_received += sum(len(a.body) for a in result.captured_assets)
         return result
 
     def __getattr__(self, name: str) -> Any:

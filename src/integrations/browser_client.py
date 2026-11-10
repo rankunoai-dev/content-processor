@@ -297,6 +297,13 @@ class RenderLimits(StrictModel):
     )
     max_response_body_bytes: int = Field(default=2 * 1024 * 1024, ge=1)
     max_captured_responses: int = Field(default=50, ge=0)
+    max_asset_bytes: int = Field(
+        default=20 * 1024 * 1024,
+        ge=1,
+        description="An image the page loaded is kept from the browser's own download up "
+        "to this size; a larger one is downloaded separately as before",
+    )
+    max_captured_assets: int = Field(default=400, ge=0)
     screenshot_quality: int = Field(default=70, ge=10, le=100)
     full_page_screenshot: bool = True
 
@@ -309,6 +316,22 @@ class CapturedResponse(StrictModel):
     content_type: str
     body: bytes = b""
     truncated: bool = False
+
+
+class CapturedAsset(StrictModel):
+    """An image the browser downloaded while rendering, kept so it is not fetched twice.
+
+    `requested_url` is the address the page asked for (what its `<img>` says), before
+    any redirect; `final_url` is where the bytes came from.
+    """
+
+    requested_url: str
+    final_url: str
+    status: int
+    content_type: str
+    body: bytes = b""
+    truncated: bool = False
+    resource_type: str = "image"
 
 
 class RenderResult(StrictModel):
@@ -329,6 +352,10 @@ class RenderResult(StrictModel):
     failed_requests: list[str] = Field(default_factory=list)
     blocked_requests: list[str] = Field(default_factory=list)
     captured_responses: list[CapturedResponse] = Field(default_factory=list)
+    captured_assets: list[CapturedAsset] = Field(
+        default_factory=list,
+        description="Images the browser downloaded for this page, one per address",
+    )
     settle: dict[str, Any] = Field(default_factory=dict)
     annotation: dict[str, int] = Field(default_factory=dict)
     overlay_html: str = ""
@@ -458,6 +485,14 @@ class BrowserRenderer:
         failed: list[str] = []
         blocked: list[str] = []
         captured: list[CapturedResponse] = []
+        assets: list[CapturedAsset] = []
+        asset_urls: set[str] = set()
+        pending: set[asyncio.Future[None]] = set()
+
+        def track(coro: Any) -> None:
+            fut = asyncio.ensure_future(coro)
+            pending.add(fut)
+            fut.add_done_callback(pending.discard)
 
         async def on_route(route: Route, request: Request) -> None:
             host = urlsplit(request.url).hostname or ""
@@ -499,6 +534,38 @@ class BrowserRenderer:
                 )
             )
 
+        async def on_asset(response: Response) -> None:
+            # Every image the page loads passes through here: keeping the bytes means the
+            # engine never has to download the same picture again on its own.
+            if len(assets) >= self._limits.max_captured_assets:
+                return
+            request = response.request
+            if request.resource_type != "image" or not 200 <= response.status < 300:
+                return
+            first = request
+            while first.redirected_from is not None:
+                first = first.redirected_from
+            if first.url in asset_urls:
+                return
+            try:
+                body = await response.body()
+            except PlaywrightError:
+                return
+            if first.url in asset_urls:
+                return
+            asset_urls.add(first.url)
+            cap = self._limits.max_asset_bytes
+            assets.append(
+                CapturedAsset(
+                    requested_url=first.url,
+                    final_url=response.url,
+                    status=response.status,
+                    content_type=(response.headers.get("content-type") or "").lower()[:100],
+                    body=body[:cap],
+                    truncated=len(body) > cap,
+                )
+            )
+
         await context.route("**/*", on_route)
         page = await context.new_page()
         page.on(
@@ -506,7 +573,12 @@ class BrowserRenderer:
         )
         page.on("pageerror", lambda e: console_errors.append(f"pageerror:{str(e)[:300]}"))
         page.on("requestfailed", lambda r: failed.append(f"{r.url} ({r.failure or 'failed'})"))
-        page.on("response", lambda r: asyncio.ensure_future(on_response(r)))
+
+        def on_any_response(response: Response) -> None:
+            track(on_response(response))
+            track(on_asset(response))
+
+        page.on("response", on_any_response)
 
         try:
             response = await page.goto(
@@ -549,6 +621,10 @@ class BrowserRenderer:
                 except Exception as exc:  # noqa: BLE001 - a hook must not lose the base capture
                     console_errors.append(f"page_hook_failed:{type(exc).__name__}:{str(exc)[:120]}")
 
+            if pending:
+                # Bodies still being read (late images from the exploration's scrolling).
+                await asyncio.wait(list(pending), timeout=5.0)
+
             hops: list[str] = []
             headers: dict[str, str] = {}
             status: int | None = None
@@ -575,6 +651,7 @@ class BrowserRenderer:
                 failed_requests=failed,
                 blocked_requests=blocked,
                 captured_responses=captured,
+                captured_assets=assets,
                 settle=settle,
                 annotation=annotation,
                 overlay_html=overlay_html,

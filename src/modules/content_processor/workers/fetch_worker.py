@@ -64,7 +64,11 @@ from src.modules.content_processor.governor.escalation import (
     escalates,
 )
 from src.modules.content_processor.governor.gates import detect_gates
-from src.modules.content_processor.governor.robots import crawl_delay_for, evaluate_robots
+from src.modules.content_processor.governor.robots import (
+    BOT_PRODUCT_NAME,
+    crawl_delay_for,
+    evaluate_robots,
+)
 from src.modules.content_processor.governor.spend import Approval, apply_approval
 from src.modules.content_processor.ledger.keys import resource_id_for, task_key
 from src.modules.content_processor.provenance import stamp_blocks
@@ -87,13 +91,15 @@ from src.modules.content_processor.scope.followups import (
 from src.modules.content_processor.scope.normalize import InvalidInputUrl, normalize_url
 from src.modules.content_processor.verify.gaps import gap_for_gate, gap_id_for
 from src.modules.content_processor.workers.ports import LedgerPort, RobotsCache, ready_wait_s
-from src.modules.content_processor.workers.render_worker import RENDER_MAX_ATTEMPTS
+from src.modules.content_processor.workers.render_worker import (
+    DEFERRED_FETCHES,
+    RENDER_MAX_ATTEMPTS,
+)
 
 __all__ = ["FetchWorker", "extraction_kind_for", "user_agent_for", "visitor_user_agent"]
 
 _logger = get_logger("content_processor.fetch_worker")
 
-BOT_PRODUCT_NAME = "RankunoContentBot"
 _CHROME_UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
@@ -124,6 +130,12 @@ def _retry_after_seconds(headers: dict[str, str]) -> float | None:
     except (TypeError, ValueError):
         return None
     return max(0.0, (when - datetime.now(UTC)).total_seconds())
+
+
+def is_browser_capturable(task: Task) -> bool:
+    """True for a FETCH of an embedded image: the browser loads it when it renders."""
+    expected = str(task.payload.get("expected_mime") or "")
+    return task.payload.get("edge_kind") == "embeds" and expected.startswith("image/")
 
 
 def extraction_kind_for(media_type: str) -> TaskKind | None:
@@ -578,6 +590,14 @@ class FetchWorker:
             },
         )
         children = [self._followup_task(task, resource, c, depth) for c in plan.followups]
+        if self._browser_handoff:
+            # The browser downloads every image when it renders the page, so the images
+            # ride along with the RENDER task and are kept from that one visit; any the
+            # browser does not load falls back to a download of its own afterwards.
+            deferred = [c for c in children if is_browser_capturable(c)]
+            if deferred:
+                children = [c for c in children if c not in deferred]
+                render.payload[DEFERRED_FETCHES] = [c.model_dump(mode="json") for c in deferred]
         self._ledger.enqueue_followups([render, *children])
 
     def _followup_task(

@@ -20,6 +20,10 @@ __all__ = ["MAX_CRAWL_DELAY_S", "RobotsVerdict", "crawl_delay_for", "evaluate_ro
 MAX_CRAWL_DELAY_S = 30.0
 
 
+BOT_PRODUCT_NAME = "RankunoContentBot"
+"""The user-agent token robots.txt rules are matched against."""
+
+
 class RobotsVerdict(StrictModel):
     """Outcome of applying robots policy to one URL."""
 
