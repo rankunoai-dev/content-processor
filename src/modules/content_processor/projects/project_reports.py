@@ -31,8 +31,10 @@ stderr tail is kept next to the bundles (`reports/<stamp>.log`, or
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
+import tempfile
 import threading
 import zipfile
 from collections.abc import Sequence
@@ -554,10 +556,21 @@ def zip_project_report(store: ProjectStore, project_id: str, stamp: str) -> Path
         return None
     folder = _reports_root(store, project_id) / stamp
     archive = folder / f"{_UNSAFE.sub('_', project_id)}_{stamp}_reports.zip"
-    if not archive.is_file():
-        tmp = archive.with_name(archive.name + ".tmp")
-        with zipfile.ZipFile(tmp, "w", compression=zipfile.ZIP_DEFLATED) as bundle:
-            for name, path in files.items():
-                bundle.write(path, arcname=name)
-        tmp.replace(archive)
+    # One build at a time per project, through a temporary file of its own: two first
+    # downloads at once never share one, and the second finds the archive made.
+    with _lock(project_id):
+        if archive.is_file():
+            return archive
+        fd, tmp_name = tempfile.mkstemp(dir=folder, prefix=f".{archive.name}.", suffix=".tmp")
+        tmp = Path(tmp_name)
+        try:
+            with (
+                os.fdopen(fd, "wb") as handle,
+                zipfile.ZipFile(handle, "w", compression=zipfile.ZIP_DEFLATED) as bundle,
+            ):
+                for name, path in files.items():
+                    bundle.write(path, arcname=name)
+            os.replace(tmp, archive)
+        finally:
+            tmp.unlink(missing_ok=True)
     return archive

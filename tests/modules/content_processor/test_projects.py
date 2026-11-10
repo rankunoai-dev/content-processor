@@ -504,6 +504,106 @@ def test_cancel_and_delete_need_the_owner(app_env):
     assert client.get("/api/projects").json() == []
 
 
+def test_renaming_to_nothing_is_refused_not_an_error(app_env):
+    client, _, _, _, _ = app_env
+    project_id, token = _create(client)
+    blank = _post(client, f"/api/projects/{project_id}/update", {"name": "   "}, token)
+    assert blank.status_code == 422 and "name" in blank.json()["detail"]
+    ok = _post(client, f"/api/projects/{project_id}/update", {"name": " Print 2 "}, token)
+    assert ok.status_code == 200 and ok.json()["name"] == "Print 2"
+
+
+class FakeSpaceStore:
+    """A website's knowledge space: built or not, and whether it was emptied."""
+
+    reset_spaces: list[str] = []
+    closed_spaces: list[str] = []
+
+    def __init__(self, namespace: str, built: bool) -> None:
+        self.namespace = namespace
+        self.built = built
+
+    def meta(self) -> dict[str, str]:
+        return {"model": "bge-m3"} if self.built else {}
+
+    def reset(self) -> None:
+        FakeSpaceStore.reset_spaces.append(self.namespace)
+
+    def close(self) -> None:
+        FakeSpaceStore.closed_spaces.append(self.namespace)
+
+
+def test_deleting_a_project_removes_the_other_modules_data_and_its_knowledge(app_env, tmp_path):
+    from src.modules.content_processor.webapi.projects_api import KnowledgeAccess
+
+    client, store, runner, _, _ = app_env
+    project_id, _ = _create(client)
+    other_id, _ = _create(client)
+    root = Path(store.root)
+    for module in ("theming", "monitoring", "gaps", "research"):
+        for pid in (project_id, other_id):
+            (root / module / pid).mkdir(parents=True)
+            (root / module / pid / "latest.json").write_text("{}", encoding="utf-8")
+    (root / "mcp" / "ledgers").mkdir(parents=True)
+    (root / "mcp" / "ledgers" / f"{project_id}.json").write_text("{}", encoding="utf-8")
+    built = runner.namespace(project_id, "flynn-s")
+    access = KnowledgeAccess(
+        open_store=lambda space: FakeSpaceStore(space.namespace, space.namespace == built),  # type: ignore[arg-type,return-value]
+        embedder_for=lambda model: None,  # type: ignore[arg-type,return-value]
+    )
+    exports = tmp_path / "exports3"
+    exports.mkdir()
+    signer = TokenSigner.from_file(tmp_path / "secret3.key")
+    app = TestClient(
+        create_app(exports, projects=(store, runner, signer), knowledge=access),
+        base_url="http://127.0.0.1",
+    )
+    token = signer.issue(project_id)[0]
+    FakeSpaceStore.reset_spaces.clear()
+    FakeSpaceStore.closed_spaces.clear()
+
+    gone = _post(app, f"/api/projects/{project_id}/delete", {"password": PASSWORD}, token)
+    assert gone.status_code == 200, gone.text
+
+    for module in ("theming", "monitoring", "gaps", "research"):
+        assert not (root / module / project_id).exists(), module
+        assert (root / module / other_id / "latest.json").is_file(), "other projects untouched"
+    assert not (root / "mcp" / "ledgers" / f"{project_id}.json").exists()
+    assert FakeSpaceStore.reset_spaces == [built], "only a space that was built is emptied"
+    assert sorted(FakeSpaceStore.closed_spaces) == sorted(
+        [built, runner.namespace(project_id, "xerox")]
+    )
+    assert [p["project_id"] for p in app.get("/api/projects").json()] == [other_id]
+
+
+def test_two_downloads_at_once_build_the_same_archive_safely(tmp_path: Path):
+    from src.modules.content_processor.webapi.projects_api import _zip
+
+    files = {}
+    for n in range(3):
+        path = tmp_path / f"report_{n}.csv"
+        path.write_text("url\n" * 1000, encoding="utf-8")
+        files[path.name] = path
+    archive = tmp_path / "run" / "reports.zip"
+    archive.parent.mkdir()
+    errors: list[Exception] = []
+
+    def go() -> None:
+        try:
+            _zip(archive, files)
+        except Exception as exc:  # noqa: BLE001 - the test collects every failure
+            errors.append(exc)
+
+    threads = [threading.Thread(target=go) for _ in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(20)
+    assert not errors, errors
+    assert sorted(zipfile.ZipFile(archive).namelist()) == sorted(files)
+    assert [p.name for p in archive.parent.iterdir()] == ["reports.zip"], "no temporary file left"
+
+
 def test_a_stopped_run_is_continued_by_its_owner(app_env):
     client, store, runner, batches, _ = app_env
     project_id, token = _create(client)

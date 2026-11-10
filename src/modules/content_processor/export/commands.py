@@ -137,4 +137,9 @@ def register(subparsers: Any) -> None:
     parser.add_argument("--nli-endpoint", default=None, help="local OpenAI-compatible URL")
     parser.add_argument("--nli-model", default=None, help="model name at the endpoint")
     parser.add_argument("--decisions", default=None, help="earlier R4 CSV/JSONL to carry forward")
+    parser.add_argument(
+        "--exit-with-parent",
+        action="store_true",
+        help="stop when the program that started this one is gone",
+    )
     parser.set_defaults(func=cmd_report)

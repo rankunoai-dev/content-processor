@@ -355,7 +355,13 @@ def _wait(check: Callable[[], bool], timeout_s: float = 15) -> None:
 
 
 class Setup:
-    def __init__(self, tmp_path: Path, urls: int = 4) -> None:
+    def __init__(
+        self,
+        tmp_path: Path,
+        urls: int = 4,
+        report: Callable[[Path, Path], int] = _report,
+        knowledge: Callable[[Path, str], tuple[bool, str]] = lambda _r, _n: (True, "ok"),
+    ) -> None:
         self.store = ProjectStore(tmp_path / "app_data")
         self.calls: list[list[str]] = []
         self.script: Script = lambda _u, _o, _c: 0
@@ -373,12 +379,19 @@ class Setup:
         self.runner = ScrapeRunner(
             self.store,
             command=self._command,
-            report=_report,
-            knowledge=lambda _r, _n: (True, "ok"),
+            report=report,
+            knowledge=knowledge,
             batch_size=2,
             attempts=2,
         )
         self.runner.start()
+
+    def folder(self, run_id: str) -> Path:
+        return self.store.run_dir(self.project, self.site, run_id)
+
+    def merged(self, run_id: str) -> dict[str, dict[str, Any]]:
+        text = (self.folder(run_id) / f"{run_id}.records.jsonl").read_text("utf-8")
+        return {r["requested_url"]: r for r in map(json.loads, text.splitlines())}
 
     def _command(self, scope: Path, out: Path, cancel: threading.Event) -> int:
         urls = json.loads(scope.read_text("utf-8"))["input_urls"]
@@ -520,6 +533,262 @@ def test_a_damaged_results_file_counts_as_pages_not_done(tmp_path: Path):
     setup.wait_status(run.run_id, "finished")
     assert setup.calls[1] == [setup.urls[1]], "only the page whose line was damaged"
     assert setup.state(run.run_id).results == {"VERIFIED_WITHIN_SCOPE": 2}
+
+
+def _rows(out: Path, rows: list[dict[str, Any]]) -> None:
+    out.with_suffix(".records.jsonl").write_text(
+        "".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8"
+    )
+
+
+def _out_of_time(url: str) -> dict[str, Any]:
+    """The record of a page whose batch hit its runtime budget (as the live batch wrote it)."""
+    return {
+        "requested_url": url,
+        "badge": "PARTIAL",
+        "resource_status": "BUDGET_EXHAUSTED",
+        "resource_status_reason": "budget_exhausted:runtime",
+    }
+
+
+def test_a_page_its_batch_ran_out_of_time_for_is_tried_again(tmp_path: Path):
+    setup = Setup(tmp_path, urls=2)
+    first, second = setup.urls
+    done_before_retry: list[int] = []
+
+    def script(urls: list[str], out: Path, _c: threading.Event) -> int:
+        if out.name.endswith("_a1.json"):
+            _rows(
+                out,
+                [_out_of_time(first), {"requested_url": second, "badge": "VERIFIED_WITHIN_SCOPE"}],
+            )
+            return 0
+        done_before_retry.append(setup.state(out.parent.name).pages_done)
+        return _done(urls, out, _c)
+
+    setup.script = script
+    run = setup.runner.submit(setup.project, setup.site, started_by="G")
+    setup.wait_status(run.run_id, "finished")
+    assert setup.calls == [[first, second], [first]], "the page out of time gets the next try"
+    assert done_before_retry == [1], "not counted as done while a try is left"
+    assert setup.state(run.run_id).results == {"VERIFIED_WITHIN_SCOPE": 2}
+    kept = setup.merged(run.run_id)[first]
+    assert kept["badge"] == "VERIFIED_WITHIN_SCOPE" and "resource_status" not in kept
+
+
+def test_a_page_out_of_time_on_every_try_is_kept_as_it_is_and_retried_when_continued(
+    tmp_path: Path,
+):
+    setup = Setup(tmp_path, urls=2)
+    first, second = setup.urls
+    setup.script = lambda urls, out, _c: (
+        _rows(
+            out,
+            [
+                _out_of_time(u) if u == first else {"requested_url": u, "badge": "PARTIAL"}
+                for u in urls
+            ],
+        )
+        or 0
+    )
+    run = setup.runner.submit(setup.project, setup.site, started_by="G")
+    setup.wait_status(run.run_id, "finished")
+    state = setup.state(run.run_id)
+    assert setup.calls == [[first, second], [first]]
+    assert state.pages_done == 2 and state.results == {"PARTIAL": 1, "BUDGET_EXHAUSTED": 1}
+    assert setup.merged(run.run_id)[first]["resource_status"] == "BUDGET_EXHAUSTED"
+
+    setup.store.save_run(state.model_copy(update={"status": "cancelled"}))
+    setup.calls.clear()
+    setup.script = _done
+    setup.runner.resume(setup.project, setup.site, run.run_id)
+    setup.wait_status(run.run_id, "finished")
+    assert setup.calls == [[first]], "continuing gives it another try"
+    assert setup.state(run.run_id).results == {"PARTIAL": 1, "VERIFIED_WITHIN_SCOPE": 1}
+
+
+def test_batches_done_never_goes_back_when_a_scrape_is_continued(tmp_path: Path):
+    setup = Setup(tmp_path, urls=4)
+    setup.script = lambda urls, out, _c: (
+        _write(
+            out,
+            dict.fromkeys(urls, "BLOCKED" if urls[0] == setup.urls[0] else "VERIFIED_WITHIN_SCOPE"),
+        )
+        or 0
+    )
+    run = setup.runner.submit(setup.project, setup.site, started_by="G")
+    setup.wait_status(run.run_id, "finished")
+    assert setup.state(run.run_id).batches_done == 2
+    setup.store.save_run(setup.state(run.run_id).model_copy(update={"status": "cancelled"}))
+
+    seen: list[int] = []
+    real_save = setup.store.save_run
+
+    def recording(state: Any) -> None:
+        seen.append(state.batches_done)
+        real_save(state)
+
+    setup.store.save_run = recording  # type: ignore[method-assign]
+    setup.script = _done
+    setup.runner.resume(setup.project, setup.site, run.run_id)
+    setup.wait_status(run.run_id, "finished")
+    assert setup.calls[-1] == setup.urls[:2], "batch 1 was tried again"
+    assert min(seen) == 2, f"batches done went back: {seen}"
+    assert setup.state(run.run_id).results == {"VERIFIED_WITHIN_SCOPE": 4}
+
+
+def test_a_page_found_on_the_way_keeps_its_best_try_too(tmp_path: Path):
+    setup = Setup(tmp_path, urls=2)
+    first, second = setup.urls
+    found = "https://alpha.com/brochure.pdf"
+
+    def script(urls: list[str], out: Path, _c: threading.Event) -> int:
+        if out.name.endswith("_a1.json"):
+            _rows(
+                out,
+                [
+                    {"requested_url": first, "badge": "VERIFIED_WITHIN_SCOPE"},
+                    {"requested_url": second, "badge": "RUNNING"},
+                    {"requested_url": found, "badge": "FAILED"},
+                ],
+            )
+        else:
+            _rows(
+                out,
+                [
+                    {"requested_url": second, "badge": "VERIFIED_WITHIN_SCOPE"},
+                    {"requested_url": found, "badge": "VERIFIED_WITHIN_SCOPE"},
+                ],
+            )
+        return 0
+
+    setup.script = script
+    run = setup.runner.submit(setup.project, setup.site, started_by="G")
+    setup.wait_status(run.run_id, "finished")
+    merged = setup.merged(run.run_id)
+    assert merged[found]["badge"] == "VERIFIED_WITHIN_SCOPE"
+    assert list(merged) == [first, second, found], "supplied pages first, then the found ones"
+
+
+def test_a_finished_scrape_leaves_nothing_behind_in_memory(tmp_path: Path):
+    setup = Setup(tmp_path, urls=2)
+    setup.script = _done
+    run = setup.runner.submit(setup.project, setup.site, started_by="G")
+    setup.wait_status(run.run_id, "finished")
+    folder = setup.folder(run.run_id)
+    assert run.run_id not in setup.runner._cancel  # noqa: SLF001 - what the fix is about
+    assert not [p for p in setup.runner._badge_cache if p.parent == folder]  # noqa: SLF001
+
+
+def test_a_cancel_while_the_reports_are_written_ends_the_scrape_cancelled(tmp_path: Path):
+    holder: dict[str, str] = {}
+    cancelled_once = threading.Event()
+
+    def report(records: Path, out_dir: Path) -> int:
+        if not cancelled_once.is_set():
+            cancelled_once.set()
+            setup.runner.cancel(setup.project, setup.site, holder["id"])
+        return _report(records, out_dir)
+
+    setup = Setup(tmp_path, urls=2, report=report)
+    setup.script = _done
+    run = setup.runner.submit(setup.project, setup.site, started_by="G")
+    holder["id"] = run.run_id
+    setup.wait_status(run.run_id, "cancelled", "finished")
+    state = setup.state(run.run_id)
+    assert state.status == "cancelled" and not state.reports_ready
+    assert "can be continued" in state.message
+
+    setup.runner.resume(setup.project, setup.site, run.run_id)
+    setup.wait_status(run.run_id, "finished")
+    assert setup.state(run.run_id).reports_ready
+
+
+def test_a_cancel_while_the_knowledge_space_is_built_ends_the_scrape_cancelled(tmp_path: Path):
+    holder: dict[str, str] = {}
+
+    def knowledge(_records: Path, _namespace: str) -> tuple[bool, str]:
+        setup.runner.cancel(setup.project, setup.site, holder["id"])
+        return True, "ok"
+
+    setup = Setup(tmp_path, urls=2, knowledge=knowledge)
+    setup.script = _done
+    run = setup.runner.submit(setup.project, setup.site, started_by="G")
+    holder["id"] = run.run_id
+    setup.wait_status(run.run_id, "cancelled", "finished")
+    state = setup.state(run.run_id)
+    assert state.status == "cancelled" and state.reports_ready
+    assert state.knowledge_status == "" and "cancelled" in state.knowledge_message
+
+
+# -- the report and knowledge steps run like batches: watched, stopped, logged ----
+
+_STEP = """
+import sys, time
+sys.stderr.write("step warning line\\n")
+sys.stderr.flush()
+if "--fast" in sys.argv:
+    sys.exit(3)
+time.sleep(30)
+"""
+
+
+@pytest.fixture
+def fake_cli(monkeypatch: pytest.MonkeyPatch) -> None:
+    from src.modules.content_processor.projects import runner as module
+
+    monkeypatch.setattr(module, "_CLI", [sys.executable, "-c", _STEP])
+
+
+def test_a_steps_failure_is_kept_in_the_runs_log(tmp_path: Path, fake_cli: None):
+    from src.modules.content_processor.projects.runner import _run_cli
+
+    log = tmp_path / "run" / "reports.log"
+    code, note = _run_cli(["report", "--fast"], cancel=None, timeout_s=60, log=log, step="report")
+    assert code == 3 and note == "step warning line"
+    text = log.read_text("utf-8")
+    assert "== report: exit 3" in text and "step warning line" in text
+    assert [p.name for p in log.parent.iterdir()] == ["reports.log"], "no part file left"
+
+
+def test_a_cancel_stops_a_running_step(tmp_path: Path, fake_cli: None):
+    from src.modules.content_processor.projects.runner import _run_cli
+
+    cancel = threading.Event()
+    threading.Timer(0.5, cancel.set).start()
+    started = time.monotonic()
+    code, note = _run_cli(
+        ["stamp"], cancel=cancel, timeout_s=60, log=tmp_path / "knowledge.log", step="stamp"
+    )
+    assert code == -1 and "cancelled" in note
+    assert time.monotonic() - started < 15
+    assert "exit -1 stopped: the scrape was cancelled" in (tmp_path / "knowledge.log").read_text()
+
+
+def test_a_step_that_runs_too_long_is_stopped(tmp_path: Path, fake_cli: None):
+    from src.modules.content_processor.projects.runner import _run_cli
+
+    code, note = _run_cli(["index"], cancel=None, timeout_s=0, log=tmp_path / "k.log", step="index")
+    assert code == -2 and "stopped after 0 s" in note
+
+
+def test_the_default_steps_are_watched_and_logged(
+    tmp_path: Path, fake_cli: None, monkeypatch: pytest.MonkeyPatch
+):
+    from src.modules.content_processor.projects import runner as module
+
+    monkeypatch.setattr(module, "REPORT_TIMEOUT_S", 0.0)
+    records = tmp_path / "run" / "r.records.jsonl"
+    records.parent.mkdir()
+    records.write_text("", encoding="utf-8")
+    assert module._report_subprocess(records, tmp_path / "run" / "reports") == -2
+    assert "== report: exit -2" in (records.parent / "reports.log").read_text("utf-8")
+    stopped = threading.Event()
+    stopped.set()
+    assert module._knowledge_subprocess(records, "ns", cancel=stopped) == (
+        False,
+        "not built: the scrape was cancelled",
+    )
 
 
 def test_progress_reads_each_results_file_once(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
