@@ -6,7 +6,7 @@ changes:
 
 | Budget | Measured as |
 |---|---|
-| `max_runtime_s` | wall-clock seconds since the meter started |
+| `max_runtime_s` | seconds the run was awake and working (see below) |
 | `max_requests` | calls to a fetcher's `fetch` (robots included) and the renderer's `render` |
 | `max_bytes` | bytes received: `FetchResult.received_bytes` plus rendered DOM and screenshot |
 | `max_evidence_bytes` | bytes newly written to disk by the evidence store, after packing |
@@ -18,6 +18,16 @@ byte budget by at most that task's size, which the fetch limits already cap.
 The meter covers one invocation of the engine. A durable run resumed by a
 later `work` command starts its runtime, request and evidence counts again;
 bytes are seeded from what the ledger recorded for the run's resources.
+
+Runtime is not the wall clock. `time.monotonic()` keeps counting while the
+computer sleeps (on Windows it does), so a batch that was asleep for a night
+would wake up over its runtime budget and end its remaining pages
+BUDGET_EXHAUSTED. The meter therefore adds time in the increments it observes,
+each time it is consulted, and drops any single increment longer than
+`SLEEP_GAP_S`: the engine consults the meter between tasks, and nothing in a
+batch blocks that long between two consultations (the longest legitimate waits
+are one wait for held tasks, `--max-wait` 360 s, plus one render of up to
+`max_page_time_s` 150 s). Dropped gaps are reported as `runtime_s.excluded_s`.
 """
 
 from __future__ import annotations
@@ -32,6 +42,7 @@ from src.integrations.http_client import FetchResult
 from src.modules.content_processor.contracts import Budgets
 
 __all__ = [
+    "SLEEP_GAP_S",
     "BudgetMeter",
     "BudgetName",
     "MeteredEvidenceStore",
@@ -40,6 +51,9 @@ __all__ = [
 ]
 
 BudgetName = Literal["runtime", "requests", "bytes", "evidence_bytes"]
+
+SLEEP_GAP_S = 600.0
+"""A single unobserved stretch longer than this is the computer asleep, not the run working."""
 
 
 class BudgetMeter:
@@ -55,15 +69,36 @@ class BudgetMeter:
         """Start the runtime clock now; `seed_bytes` carries bytes already spent."""
         self.budgets = budgets
         self._clock = clock
-        self._started = clock()
+        self._last_tick = clock()
+        self._used_s = 0.0
+        self._excluded_s = 0.0
         self.requests = 0
         self.bytes_received = seed_bytes
         self.evidence_bytes = 0
 
+    def _tick(self) -> None:
+        """Credit the time since the last look; a gap longer than `SLEEP_GAP_S` was sleep."""
+        now = self._clock()
+        gap = now - self._last_tick
+        self._last_tick = now
+        if gap <= 0:
+            return
+        if gap > SLEEP_GAP_S:
+            self._excluded_s += gap
+        else:
+            self._used_s += gap
+
     @property
     def elapsed_s(self) -> float:
-        """Seconds since the meter started."""
-        return self._clock() - self._started
+        """Seconds the run has been working since the meter started (sleep left out)."""
+        self._tick()
+        return self._used_s
+
+    @property
+    def excluded_s(self) -> float:
+        """Seconds left out of the runtime because the computer was asleep."""
+        self._tick()
+        return self._excluded_s
 
     def remaining_runtime_s(self) -> float:
         """Seconds left before the runtime budget; never negative."""
@@ -86,7 +121,11 @@ class BudgetMeter:
         """Used and limit per budget, for run reports."""
         b = self.budgets
         return {
-            "runtime_s": {"used": round(self.elapsed_s, 3), "limit": b.max_runtime_s},
+            "runtime_s": {
+                "used": round(self.elapsed_s, 3),
+                "limit": b.max_runtime_s,
+                "excluded_s": round(self.excluded_s, 3),
+            },
             "requests": {"used": self.requests, "limit": b.max_requests},
             "bytes": {"used": self.bytes_received, "limit": b.max_bytes},
             "evidence_bytes": {"used": self.evidence_bytes, "limit": b.max_evidence_bytes},
