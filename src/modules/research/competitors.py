@@ -12,8 +12,10 @@ gap analysis and Claude even before anyone adds them to the project:
 Suggestions are saved per project (`<app data>/research/<project>/competitors.json`)
 and merged on every new pull or import: figures are refreshed, the sources and the
 keywords add up, and a decision (added or dismissed) is kept. The client's own
-websites are never suggested. A suggestion is only data: nothing is scraped or paid
-for until a person adds it to the project as a competitor.
+websites are never suggested, and neither is a website that is a client's website
+(a sister brand) in any other project: the client's websites are always the
+client's side, across all projects. A suggestion is only data: nothing is scraped
+or paid for until a person adds it to the project as a competitor.
 """
 
 from __future__ import annotations
@@ -43,9 +45,11 @@ __all__ = [
     "CompetitorsStore",
     "SuggestionSource",
     "SuggestionStatus",
+    "client_domains_everywhere",
     "domain_of",
     "from_competitor_rows",
     "from_search_results",
+    "is_client_domain",
     "merge_suggestions",
     "read_competitors_csv",
     "with_project_status",
@@ -215,8 +219,26 @@ def _project_domains(project: ProjectRecord) -> tuple[list[str], dict[str, str]]
     return client, competitors
 
 
-def _is_client(domain: str, client: list[str]) -> bool:
+def client_domains_everywhere(projects: Iterable[ProjectRecord]) -> list[str]:
+    """Every address that is a client website in any project (the client's side everywhere).
+
+    A client's websites and brands are never competitors of one another, whichever
+    project registered them, so none of them may be suggested as a competitor.
+    """
+    out: list[str] = []
+    for project in projects:
+        for site in project.sites:
+            if site.role == "client":
+                out.extend(a for a in site.domains if a not in out)
+    return out
+
+
+def is_client_domain(domain: str, client: Iterable[str]) -> bool:
+    """True when the domain is, or lies inside, one of the client addresses."""
     return any(addresses_overlap(domain, a) or addresses_overlap(a, domain) for a in client)
+
+
+_is_client = is_client_domain
 
 
 def _site_of(domain: str, competitors: Mapping[str, str]) -> str | None:
@@ -250,9 +272,17 @@ def _rank(s: CompetitorSuggestion) -> tuple[int, float, int, int, str]:
     return (order, -(s.relevance or 0.0), -s.common_keywords, -s.search_results, s.domain)
 
 
-def with_project_status(book: CompetitorBook, project: ProjectRecord) -> CompetitorBook:
-    """The book against the project as it is now: client websites dropped, added ones marked."""
+def with_project_status(
+    book: CompetitorBook, project: ProjectRecord, other_clients: Iterable[str] = ()
+) -> CompetitorBook:
+    """The book against the project as it is now: client websites dropped, added ones marked.
+
+    `other_clients` are addresses that are a client's website in any project (see
+    `client_domains_everywhere`): they are dropped too, even when this project lists
+    one of them as a competitor.
+    """
     client, competitors = _project_domains(project)
+    client = [*client, *other_clients]
     kept: list[CompetitorSuggestion] = []
     for s in book.suggestions:
         if _is_client(s.domain, client):
@@ -277,6 +307,7 @@ def merge_suggestions(
     found: Iterable[CompetitorSuggestion],
     project: ProjectRecord,
     now: datetime | None = None,
+    other_clients: Iterable[str] = (),
 ) -> CompetitorBook:
     """The book with newly found competitors added and known ones refreshed."""
     moment = now or datetime.now(UTC)
@@ -290,7 +321,7 @@ def merge_suggestions(
         client_domain=book.client_domain if book else None,
         suggestions=list(by_domain.values()),
     )
-    return with_project_status(merged, project)
+    return with_project_status(merged, project, other_clients)
 
 
 class CompetitorsStore:

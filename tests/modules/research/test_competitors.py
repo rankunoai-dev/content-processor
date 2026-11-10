@@ -192,3 +192,53 @@ def test_api_competitors(themed: World, tmp_path: Path) -> None:
     themed.store.remove_site(themed.project_id, site.site_id)
     back = client.get(f"{base}/competitors").json()
     assert {s["domain"]: s["status"] for s in back["suggestions"]}["bigsure.com"] == "suggested"
+
+
+def test_a_sister_brand_in_another_project_is_never_suggested(world: World) -> None:
+    from src.modules.content_processor.projects.store import SiteSpec
+    from src.modules.research.competitors import client_domains_everywhere
+    from src.modules.theming.models import ThemeMap
+
+    project = world.store.get(world.project_id)
+    found = read_competitors_csv(EXPORT.encode(), NOW) or []
+    book = merge_suggestions(None, found, project, NOW)
+    competitors_store(world.store).save(book)
+    assert [s.domain for s in competitor_book(world.store, world.project_id).suggestions] == [
+        "bigsure.com",
+        "newco.io",
+    ]
+    # Another project registers newco.io as a client's website: the client's side everywhere.
+    world.store.create(
+        name="NewCo project",
+        owner_name="Tester",
+        client_name="NewCo",
+        password="password-123",
+        client_site=SiteSpec(name="NewCo", website="https://www.newco.io"),
+    )
+    assert client_domains_everywhere(world.store.projects()) == ["newco.io", "example.com"]
+    shown = competitor_book(world.store, world.project_id)
+    assert [s.domain for s in shown.suggestions] == ["bigsure.com"]
+    # a fresh pull or import keeps it out too
+    merged = merge_suggestions(
+        competitors_store(world.store).get(world.project_id),
+        found,
+        project,
+        NOW,
+        other_clients=client_domains_everywhere(world.store.projects()),
+    )
+    assert [s.domain for s in merged.suggestions] == ["bigsure.com"]
+    # and the gap findings never flag it as an unwatched competitor
+    empty_map = ThemeMap(
+        map_id="tm-x",
+        project_id=world.project_id,
+        built_at=NOW,
+        method="test",
+        websites=[],
+        themes=[],
+        pages=[],
+    )
+    close = [s.model_copy(update={"relevance": 0.9}) for s in book.suggestions]
+    flagged = build_findings(empty_map, {}, suggested=close)
+    assert flagged[0].competitors == ["bigsure.com", "newco.io"]
+    flagged = build_findings(empty_map, {}, suggested=close, client_domains=["newco.io"])
+    assert flagged[0].competitors == ["bigsure.com"]

@@ -24,6 +24,7 @@ from src.modules.research.competitors import (
     CompetitorBook,
     CompetitorsStore,
     CompetitorSuggestion,
+    client_domains_everywhere,
     from_competitor_rows,
     from_search_results,
     merge_suggestions,
@@ -52,6 +53,8 @@ __all__ = [
     "import_csv",
     "pull_project",
     "research_store",
+    "theme_map_for",
+    "theme_map_stale",
     "unit_log",
 ]
 
@@ -100,7 +103,11 @@ def competitors_store(projects: ProjectStore) -> CompetitorsStore:
 
 
 def competitor_book(projects: ProjectStore, project_id: str) -> CompetitorBook:
-    """The project's suggested competitors, against its websites as they are now."""
+    """The project's suggested competitors, against its websites as they are now.
+
+    A website that is a client's website in any project (a sister brand) is never
+    among them: the client's websites are the client's side everywhere.
+    """
     project = projects.get(project_id)
     found = competitors_store(projects).get(project_id)
     if found is None:
@@ -110,7 +117,7 @@ def competitor_book(projects: ProjectStore, project_id: str) -> CompetitorBook:
             updated_at=project.updated_at,
             client_domain=main.domains[0] if main and main.domains else None,
         )
-    return with_project_status(found, project)
+    return with_project_status(found, project, client_domains_everywhere(projects.projects()))
 
 
 def remember_competitors(
@@ -118,7 +125,12 @@ def remember_competitors(
 ) -> CompetitorBook:
     """Merge newly found competitors into the project's book and save it."""
     store = competitors_store(projects)
-    book = merge_suggestions(store.get(project_id), found, projects.get(project_id))
+    book = merge_suggestions(
+        store.get(project_id),
+        found,
+        projects.get(project_id),
+        other_clients=client_domains_everywhere(projects.projects()),
+    )
     store.save(book)
     return book
 
@@ -138,11 +150,39 @@ def estimate_units(websites: int, settings: ResearchSettings, keywords: int = 0)
     return websites * per_site + keywords * per_keyword + competitors
 
 
-def _theme_map(projects: ProjectStore, access: KnowledgeAccess, project_id: str) -> ThemeMap:
-    found = theme_store(projects).latest(project_id)
-    if found is None:  # building the theme map is local and free
+def theme_map_stale(projects: ProjectStore, project_id: str, theme_map: ThemeMap) -> bool:
+    """True when a scrape of any website of the project finished after the map was built."""
+    newest = max(
+        (
+            r.finished_at
+            for r in projects.runs(project_id)
+            if r.status == "finished" and r.finished_at is not None
+        ),
+        default=None,
+    )
+    return newest is not None and newest > theme_map.built_at
+
+
+def theme_map_for(
+    projects: ProjectStore, access: KnowledgeAccess, project_id: str, *, rebuild: bool = False
+) -> tuple[ThemeMap, bool]:
+    """The project's theme map, and whether it was (re)built now.
+
+    The latest build is reused unless `rebuild` is asked, none exists, or a scrape of
+    any website of the project finished after it was built (a stale map would describe
+    pages that have since changed). Building is local and free.
+    """
+    found = None if rebuild else theme_store(projects).latest(project_id)
+    if found is not None and theme_map_stale(projects, project_id, found):
+        found = None
+    if found is None:
         found, _files = build_project_themes(projects, access, project_id)
-    return found
+        return found, True
+    return found, False
+
+
+def _theme_map(projects: ProjectStore, access: KnowledgeAccess, project_id: str) -> ThemeMap:
+    return theme_map_for(projects, access, project_id)[0]
 
 
 def _save(

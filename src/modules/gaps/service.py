@@ -14,8 +14,8 @@ from src.modules.gaps.build import build_findings
 from src.modules.gaps.models import GapReport
 from src.modules.gaps.store import GapStore, write_gap_workbook
 from src.modules.monitoring.service import monitor_store
-from src.modules.research.service import competitor_book, research_store
-from src.modules.theming.service import build_project_themes, theme_store
+from src.modules.research.competitors import client_domains_everywhere
+from src.modules.research.service import competitor_book, research_store, theme_map_for
 
 __all__ = ["build_project_gaps", "gap_store"]
 
@@ -42,12 +42,10 @@ def _catalogs(play: Playground) -> dict[str, list[tuple[str, str | None]]]:
 def build_project_gaps(
     projects: ProjectStore, access: KnowledgeAccess, project_id: str
 ) -> tuple[GapReport, dict[str, str]]:
-    """Build the report (theme map built when missing), apply statuses, save it."""
+    """Build the report (theme map built when missing or stale), apply statuses, save it."""
     play = Playground(projects, access, [project_id])
     roles = {w.key: play.role_in_run(w) for w in play.websites()}
-    theme_map = theme_store(projects).latest(project_id)
-    if theme_map is None:
-        theme_map, _files = build_project_themes(projects, access, project_id)
+    theme_map, _rebuilt = theme_map_for(projects, access, project_id)
     research = research_store(projects).latest(project_id)
     check = monitor_store(projects).latest(project_id)
     missing = []
@@ -63,6 +61,7 @@ def build_project_gaps(
         catalogs=_catalogs(play),
         suggested=competitor_book(projects, project_id).suggestions,
         settings=gap_store(projects).settings(project_id),
+        client_domains=client_domains_everywhere(projects.projects()),
     )
     store = gap_store(projects)
     statuses = store.statuses(project_id)
