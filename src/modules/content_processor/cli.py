@@ -670,8 +670,6 @@ def _exit_when_parent_stops() -> None:
 
 def cmd_dryrun(args: argparse.Namespace) -> int:
     """Run a scope end to end with an in-memory ledger and write the reports."""
-    if getattr(args, "exit_with_parent", False):
-        _exit_when_parent_stops()
     return asyncio.run(_dryrun(args))
 
 
@@ -969,6 +967,10 @@ def main(argv: list[str] | None = None) -> int:
     p_status.set_defaults(func=cmd_status)
 
     args = parser.parse_args(argv)
+    # Any subcommand the app starts for a scrape (dryrun, report, stamp, catalog, index)
+    # stops when the app is gone.
+    if getattr(args, "exit_with_parent", False):
+        _exit_when_parent_stops()
     result: int = args.func(args)
     return result
 

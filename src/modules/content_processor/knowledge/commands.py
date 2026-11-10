@@ -218,6 +218,15 @@ def cmd_structure(args: argparse.Namespace) -> int:
     return 0
 
 
+def _add_exit_with_parent(parser: Any) -> None:
+    """The flag the app passes to every step of a scrape; the CLI's `main` acts on it."""
+    parser.add_argument(
+        "--exit-with-parent",
+        action="store_true",
+        help="stop when the program that started this one is gone",
+    )
+
+
 def register(subparsers: Any) -> None:
     """Add the `stamp`, `catalog` and `inventory` subcommands to the CLI's subparsers."""
     parser = subparsers.add_parser("stamp", help="stamp pages and build context-preserving chunks")
@@ -232,6 +241,7 @@ def register(subparsers: Any) -> None:
         default=None,
         help="prefix of the output files (default: the records file name, x.records.jsonl -> x)",
     )
+    _add_exit_with_parent(parser)
     parser.set_defaults(func=cmd_stamp)
 
     cat = subparsers.add_parser("catalog", help="build the site's offering catalog from stamps")
@@ -242,6 +252,7 @@ def register(subparsers: Any) -> None:
     cat.add_argument("--embed-model", default=None, help="embedding model, e.g. bge-m3")
     cat.add_argument("--llm-endpoint", default=None, help="local chat URL (optional)")
     cat.add_argument("--llm-model", default=None, help="instruct model, e.g. qwen2.5:14b")
+    _add_exit_with_parent(cat)
     cat.set_defaults(func=cmd_catalog)
 
     inv = subparsers.add_parser(

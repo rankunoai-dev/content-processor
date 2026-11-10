@@ -337,6 +337,11 @@ def register(subparsers: Any) -> None:
     index.add_argument(
         "--rebuild", action="store_true", help="empty the tenant's store first (new model)"
     )
+    index.add_argument(
+        "--exit-with-parent",
+        action="store_true",
+        help="stop when the program that started this one is gone",
+    )
     index.set_defaults(func=cmd_index)
 
     search = subparsers.add_parser("search", help="hybrid search over the stored passages")
