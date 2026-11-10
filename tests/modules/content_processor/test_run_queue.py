@@ -6,6 +6,7 @@ starts by itself when its turn comes, or emails its person and waits for them.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import threading
 import time
@@ -16,8 +17,9 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from src.modules.content_processor.projects.models import RUN_ACTIVE, RunState
 from src.modules.content_processor.projects.notify import Notifier, check_email, hide_email
-from src.modules.content_processor.projects.runner import ScrapeRunner
+from src.modules.content_processor.projects.runner import SECONDS_PER_URL, ScrapeRunner
 from src.modules.content_processor.projects.security import TokenSigner
 from src.modules.content_processor.projects.store import ProjectStore, SiteSpec
 from src.modules.content_processor.webapi.app import WRITE_HEADER, WRITE_HEADER_VALUE, create_app
@@ -143,6 +145,87 @@ def test_one_scrape_at_a_time_in_the_order_queued(env):
     assert batches.order == ["https://alpha.com/a", "https://beta.com/a", "https://gamma.com/a"]
     assert {_status(store, s) for s in (first, second, third)} == {"finished"}
     assert runner.seconds_per_url() >= 1.0
+    assert store.run(first.project_id, first.site_id, first.run_id).active_seconds > 0
+
+
+def test_two_requests_at_once_queue_one_scrape_of_a_website(env):
+    store, runner, _, _ = env
+    ids = _projects(store)
+    pid, sid = ids["Alpha"], _site(store, ids["Alpha"])
+    meet = threading.Barrier(2)
+    real = runner._queue_time  # noqa: SLF001 - the moment between the check and the write
+
+    def held() -> datetime:
+        # Both requests here at once would mean both passed the check.
+        with contextlib.suppress(threading.BrokenBarrierError):
+            meet.wait(timeout=0.5)
+        return real()
+
+    runner._queue_time = held  # type: ignore[method-assign]  # noqa: SLF001
+    results: list[RunState | ValueError] = []
+
+    def go() -> None:
+        try:
+            results.append(runner.submit(pid, sid, started_by="A"))
+        except ValueError as exc:
+            results.append(exc)
+
+    threads = [threading.Thread(target=go) for _ in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(10)
+    assert sum(isinstance(r, RunState) for r in results) == 1, results
+    assert sum(isinstance(r, ValueError) for r in results) == 1, results
+    assert len([r for r in store.runs(pid, sid) if r.status in RUN_ACTIVE]) == 1
+
+
+def test_a_scrape_cancelled_before_it_starts_keeps_no_flag(env):
+    store, runner, batches, _ = env
+    ids = _projects(store)
+    first = runner.submit(ids["Alpha"], _site(store, ids["Alpha"]), started_by="A")
+    _wait_for(lambda: _status(store, first) == "running")
+    second = runner.submit(ids["Beta"], _site(store, ids["Beta"]), started_by="B")
+    runner.cancel(second.project_id, second.site_id, second.run_id)
+    assert second.run_id not in runner._cancel  # noqa: SLF001
+    batches.release.set()
+    assert runner.wait_idle(20)
+    assert first.run_id not in runner._cancel  # noqa: SLF001
+
+
+def test_wait_estimates_count_only_the_time_a_scrape_ran(tmp_path: Path):
+    store = ProjectStore(tmp_path)
+    ids = _projects(store)
+    runner = ScrapeRunner(store, command=GatedBatches(), report=_report, knowledge=_knowledge)
+    assert runner.seconds_per_url() == SECONDS_PER_URL
+    now = datetime.now(UTC)
+    # Stopped for three days, then continued: it ran for 40 s in all.
+    state = runner.submit(ids["Alpha"], _site(store, ids["Alpha"]), started_by="A")
+    store.save_run(
+        state.model_copy(
+            update={
+                "status": "finished",
+                "started_at": now - timedelta(days=3),
+                "finished_at": now,
+                "url_count": 2,
+                "active_seconds": 40.0,
+            }
+        )
+    )
+    assert runner.seconds_per_url() == 20.0
+    # A scrape from before running time was kept says nothing about the rate.
+    legacy = runner.submit(ids["Beta"], _site(store, ids["Beta"]), started_by="B")
+    store.save_run(
+        legacy.model_copy(
+            update={
+                "status": "finished",
+                "started_at": now - timedelta(hours=1),
+                "finished_at": now,
+                "active_seconds": 0.0,
+            }
+        )
+    )
+    assert runner.seconds_per_url() == 20.0
 
 
 def test_your_turn_email_then_start_runs_before_the_waiting_line(env):

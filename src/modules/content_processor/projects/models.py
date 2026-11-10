@@ -116,6 +116,11 @@ class RunState(StrictModel):
     resume_count: int = Field(
         default=0, ge=0, description="times a person continued this scrape after it stopped"
     )
+    active_seconds: float = Field(
+        default=0.0,
+        ge=0.0,
+        description="seconds spent scraping, over every start; time stopped or queued is left out",
+    )
     # -- the shared queue (one scrape at a time on the whole instance) ----------
     on_turn: OnTurn = Field(
         default="auto",
