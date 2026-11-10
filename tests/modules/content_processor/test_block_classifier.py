@@ -233,7 +233,7 @@ def test_captcha_widget_on_a_content_page_is_not_a_block(widget: str):
 
 
 _INLINE_JS = (
-    "<script>window.__cfg = {label: \"I'm not a robot\", "
+    '<script>window.__cfg = {label: "I\'m not a robot", '
     + "x: 1, ".join(["y"] * 600)
     + "};</script>"
 )

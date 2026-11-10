@@ -233,7 +233,8 @@ class HostAccessState:
                     proposed_tier=target,
                 )
             return Action(ActionKind.BLOCKED, self.tier, reason=f"ceiling:{self.ceiling}")
-        if distinct_urls < HOST_ESCALATION_DISTINCT_URLS or tier_rank(target) <= tier_rank(self.tier):
+        url_only = distinct_urls < HOST_ESCALATION_DISTINCT_URLS
+        if url_only or tier_rank(target) <= tier_rank(self.tier):
             # One page blocked: retry that page one tier up; the host is unchanged.
             return Action(
                 ActionKind.ESCALATE,
