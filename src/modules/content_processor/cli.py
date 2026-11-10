@@ -248,6 +248,16 @@ def build_fetchers(scope: RunScope) -> tuple[Any, list[Any]]:
     return t1, escalation
 
 
+def browser_channel() -> str | None:
+    """The Playwright channel from `CP_BROWSER_CHANNEL`; None means the bundled Chromium.
+
+    "chrome" (the default) launches the installed Google Chrome and the renderer falls
+    back to the bundled Chromium by itself when Chrome is absent (containers).
+    """
+    channel = get_settings().cp_browser_channel
+    return None if channel == "chromium" else channel
+
+
 def build_renderer(scope: RunScope) -> Any:
     """T3 browser configured from the scope (not started)."""
     return BrowserRenderer(
@@ -258,6 +268,7 @@ def build_renderer(scope: RunScope) -> Any:
         viewport=scope.viewport,
         analytics_suppression=scope.analytics_suppression,
         limits=RenderLimits(),
+        channel=browser_channel(),
     )
 
 

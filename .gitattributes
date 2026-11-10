@@ -1,0 +1,4 @@
+# Files that run inside the Linux image must keep LF endings on every checkout.
+deploy/start.sh text eol=lf
+Dockerfile text eol=lf
+.dockerignore text eol=lf
