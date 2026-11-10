@@ -50,6 +50,37 @@ def test_soft_404_from_title_and_body():
     assert v.confidence >= 0.7
 
 
+@pytest.mark.parametrize(
+    "title",
+    [
+        "Terrorism insurance: what it covers | Example",
+        "Error handling guide for Python developers",
+        "Trial and error: how we learned to ship",
+        "Suite 1404, Market Street offices",
+    ],
+)
+def test_error_like_words_in_a_real_title_are_not_a_soft_404(title: str):
+    body = (
+        f"<html><head><title>{title}</title></head><body><main><h1>{title}</h1>"
+        "<p>A full article with a paragraph about the topic in the title. "
+        "The page you requested could not be found is not written anywhere here.</p>"
+        "</main></body></html>"
+    ).encode()
+    v = classify_response(status=200, headers={"content-type": "text/html"}, body_prefix=body)
+    assert v.kind is BlockKind.NONE, (title, v)
+
+
+def test_soft_404_title_alone_is_a_hint_not_a_verdict():
+    body = (
+        b"<html><head><title>Not found in any archive | Example</title></head><body>"
+        b"<main><h1>The lost manuscripts</h1><p>An essay about documents nobody kept.</p></main>"
+        b"</body></html>"
+    )
+    v = classify_response(status=200, headers={"content-type": "text/html"}, body_prefix=body)
+    assert v.kind is BlockKind.NONE
+    assert "soft404:title_only" in v.evidence
+
+
 def test_html_for_pdf_request_is_wrong_payload():
     v = classify_response(
         status=200,

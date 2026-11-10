@@ -76,12 +76,16 @@ _SCRIPT_STYLE = re.compile(r"<(script|style|noscript).*?</\s*>", re.IGNORECASE
 _TAG = re.compile(r"<[^>]+>")
 _TITLE = re.compile(r"<title[^>]*>([^<]*)", re.IGNORECASE)
 
+# Both are whole-word matches: "Terrorism insurance", "Trial and error" and a street
+# number ending in 404 are not error pages. A soft 404 needs the title AND the body.
 _SOFT404_BODY = re.compile(
-    r"page (you requested )?(was |could )?not (be )?found|404|no longer available|"
+    r"page (you requested )?(was |could )?not (be )?found|\b404\b|no longer available|"
     r"this page doesn.t exist|oops!? .{0,40}(wrong|missing)",
     re.IGNORECASE,
 )
-_SOFT404_TITLE = re.compile(r"<title>[^<]*(not found|404|error)[^<]*</title>", re.IGNORECASE)
+_SOFT404_TITLE = re.compile(
+    r"<title[^>]*>[^<]*\b(404|not found|page not found)\b[^<]*</title>", re.IGNORECASE
+)
 _LOGIN_PATH = re.compile(r"/(login|signin|sign-in|auth|sso)(/|\?|$)", re.IGNORECASE)
 
 
@@ -222,7 +226,8 @@ def classify_response(
         if title_hit and body_hit:
             fire("generic", BlockKind.SOFT_404, "soft404:title+body", 0.75)
         elif title_hit:
-            fire("generic", BlockKind.SOFT_404, "soft404:title", 0.5)
+            # Title alone is a hint for the ledger, never a verdict.
+            evidence.append("soft404:title_only")
 
     # Weak cookie-only evidence with a clean 2xx and a non-challenge body is not a block.
     if kind is not BlockKind.NONE and confidence < 0.5 and status < 400:
