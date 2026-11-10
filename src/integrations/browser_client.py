@@ -321,6 +321,8 @@ class RenderResult(StrictModel):
     hops: list[str] = Field(default_factory=list)
     dom_html: bytes = b""
     inner_text: str = ""
+    # Kept so results saved by earlier versions still load; no longer captured (it was
+    # read by nothing) and always empty.
     aria_snapshot: str = ""
     screenshot_jpeg: bytes = b""
     console_errors: list[str] = Field(default_factory=list)
@@ -522,10 +524,6 @@ class BrowserRenderer:
             dom_html = str(snapshot.get("html") or "").encode("utf-8")
             inner_text = str(snapshot.get("text") or "")
             try:
-                aria = await page.locator("body").aria_snapshot()
-            except PlaywrightError:
-                aria = ""
-            try:
                 screenshot = await page.screenshot(
                     full_page=self._limits.full_page_screenshot,
                     type="jpeg",
@@ -572,7 +570,6 @@ class BrowserRenderer:
                 hops=hops,
                 dom_html=dom_html,
                 inner_text=inner_text,
-                aria_snapshot=aria,
                 screenshot_jpeg=screenshot,
                 console_errors=console_errors,
                 failed_requests=failed,

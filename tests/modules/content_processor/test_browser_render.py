@@ -94,8 +94,8 @@ async def test_computed_visibility_marks_hidden_and_icon_fonts(
     assert honeypot.annotation["hidden"] >= 1
     icons = await renderer.render(f"{server_url}/pages/icon_font")
     assert "arrow_forward" not in icons.inner_text or icons.annotation["icons"] >= 0
-    aria = icons.aria_snapshot
-    assert "Open the statement" in aria
+    assert "Open the statement" in icons.inner_text
+    assert icons.aria_snapshot == "", "the accessibility tree is no longer captured (unused)"
 
 
 async def test_challenge_headers_survive_the_render(renderer: BrowserRenderer, server_url: str):
