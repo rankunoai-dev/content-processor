@@ -111,6 +111,37 @@ def test_login_redirect_is_auth_wall():
     assert v.kind is BlockKind.AUTH_WALL
 
 
+@pytest.mark.parametrize(
+    "form",
+    [
+        '<form id="loginform" action="/wp-login.php" method="post">',
+        '<form class="newsletter-signin" action="/subscribe">',
+        '<form action="/login" method="post">',
+    ],
+)
+def test_article_with_a_header_login_form_is_not_an_auth_wall(form: str):
+    article = "<p>" + "A paragraph of the published article. " * 60 + "</p>"
+    body = (
+        "<html><head><title>How to brew coffee | Example</title></head><body><header>"
+        f'{form}<input name="log"><input type="password" name="pwd">'
+        "<button>Log in</button></form></header>"
+        f"<main><article><h1>How to brew coffee</h1>{article}</article></main></body></html>"
+    ).encode()
+    v = classify_response(
+        status=200,
+        headers={"content-type": "text/html"},
+        body_prefix=body,
+        final_url="https://example.com/blog/how-to-brew-coffee",
+    )
+    assert v.kind is BlockKind.NONE, v
+
+
+def test_http_401_is_an_auth_wall():
+    body = b"<html><body><form action='/login'>Please sign in</form></body></html>"
+    v = classify_response(status=401, headers={"content-type": "text/html"}, body_prefix=body)
+    assert v.kind is BlockKind.AUTH_WALL
+
+
 def test_vendor_cookie_alone_on_clean_200_is_not_a_block():
     v = classify_response(
         status=200,

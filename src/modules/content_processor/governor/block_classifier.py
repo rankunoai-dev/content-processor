@@ -55,8 +55,11 @@ _BODY_SIGNALS: tuple[tuple[str, BlockKind, str], ...] = (
     ("anubis", BlockKind.JS_CHALLENGE, r"making sure you're not a bot|anubis"),
     ("generic", BlockKind.FINGERPRINT, r"unusual traffic|automated access|bot detection"),
     ("generic", BlockKind.GEO_GATE, r"not available in your (country|region)"),
-    ("generic", BlockKind.AUTH_WALL, r"<form[^>]+(login|signin|sign-in)"),
 )
+# No body pattern for login forms: a header sign-in box, a WordPress `#loginform`
+# or a `newsletter-signin` class sits on ordinary article pages. An auth wall is an
+# HTTP 401, a redirect to a login URL, or `gates.login_wall` (password input and
+# almost no main text).
 
 # (vendor, body regex): CAPTCHA widgets, a challenge only with one of the conditions below.
 _CAPTCHA_WIDGETS: tuple[tuple[str, str], ...] = (
