@@ -296,7 +296,7 @@ def rule_r3_frames(
     extracted_frames = {b.provenance.frame_path for b in blocks}
     gaps: list[Gap] = []
     for frame in frames:
-        if frame.hidden:
+        if frame.hidden or is_pixel_frame(frame.url):
             continue
         key = f"R3:frame:{frame.url}"
         child = _frame_child(frame.url, children)
@@ -340,6 +340,50 @@ def rule_r3_frames(
                 )
             )
     return gaps
+
+
+# Frames that carry no page content: tag managers and advertising/analytics pixels.
+# They are usually `<noscript>` or 0 x 0 frames; this list catches the ones a site
+# styles some other way. Matched on the host and path, never on query strings.
+_PIXEL_FRAME_HOSTS = (
+    "googletagmanager.com",
+    "google-analytics.com",
+    "doubleclick.net",
+    "googlesyndication.com",
+    "facebook.com/tr",
+    "connect.facebook.net",
+    "bat.bing.com",
+    "ads.linkedin.com",
+    "px.ads.linkedin.com",
+    "analytics.twitter.com",
+    "t.co/i/adsct",
+    "tr.snapchat.com",
+    "analytics.tiktok.com",
+    "quantserve.com",
+    "demdex.net",
+    "adnxs.com",
+    "criteo.com",
+    "rubiconproject.com",
+    "pubmatic.com",
+    "casalemedia.com",
+    "openx.net",
+    "consentcdn.cookiebot.com",
+    "cdn.cookielaw.org",
+)
+
+
+def is_pixel_frame(url: str) -> bool:
+    """True for a frame whose address is a tag manager or tracking pixel, not content."""
+    parts = urlsplit(url)
+    host = (parts.hostname or "").lower()
+    path = parts.path.lower()
+    for marker in _PIXEL_FRAME_HOSTS:
+        marker_host, _, marker_path = marker.partition("/")
+        if host != marker_host and not host.endswith("." + marker_host):
+            continue
+        if not marker_path or path.startswith("/" + marker_path):
+            return True
+    return False
 
 
 # -- R10 ---------------------------------------------------------------------

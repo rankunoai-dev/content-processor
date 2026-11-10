@@ -262,6 +262,17 @@ def _effective(resource: Resource, gaps: Sequence[Gap]) -> EntityStatus:
     )
 
 
+def status_vector_for(
+    resources: Sequence[Resource],
+    regions: Sequence[ContentBlock],
+    gaps: Sequence[Gap],
+    target_status: EntityStatus,
+    discovery: DiscoveryState,
+) -> StatusVector:
+    """The status vector of one URL from its resources, regions, gaps and discovery."""
+    return _status_vector(resources, regions, gaps, target_status, discovery)
+
+
 def _status_vector(
     resources: Sequence[Resource],
     regions: Sequence[ContentBlock],

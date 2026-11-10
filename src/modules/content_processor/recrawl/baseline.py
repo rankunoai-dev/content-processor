@@ -27,7 +27,9 @@ __all__ = ["Baseline", "conditional_headers", "extraction_time", "url_key"]
 _REUSABLE_BADGES = frozenset(
     {UrlBadge.VERIFIED_WITHIN_SCOPE, UrlBadge.PARTIAL, UrlBadge.NEEDS_REVIEW}
 )
-_UNUSABLE_STATUSES = frozenset({EntityStatus.FAILED, EntityStatus.BLOCKED})
+_UNUSABLE_STATUSES = frozenset(
+    {EntityStatus.FAILED, EntityStatus.BLOCKED, EntityStatus.BUDGET_EXHAUSTED}
+)
 
 
 def url_key(url: str | None) -> str | None:

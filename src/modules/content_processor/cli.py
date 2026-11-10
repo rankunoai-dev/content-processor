@@ -111,6 +111,7 @@ from src.modules.content_processor.scheduler.site_controls import (
 )
 from src.modules.content_processor.scope.frontier import FrontierPlan, build_frontier
 from src.modules.content_processor.scope.ssrf import EgressDecision, IpClass, check_host
+from src.modules.content_processor.verify.reverdict import reverdict_file, reverdict_folder
 from src.modules.content_processor.workers.doc_worker import DocWorker
 from src.modules.content_processor.workers.fetch_worker import FetchWorker, user_agent_for
 from src.modules.content_processor.workers.ports import LedgerPort
@@ -797,6 +798,14 @@ def cmd_fetch(args: argparse.Namespace) -> int:
     return cmd_work(args)
 
 
+def cmd_reverdict(args: argparse.Namespace) -> int:
+    """Remove false-alarm gaps from stored records and derive their badges again."""
+    target = Path(args.records)
+    result = reverdict_folder(target) if target.is_dir() else reverdict_file(target)
+    _emit(result.as_dict())
+    return 0
+
+
 def cmd_records(args: argparse.Namespace) -> int:
     """Assemble UrlRecords for a durable run from the ledger, without running workers."""
     scope = load_scope(args.scope)
@@ -952,6 +961,13 @@ def main(argv: list[str] | None = None) -> int:
     p_records.add_argument("--out", default=None)
     p_records.add_argument("--reports-dir", default=None, help="write the Stage 4 bundle here")
     p_records.set_defaults(func=cmd_records)
+
+    p_rev = sub.add_parser(
+        "reverdict",
+        help="re-score stored records after a verdict rule was corrected (no new scrape)",
+    )
+    p_rev.add_argument("--records", required=True, help="a .records.jsonl file or a run folder")
+    p_rev.set_defaults(func=cmd_reverdict)
 
     register_report_command(sub)
     register_paid_commands(sub)

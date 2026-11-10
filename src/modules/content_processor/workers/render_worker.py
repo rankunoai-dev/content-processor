@@ -14,9 +14,11 @@ from __future__ import annotations
 import asyncio
 import re
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
+
+from selectolax.parser import HTMLParser
 
 from src.core.logger import get_logger
 from src.integrations.browser_client import AssetStore, PageHook, RenderResult
@@ -378,7 +380,9 @@ class RenderWorker:
             status = gate_status if _worse(gate_status, status) else status
             reasons.extend(gate_reasons)
         status = self._discovery_verdict(resource_id, exploration, status, reasons, evidence_ids)
-        status = self._coverage_verdict(resource_id, status, reasons, evidence_ids)
+        states = exploration.states if exploration is not None else []
+        ignore = option_lines([result.dom_html, *(st.dom_html for st in states)])
+        status = self._coverage_verdict(resource_id, status, reasons, evidence_ids, ignore=ignore)
         self._set_status(task, resource, status, ";".join(reasons), evidence_ids)
         self._ledger.complete(task.id or 0, self._worker_id)
 
@@ -390,14 +394,17 @@ class RenderWorker:
         status: EntityStatus,
         reasons: list[str],
         evidence_ids: list[str],
+        *,
+        ignore: frozenset[str] = frozenset(),
     ) -> EntityStatus:
         """Every line the browser shows must be in the extraction (coverage, not precision).
 
         Verification of blocks proves what was extracted is on the page; this proves
         what is on the page was extracted. A visible line counts as covered only by a
         block of a captured layer: a block wrongly put in the hidden layer does not.
+        `ignore` holds squashed lines that are not page text (drop-down choices).
         """
-        missing = missing_visible_lines(self._snapshots)
+        missing = missing_visible_lines(self._snapshots, ignore=ignore)
         words = sum(len(_WORD.findall(line)) for line in missing)
         if words < COVERAGE_MIN_MISSING_WORDS:
             return status
@@ -700,7 +707,36 @@ def _flow(blocks: list[ContentBlock]) -> str:
     return _squash("".join(b.normalized_text for b in ordered))
 
 
-def missing_visible_lines(snapshots: list[tuple[str, list[ContentBlock]]]) -> list[str]:
+_OPTION_TAGS = ("option", "datalist")
+
+
+def option_lines(documents: Iterable[bytes]) -> frozenset[str]:
+    """The choices of every drop-down list in these DOMs, squashed like visible lines.
+
+    A browser's visible text lists every `<option>` of a `<select>` on its own line
+    (a country picker alone is 200 lines), while the reader keeps those choices out
+    of the page's content: they are form furniture, not text the page says.
+    """
+    out: set[str] = set()
+    for document in documents:
+        if not document:
+            continue
+        try:
+            tree = HTMLParser(document)
+        except Exception:  # noqa: BLE001 - a DOM that cannot be parsed hides no options
+            _logger.debug("option_lines_unparsed_dom")
+            continue
+        for tag in _OPTION_TAGS:
+            for node in tree.css(tag):
+                text = " ".join((node.text(deep=True) or "").split())
+                if text:
+                    out.add(_squash(text))
+    return frozenset(out)
+
+
+def missing_visible_lines(
+    snapshots: list[tuple[str, list[ContentBlock]]], *, ignore: frozenset[str] = frozenset()
+) -> list[str]:
     """Lines of visible text (3+ words) that the extraction does not account for.
 
     Each snapshot's text (the base render, each explored state) is compared with
@@ -728,7 +764,7 @@ def missing_visible_lines(snapshots: list[tuple[str, list[ContentBlock]]]) -> li
             if not key or key in seen:
                 continue
             seen.add(key)
-            if key in own or key in singles or key in everything:
+            if key in own or key in singles or key in everything or key in ignore:
                 continue
             missing.append(line)
     return missing

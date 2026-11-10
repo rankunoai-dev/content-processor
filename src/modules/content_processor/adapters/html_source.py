@@ -158,6 +158,19 @@ _HIDDEN_STYLE = re.compile(
     r"left\s*:\s*-\d{4,}px|text-indent\s*:\s*-\d{4,}px",
     re.IGNORECASE,
 )
+_ZERO_SIZE = re.compile(r"^\s*0*(?:1?)(?:px)?\s*$")  # "0", "1", "0px": a pixel, not a view
+
+
+def _self_hidden(attrs: dict[str, str | None]) -> bool:
+    """True when an element hides itself by attribute, style or a 0/1-pixel box."""
+    if "hidden" in attrs or (attrs.get("aria-hidden") or "").lower() == "true":
+        return True
+    if _HIDDEN_STYLE.search(attrs.get("style") or ""):
+        return True
+    width, height = attrs.get("width"), attrs.get("height")
+    return bool(width and height and _ZERO_SIZE.match(width) and _ZERO_SIZE.match(height))
+
+
 _ACTION_LINK = re.compile(
     r"logout|log-out|signout|sign-out|delete|remove|add-to-cart|addtocart|checkout|"
     r"unsubscribe|vote|like\b|/cart|wishlist|mark-as-read",
@@ -635,7 +648,10 @@ class _Walker:
         )
 
     def asset(self, tag: str, attrs: dict[str, str | None], ctx: _Ctx) -> None:
-        hidden = ctx.layer is ContentLayer.HIDDEN
+        # Hidden when an ancestor hides it, when it sits in <noscript>/<template> (never
+        # shown by a browser that runs scripts), or when the element hides itself: a
+        # tag-manager or tracking-pixel iframe is `display:none` or 0 x 0.
+        hidden = ctx.layer in (ContentLayer.HIDDEN, ContentLayer.SOURCE_ONLY) or _self_hidden(attrs)
         src = attrs.get("src") or attrs.get("data-src") or ""
         if tag in ("img", "picture", "source") and (src or attrs.get("srcset")):
             first = src or (attrs.get("srcset") or "").split(",")[0].strip().split(" ")[0]

@@ -11,7 +11,9 @@ ARCHITECTURE.md §6 and §6.1:
 from __future__ import annotations
 
 import hashlib
+import html
 import io
+import re
 from collections.abc import Sequence
 from typing import Any
 
@@ -51,6 +53,115 @@ class ImageExtraction(StrictModel):
     warnings: list[str] = Field(default_factory=list)
 
 
+_SVG_TEXT = re.compile(r"<(text|title|desc)\b[^>]*>(.*?)</\1\s*>", re.IGNORECASE | re.DOTALL)
+_SVG_TAG = re.compile(r"<[^>]+>")
+_SVG_SIZE = re.compile(r"""\b(width|height)\s*=\s*["']\s*([\d.]+)""", re.IGNORECASE)
+_SVG_VIEWBOX = re.compile(
+    r"""\bviewBox\s*=\s*["']\s*[\d.-]+[\s,]+[\d.-]+[\s,]+([\d.]+)[\s,]+([\d.]+)"""
+)
+
+
+def _is_svg(data: bytes, media_type: str) -> bool:
+    """SVG is XML, not a picture: PIL cannot open it and OCR has nothing to look at."""
+    if media_type.lower().split(";")[0].strip() == "image/svg+xml":
+        return True
+    head = data[:2048].lstrip(b"\xef\xbb\xbf \t\r\n")
+    return head.startswith(b"<svg") or (
+        head.startswith((b"<?xml", b"<!DOCTYPE svg")) and b"<svg" in head
+    )
+
+
+def _extract_svg(
+    data: bytes, *, resource_id: str, run_id: str, evidence_id: str
+) -> ImageExtraction:
+    """Read an SVG's own text (<text>, <title>, <desc>); a text-free one is non-content."""
+    source = data.decode("utf-8", errors="replace")
+    sizes = {k.lower(): float(v) for k, v in _SVG_SIZE.findall(source[:4000])}
+    width, height = int(sizes.get("width", 0)), int(sizes.get("height", 0))
+    if not (width and height):
+        box = _SVG_VIEWBOX.search(source[:4000])
+        if box:
+            width, height = int(float(box.group(1))), int(float(box.group(2)))
+    lines: list[str] = []
+    for _, inner in _SVG_TEXT.findall(source):
+        text = " ".join(html.unescape(_SVG_TAG.sub(" ", inner)).split())
+        if text and text not in lines:
+            lines.append(text)
+    metadata = {"format": "SVG", "dimensions": f"{width}x{height}"}
+    meta_text = f"Image SVG {width}x{height}"
+    norm_meta, ops_meta = normalize_text(meta_text)
+    meta_hash = hashlib.sha256(f"{resource_id}|image|meta".encode()).hexdigest()
+    blocks = [
+        ContentBlock(
+            block_id=f"blk-{meta_hash[:12]}",
+            block_key=f"{resource_id}|image|metadata",
+            resource_id=resource_id,
+            state_id=f"{run_id}|image",
+            region_id="reg-image-metadata",
+            reading_order=0,
+            layer=ContentLayer.METADATA,
+            role="unknown",
+            raw_text=meta_text,
+            normalized_text=norm_meta,
+            normalization_ops=ops_meta,
+            method="svg/metadata",
+            tool_version=TOOL_VERSION,
+            confidence=1.0,
+            status=EntityStatus.VERIFIED_EXTRACTED,
+            evidence_ids=[evidence_id],
+            provenance=Provenance(frame_path="image"),
+        )
+    ]
+    if not lines:
+        return ImageExtraction(
+            blocks=blocks,
+            gaps=[],
+            metadata=metadata,
+            width=width,
+            height=height,
+            image_format="SVG",
+            is_visual_only=True,
+            status=EntityStatus.VERIFIED_NONCONTENT,
+            warnings=["svg_without_text"],
+        )
+    raw = "\n".join(lines)
+    norm, ops = normalize_text(raw)
+    txt_hash = hashlib.sha256(f"{resource_id}|image|svg|{norm}".encode()).hexdigest()
+    blocks.append(
+        ContentBlock(
+            block_id=f"blk-{txt_hash[:12]}",
+            block_key=f"{resource_id}|image|svg_text",
+            resource_id=resource_id,
+            state_id=f"{run_id}|image",
+            region_id="reg-image-svg-text",
+            reading_order=1,
+            bbox=(0.0, 0.0, float(width), float(height)),
+            layer=ContentLayer.RENDERED_VISIBLE,
+            role="main",
+            raw_text=raw,
+            normalized_text=norm,
+            normalization_ops=ops,
+            method="svg/text",
+            tool_version=TOOL_VERSION,
+            confidence=1.0,
+            status=EntityStatus.VERIFIED_EXTRACTED,
+            evidence_ids=[evidence_id],
+            provenance=Provenance(frame_path="image"),
+        )
+    )
+    return ImageExtraction(
+        blocks=blocks,
+        gaps=[],
+        metadata=metadata,
+        width=width,
+        height=height,
+        image_format="SVG",
+        is_visual_only=False,
+        status=EntityStatus.VERIFIED_EXTRACTED,
+        warnings=["svg_text_read"],
+    )
+
+
 def extract_image(
     image_bytes: bytes,
     *,
@@ -65,6 +176,10 @@ def extract_image(
     osd_runner: Any = None,
 ) -> ImageExtraction:
     """Analyze image metadata and extract text via multilingual OCR."""
+    if _is_svg(image_bytes, media_type):
+        return _extract_svg(
+            image_bytes, resource_id=resource_id, run_id=run_id, evidence_id=evidence_id
+        )
     try:
         pil_img = Image.open(io.BytesIO(image_bytes))
         width, height = pil_img.size
