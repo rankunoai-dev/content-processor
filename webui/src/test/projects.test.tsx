@@ -21,6 +21,7 @@ const project: Project = {
   project_id: 'print-security-a1b2c3',
   name: 'Print security',
   owner_name: 'Gaurav',
+  confidential: false,
   client_name: "Flynn's",
   created_at: '2026-10-30T09:00:00Z',
   updated_at: '2026-10-30T09:00:00Z',
@@ -134,6 +135,8 @@ describe('projects (Content Scraper)', () => {
     await fill(user, within(dialog).getByLabelText('Website 1'), 'xerox.com');
     await fill(user, within(dialog).getByLabelText('Project password'), 'correct horse 42');
     await fill(user, within(dialog).getByLabelText('Repeat the password'), 'something else');
+    expect(within(dialog).getByText(/never sent to Claude or shown to Claude Desktop/)).toBeInTheDocument();
+    await user.click(within(dialog).getByText('Confidential project'));
     await user.click(buttonIn(within(dialog), 'Create project'));
     expect(await within(dialog).findByText('The two passwords are not the same.')).toBeInTheDocument();
     expect(sent).toHaveLength(0);
@@ -150,6 +153,7 @@ describe('projects (Content Scraper)', () => {
       client_website: 'flynns.com',
       client_brands: [{ name: "Flynn's Managed Print", website: 'mps.flynns.com', note: 'Managed print brand' }],
       competitors: [{ name: 'Xerox', website: 'xerox.com' }],
+      confidential: true,
     });
     expect(sent[0]?.headers['X-Requested-With']).toBe('content-processor');
     await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent(`/projects/${project.project_id}`));
@@ -198,6 +202,31 @@ describe('projects (Content Scraper)', () => {
     expect(add?.headers['X-Project-Token']).toBe('tok-2');
     expect(add?.body).toEqual({ text: 'https://www.flynns.com/blog/b\nftp://x' });
   }, INTERACTION_TIMEOUT_MS);
+  it('turns the Confidential option on in the Settings tab, with the unlock token', async () => {
+    let shown = project;
+    const sent = fakeServer({
+      ...readRoutes,
+      [`GET /api/projects/${project.project_id}`]: () => [200, shown],
+      [`POST /api/projects/${project.project_id}/update`]: (body) => {
+        shown = { ...shown, ...(body as Partial<Project>) };
+        return [200, shown];
+      },
+    });
+    const user = userEvent.setup({ pointerEventsCheck: PointerEventsCheckLevel.Never });
+    renderApp(`/projects/${project.project_id}?tab=settings`);
+    const toggle = await screen.findByLabelText('Confidential project', {}, FIRST_PAINT);
+    expect(toggle).toBeDisabled(); // view only until unlocked
+    expect(screen.getByText(/never sent to Claude or shown to Claude Desktop/)).toBeInTheDocument();
+    useProjectTokens.getState().remember(project.project_id, 'tok-4', '2099-01-01T00:00:00Z');
+    await waitFor(() => expect(screen.getByLabelText('Confidential project')).toBeEnabled());
+    await user.click(screen.getByLabelText('Confidential project'));
+    await waitFor(() => expect(sent).toHaveLength(1));
+    expect(sent[0]?.path).toBe(`/api/projects/${project.project_id}/update`);
+    expect(sent[0]?.body).toEqual({ confidential: true });
+    expect(sent[0]?.headers['X-Project-Token']).toBe('tok-4');
+    expect(await screen.findByText(/Claude Desktop sees only counts, names/)).toBeInTheDocument();
+  }, INTERACTION_TIMEOUT_MS);
+
   it("shows each website's note and tags, and edits them with the unlock token", async () => {
     const xerox = { ...project.sites[1]!, note: 'Main rival in the US', tags: ['US'] };
     const shown = { ...project, sites: [project.sites[0]!, xerox] };

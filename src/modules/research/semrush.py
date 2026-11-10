@@ -7,6 +7,11 @@ Every call is priced at its worst case (the line limit times the report's units 
 line, from `UNITS_PER_LINE`) and refused when that would cross the pull or monthly cap,
 before anything is sent; the actual cost (lines returned) is logged afterwards.
 
+The monthly cap holds across concurrent pulls (two browser tabs, the CLI and the app):
+a call's worst case is **reserved** in `units.reserved.json` next to the log, under a
+lock other processes respect, and every reservation counts the month's room until the
+call is logged. A reservation left behind by a crashed pull expires after an hour.
+
 Calls are **paced**: one `Pacer` shared by every pull of the app server waits so two
 calls are at least `CP_SEMRUSH_MIN_INTERVAL_MS` apart (500 ms: two a second), well under
 Semrush's limit, so pulls run steadily instead of in bursts. An HTTP 429 (too many
@@ -23,16 +28,19 @@ from __future__ import annotations
 import csv
 import io
 import json
+import os
 import threading
 import time
+import uuid
 from collections.abc import Callable, Mapping
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Final
+from typing import Any, Final
 
 import httpx
 
 from src.core.schemas import StrictModel
+from src.modules.analyst.policy import FileLock
 
 __all__ = [
     "BASE_URL",
@@ -57,6 +65,8 @@ UNITS_PER_LINE: Final[dict[str, int]] = {
 }
 _UNKNOWN_UNITS = 50
 _LOCK = threading.Lock()
+RESERVATION_TTL: Final = timedelta(hours=1)
+"""A reservation older than this belongs to a pull that died: it no longer counts."""
 
 
 _RETRIES: Final = 2
@@ -120,17 +130,65 @@ class UnitEntry(StrictModel):
 
 
 class UnitLog:
-    """Append-only JSON lines of every Semrush call (`<root>/units.jsonl`)."""
+    """Append-only JSON lines of every Semrush call (`<root>/units.jsonl`), and the reservations.
+
+    `units.reserved.json` holds, per running pull, the worst-case units of its calls
+    that are not logged yet; `units.lock` serialises every look at both files, across
+    threads and processes.
+    """
 
     def __init__(self, root: Path) -> None:
         """Bind to the research folder."""
         self.path = root / "units.jsonl"
+        self.reserved_path = root / "units.reserved.json"
+        self.lock_path = root / "units.lock"
+
+    def lock(self) -> FileLock:
+        """The lock to hold while reading the month's use and writing a reservation."""
+        return FileLock(self.lock_path)
 
     def add(self, entry: UnitEntry) -> None:
         """Log one call."""
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with _LOCK, self.path.open("a", encoding="utf-8") as handle:
             handle.write(entry.model_dump_json() + "\n")
+
+    def _reservations(self) -> dict[str, dict[str, Any]]:
+        if not self.reserved_path.exists():
+            return {}
+        try:
+            data = json.loads(self.reserved_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+        return data if isinstance(data, dict) else {}
+
+    def reserved(self, *, except_key: str = "", now: datetime | None = None) -> int:
+        """Units reserved by other running pulls (reservations older than an hour expire)."""
+        moment = now or datetime.now(UTC)
+        total = 0
+        for key, item in self._reservations().items():
+            if key == except_key:
+                continue
+            try:
+                at = datetime.fromisoformat(str(item["at"]))
+                units = int(item["units"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            if moment - at <= RESERVATION_TTL:
+                total += units
+        return total
+
+    def set_reservation(self, key: str, units: int, now: datetime | None = None) -> None:
+        """Write one pull's outstanding reservation (0 removes it). Call under `lock()`."""
+        data = self._reservations()
+        if units > 0:
+            data[key] = {"units": units, "at": (now or datetime.now(UTC)).isoformat()}
+        else:
+            data.pop(key, None)
+        self.reserved_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = self.reserved_path.with_name(f"{self.reserved_path.name}.{os.getpid()}.tmp")
+        tmp.write_text(json.dumps(data, indent=1), encoding="utf-8")
+        tmp.replace(self.reserved_path)
 
     def used(self, since: datetime) -> int:
         """Units used since a moment."""
@@ -147,7 +205,12 @@ class UnitLog:
 
 
 class UnitBudget:
-    """What one pull may use: the smaller of its own cap and the month's room."""
+    """What one pull may use: the smaller of its own cap and the month's room.
+
+    The month's room is checked again, under the shared lock, every time a call is
+    reserved: the log plus every other pull's outstanding reservations. So two pulls
+    running at once cannot both pass the cap with the same units.
+    """
 
     def __init__(
         self,
@@ -160,16 +223,22 @@ class UnitBudget:
     ) -> None:
         """Read this month's use once, at the start of the pull."""
         moment = now or datetime.now(UTC)
-        month = moment.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        self._month = moment.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        self.log = log
+        self.key = f"{os.getpid()}-{uuid.uuid4().hex[:8]}"
         self.enabled = enabled
         self.monthly_units = monthly_units
-        self.month_left = max(0, monthly_units - log.used(month)) if monthly_units else 0
+        self.month_left = 0
+        if monthly_units:
+            with log.lock():
+                self.month_left = max(0, monthly_units - log.used(self._month) - log.reserved())
         self.pull_units = pull_units
         self.spent = 0
+        self._pending: list[int] = []
 
     @property
     def left(self) -> int:
-        """Units this pull may still use."""
+        """Units this pull may still use (from the month's room as it was at the start)."""
         return max(0, min(self.pull_units, self.month_left) - self.spent)
 
     def refusal(self) -> str | None:
@@ -185,19 +254,44 @@ class UnitBudget:
         return None
 
     def reserve(self, report: str, lines: int) -> int:
-        """The worst-case units of a call; raises `SemrushError` if it does not fit."""
+        """Reserve the worst-case units of a call; raises `SemrushError` if it does not fit.
+
+        Checked under the shared lock against this pull's cap and the month's room right
+        now (the log plus every pull's outstanding reservations, this one's included);
+        the reservation is written before the lock is released.
+        """
         worst = lines * UNITS_PER_LINE.get(report, _UNKNOWN_UNITS)
-        if worst > self.left:
-            msg = (
-                f"{report} for up to {lines} lines could use {worst} units; only {self.left} "
-                "are left for this pull (pull cap or monthly cap)"
-            )
-            raise SemrushError(msg)
+        with self.log.lock():
+            pending = sum(self._pending)
+            room = self.pull_units - self.spent - pending
+            if self.monthly_units:
+                used = self.log.used(self._month) + self.log.reserved(except_key=self.key)
+                room = min(room, self.monthly_units - used - pending)
+            room = max(0, room)
+            if worst > room:
+                msg = (
+                    f"{report} for up to {lines} lines could use {worst} units; only {room} "
+                    "are left for this pull (pull cap or monthly cap, counting pulls running "
+                    "at the same time)"
+                )
+                raise SemrushError(msg)
+            self._pending.append(worst)
+            self.log.set_reservation(self.key, pending + worst)
         return worst
 
     def charge(self, units: int) -> None:
-        """Count a call's actual units."""
+        """Count a call's actual units and let its reservation go (the log holds it now)."""
         self.spent += units
+        with self.log.lock():
+            if self._pending:
+                self._pending.pop(0)
+            self.log.set_reservation(self.key, sum(self._pending))
+
+    def release(self) -> None:
+        """Drop whatever this pull still had reserved (at the end of the pull)."""
+        self._pending.clear()
+        with self.log.lock():
+            self.log.set_reservation(self.key, 0)
 
 
 def parse_rows(text: str) -> list[dict[str, str]]:
@@ -252,25 +346,29 @@ class SemrushClient:
         self.budget.reserve(report, lines)
         query = {"type": report, "key": self._key, "display_limit": str(lines), **params}
         attempt = 0
-        while True:
-            self.pacer.wait()
-            try:
-                response = self._client.get(self._base, params=query)
-                if response.status_code == 429 and attempt < _RETRIES:
-                    attempt += 1
-                    self.retries += 1
-                    self.pacer.hold(_retry_after(response, attempt))
-                    continue
-                response.raise_for_status()
-            except httpx.HTTPError as exc:
-                msg = f"could not reach Semrush for {report}: {type(exc).__name__}"
-                if isinstance(exc, httpx.HTTPStatusError):
-                    msg += f" (HTTP {exc.response.status_code})"
-                raise SemrushError(msg) from exc
-            break
-        rows = parse_rows(response.text)
+        try:
+            while True:
+                self.pacer.wait()
+                try:
+                    response = self._client.get(self._base, params=query)
+                    if response.status_code == 429 and attempt < _RETRIES:
+                        attempt += 1
+                        self.retries += 1
+                        self.pacer.hold(_retry_after(response, attempt))
+                        continue
+                    response.raise_for_status()
+                except httpx.HTTPError as exc:
+                    msg = f"could not reach Semrush for {report}: {type(exc).__name__}"
+                    if isinstance(exc, httpx.HTTPStatusError):
+                        msg += f" (HTTP {exc.response.status_code})"
+                    raise SemrushError(msg) from exc
+                break
+            rows = parse_rows(response.text)
+        except Exception:
+            self.budget.charge(0)  # the call used nothing: its reservation goes
+            raise
         units = len(rows) * UNITS_PER_LINE.get(report, _UNKNOWN_UNITS)
-        self.budget.charge(units)
+        # Logged first, then the reservation is let go: the units are never uncounted.
         self.log.add(
             UnitEntry(
                 at=datetime.now(UTC),
@@ -281,6 +379,7 @@ class SemrushClient:
                 units=units,
             )
         )
+        self.budget.charge(units)
         return rows
 
     def domain_overview(self, domain: str, database: str) -> list[dict[str, str]]:
@@ -336,5 +435,6 @@ class SemrushClient:
         )
 
     def close(self) -> None:
-        """Close the HTTP client."""
+        """Close the HTTP client and drop any reservation the pull still holds."""
+        self.budget.release()
         self._client.close()

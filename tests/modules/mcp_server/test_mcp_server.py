@@ -254,7 +254,15 @@ def test_the_app_refuses_other_modules_on_a_scoped_connection(
     assert not is_error and theme["tool"] == "get_theme_map"
     listed, _ = call("list_projects", ["themes"])
     mine = next(p for p in listed["projects"] if p["project_id"] == pid)
-    assert set(mine) == {"project_id", "name", "client", "websites", "themes_built", "themes"}
+    assert set(mine) == {
+        "project_id",
+        "name",
+        "client",
+        "websites",
+        "confidential",
+        "themes_built",
+        "themes",
+    }
     full, _ = call("list_projects", None)
     assert "finished_scrapes" in next(p for p in full["projects"] if p["project_id"] == pid)
     assert "unknown module" in call("list_projects", ["keywords"])[0]["error"]

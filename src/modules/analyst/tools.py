@@ -779,12 +779,11 @@ def _monitoring(play: Playground, args: MonitorInput) -> dict[str, Any]:
 
 
 def _theme_map(play: Playground, args: ThemeInput) -> dict[str, Any]:
-    from src.modules.theming.service import build_project_themes, theme_store
+    from src.modules.research.service import theme_map_for
 
     project_id = play.project_ids[0]
-    theme_map = None if args.rebuild else theme_store(play.store).latest(project_id)
-    if theme_map is None:
-        theme_map, _files = build_project_themes(play.store, play.access, project_id)
+    # The latest build is reused only while no scrape of the project finished after it.
+    theme_map, rebuilt = theme_map_for(play.store, play.access, project_id, rebuild=args.rebuild)
     themes = []
     for t in theme_map.themes:
         pillar = next((c.pillar.url for c in t.coverage if c.pillar is not None), None)
@@ -822,6 +821,7 @@ def _theme_map(play: Playground, args: ThemeInput) -> dict[str, Any]:
     return {
         "map_id": theme_map.map_id,
         "built_at": theme_map.built_at.isoformat(),
+        "rebuilt_now": rebuilt,
         "websites": [
             {"website": w.website, "role": w.role, "pages": w.pages} for w in theme_map.websites
         ],

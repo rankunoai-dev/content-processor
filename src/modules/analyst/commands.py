@@ -100,6 +100,10 @@ def cmd_analyze(args: argparse.Namespace) -> int:
                 return 0 if check.runnable else 1
             record = runner.start(chosen, _inputs(args), args.backend)
             if record.status == "queued":
+                if runner.run_busy():
+                    sys.stderr.write(
+                        "another card run is in progress (one runs at a time); waiting for it\n"
+                    )
                 record = runner.execute(chosen, record)
             folder = runner.runs.folder(record.run_id)
             _write(
@@ -137,14 +141,21 @@ def cmd_analyze(args: argparse.Namespace) -> int:
             return 0
         if action == "policy":
             from src.modules.analyst.policy import DataClass, DataPolicy
+            from src.modules.content_processor.projects.store import ProjectStore
 
-            policy = DataPolicy(runner_root)
+            policy = DataPolicy(runner_root, ProjectStore(_root(args)))
             if not args.project:
                 sys.stderr.write("--project is required\n")
                 return 2
             if args.data_class:
                 policy.set(args.project, cast(DataClass, args.data_class))
-            _write({"project": args.project, "data_class": policy.data_class(args.project)})
+            _write(
+                {
+                    "project": args.project,
+                    "data_class": policy.data_class(args.project),
+                    "confidential_in_app": policy.project_confidential(args.project),
+                }
+            )
             return 0
         if action == "spend":
             from src.modules.analyst.policy import SpendLog

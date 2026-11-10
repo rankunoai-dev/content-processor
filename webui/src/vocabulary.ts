@@ -1428,6 +1428,9 @@ export const PROJECTS = {
     create: 'Create project',
     required: 'Please fill this in.',
     tooShort: 'Use at least 8 characters.',
+    confidential: 'Confidential project',
+    confidentialHelp:
+      'Confidential: page text from this project is never sent to Claude or shown to Claude Desktop; only counts and names.',
   },
   lock: {
     locked: 'View only',
@@ -1675,6 +1678,17 @@ export const PROJECTS = {
       host_backoff: 'Waiting before asking this website again',
       budget_stopped: 'Stopped by the budget',
     } as Record<string, string>,
+  },
+  confidential: {
+    title: 'Confidentiality',
+    label: 'Confidential project',
+    help: 'Confidential: page text from this project is never sent to Claude or shown to Claude Desktop; only counts and names.',
+    on: 'Confidential',
+    off: 'Not confidential',
+    onHelp:
+      'Claude cards that send text to Claude are refused for this project (the context pack still works for a person), and Claude Desktop sees only counts, names, themes, rankings and findings. Downloads in the app are not affected.',
+    offHelp: 'Page text from this project may go to Claude when Claude is switched on, and Claude Desktop can read its pages.',
+    tag: 'Confidential',
   },
 };
 

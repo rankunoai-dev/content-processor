@@ -30,7 +30,7 @@ from typing import Any
 from src.modules.analyst.library import ANALYST_RULES
 from src.modules.analyst.models import ActionCard, Backend, Preflight, RunRecord
 from src.modules.analyst.playground import Playground, ScopeError
-from src.modules.analyst.policy import Budget, DataPolicy, SpendLog
+from src.modules.analyst.policy import Budget, DataPolicy, FileLock, SpendLog
 from src.modules.analyst.tools import TOOLS, anthropic_tools, run_tool
 from src.modules.analyst.verify import sources_section, verify_deliverable
 from src.modules.content_processor.projects.store import ProjectStore
@@ -99,7 +99,10 @@ def _as_list(value: Any) -> list[str]:
 def _project_sites(play: Playground, project_id: str) -> tuple[str | None, list[str]]:
     """The project's main client website key and its competitor keys.
 
-    The client's other websites or brands are neither: they are never competitors.
+    Roles come from the run's resolution (`Playground.role_in_run`, the same one
+    theming, monitoring and gaps use), not from the website's role in this project
+    alone: the client's other websites or brands, registered here or as the client's
+    side in any other project, are never competitors.
     """
     project = play.store.get(project_id)
     client: str | None = None
@@ -110,9 +113,10 @@ def _project_sites(play: Playground, project_id: str) -> tuple[str | None, list[
         website = play.graph.find(site.domains[0])
         if website is None:
             continue
-        if site.role == "client":
-            client = client or website.key
-        else:
+        if play.role_in_run(website) == "client":
+            if site.role == "client":
+                client = client or website.key
+        elif website.key not in competitors:
             competitors.append(website.key)
     return client, competitors
 
@@ -348,13 +352,25 @@ class CardRunner:
         self.settings = settings or AnalystSettings.from_env()
         self.runs = RunStore(root)
         self.spend = SpendLog(root)
-        self.policy = DataPolicy(root)
+        self.policy = DataPolicy(root, store)
         self._client_factory = client_factory
         self._evidence_root = evidence_root
 
     def playground(self, project_ids: list[str]) -> Playground:
         """A playground bound to these projects."""
         return Playground(self.store, self.access, project_ids, evidence_root=self._evidence_root)
+
+    def run_lock(self) -> FileLock:
+        """The one-run-at-a-time lock every path shares (the web app's worker and the CLI).
+
+        The server's worker runs one card at a time; a CLI run is another process, so
+        the limit is kept on a file in the analyst folder (`run.lock`).
+        """
+        return FileLock(self.root / "run.lock")
+
+    def run_busy(self) -> bool:
+        """True while a card run holds the lock (here or in another process)."""
+        return self.run_lock().held_elsewhere()
 
     def _budget(self) -> Budget:
         s = self.settings
@@ -494,7 +510,15 @@ class CardRunner:
         return record
 
     def execute(self, card: ActionCard, record: RunRecord) -> RunRecord:
-        """Run a queued record to the end; never raises (failures go into the record)."""
+        """Run a queued record to the end, one run at a time on this computer.
+
+        Never raises (failures go into the record). Waits for the run lock first, so a
+        CLI run and the web app's worker never run two cards at once.
+        """
+        with self.run_lock():
+            return self._execute(card, record)
+
+    def _execute(self, card: ActionCard, record: RunRecord) -> RunRecord:
         runs = self.runs
         record = record.model_copy(update={"status": "running"})
         runs.save(record)
@@ -521,8 +545,20 @@ class CardRunner:
             )
             files = {"prompt": "prompt.md"}
             if record.backend == "pack":
+                confidential = any(
+                    self.policy.data_class(p) == "client_confidential" for p in play.project_ids
+                )
+                notice = (
+                    "> **CONFIDENTIAL.** This project is marked confidential: its page text may "
+                    "not be sent to Claude or any other outside service. Use this pack only as "
+                    "the client's agreement allows.\n\n"
+                    if confidential
+                    else ""
+                )
                 pack = (
-                    f"# Context pack: {card.title}\n\n"
+                    f"# Context pack: {card.title}"
+                    + (" (Confidential)" if confidential else "")
+                    + f"\n\n{notice}"
                     "Paste everything below into Claude (or another assistant your data policy "
                     "allows). Citations like [chunk:...] refer to the data in this pack; check "
                     "the answer against them.\n\n"

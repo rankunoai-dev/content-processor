@@ -255,12 +255,14 @@ class ProjectStore:
         client_site: SiteSpec | None = None,
         competitors: list[SiteSpec] | None = None,
         client_brands: list[SiteSpec] | None = None,
+        confidential: bool = False,
     ) -> ProjectRecord:
         """A new project with the client's website(s) and any competitor websites.
 
         `client_site` is the client's main website; `client_brands` are its other
         websites or brands. The password is hashed before anything is written.
-        Website names must be different, and so must their addresses.
+        Website names must be different, and so must their addresses. A
+        `confidential` project's page text never goes to Claude or Claude Desktop.
         """
         if len(password) < MIN_PASSWORD_LENGTH:
             raise ValueError(f"The password must have at least {MIN_PASSWORD_LENGTH} characters.")
@@ -285,6 +287,7 @@ class ProjectStore:
                 created_at=now,
                 updated_at=now,
                 sites=sites,
+                confidential=confidential,
             )
             self.project_dir(project_id).mkdir(parents=True, exist_ok=False)
             self._save(record)
@@ -347,9 +350,15 @@ class ProjectStore:
         path = self.project_dir(project_id) / "project.json"
         if not path.is_file():
             raise ProjectNotFoundError(project_id)
-        record = ProjectRecord.model_validate_json(self._read(path))
+        data = json.loads(self._read(path))
+        record = ProjectRecord.model_validate(data)
         if not record.sites:
             record = self._convert_single_list(record)
+        if "confidential" not in data:
+            # A project written before the confidential option existed: not confidential,
+            # written once so the file says so explicitly.
+            with self._lock:
+                self._save(record)
         return record
 
     def _convert_single_list(self, record: ProjectRecord) -> ProjectRecord:
@@ -390,9 +399,14 @@ class ProjectStore:
         return verify_password(password, self.get(project_id).password_hash)
 
     def update(
-        self, project_id: str, *, name: str | None = None, client_name: str | None = None
+        self,
+        project_id: str,
+        *,
+        name: str | None = None,
+        client_name: str | None = None,
+        confidential: bool | None = None,
     ) -> ProjectRecord:
-        """Rename the project or its client."""
+        """Rename the project or its client, or mark it confidential (or not)."""
         with self._lock:
             record = self.get(project_id)
             changes: dict[str, object] = {"updated_at": _now()}
@@ -400,6 +414,8 @@ class ProjectStore:
                 changes["name"] = name.strip()
             if client_name is not None:
                 changes["client_name"] = client_name.strip()
+            if confidential is not None:
+                changes["confidential"] = confidential
             record = ProjectRecord.model_validate(record.model_dump() | changes)
             self._save(record)
             return record

@@ -34,6 +34,7 @@ from src.modules.mcp_server.catalog import (
     SCOPES,
     Scope,
     definitions,
+    exposes_text,
     parse_scope,
     scope_label,
     scope_of,
@@ -74,7 +75,7 @@ _STATUS_FIELDS: dict[str, tuple[str, ...]] = {
     "research": ("research_added", "keywords"),
     "gaps": ("gaps_built", "findings", "open_findings", "high_findings"),
 }
-_COMMON_FIELDS = ("project_id", "name", "client", "websites")
+_COMMON_FIELDS = ("project_id", "name", "client", "websites", "confidential")
 
 
 def _scope(keys: list[str] | None) -> Scope:
@@ -152,9 +153,16 @@ class McpBridge:
         if not _PROJECT_ID.match(project_id):
             return _error("project_id is required; call list_projects for the ids")
         try:
-            self.projects.get(project_id)
+            record = self.projects.get(project_id)
         except ProjectNotFoundError:
             return _error(f"there is no project {project_id!r}; call list_projects for the ids")
+        if record.confidential and exposes_text(tool):
+            return _error(
+                f"the project {record.name!r} is confidential: its page text is never shown to "
+                f"Claude Desktop, and {tool} returns page text. Use the tools that return counts, "
+                "names, themes, rankings and findings, and tell the user plainly that this "
+                "question needs the pages themselves."
+            )
         if tool == "check_deliverable":
             return self.check(project_id, args)
         if tool == "present_answer":
@@ -234,6 +242,9 @@ class McpBridge:
         from src.modules.workspace.status import project_statuses
 
         statuses = project_statuses(self.projects)
+        flags = {p.project_id: p.confidential for p in self.projects.projects()}
+        for status in statuses:
+            status["confidential"] = flags.get(str(status.get("project_id")), False)
         if scope is None:
             return statuses
         keep = set(_COMMON_FIELDS)

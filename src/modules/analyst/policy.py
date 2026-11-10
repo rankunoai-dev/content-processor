@@ -4,7 +4,10 @@ Data policy (decision pending with the product owner, see
 docs/app/ARCHITECTURE_PLATFORM_MODULES_AND_CLAUDE.md section 5.4): every project
 has a data class, `public` by default (scraped public websites). A project marked
 `client_confidential` is never sent to Claude; its cards can still export a
-context pack for a person to use as the client's agreement allows.
+context pack for a person to use as the client's agreement allows. The class
+comes from two places and the stricter wins: the project's own "Confidential"
+option in the app (`ProjectRecord.confidential`) and the CLI's
+`analyze policy --data-class` file.
 
 Spend follows the paid-scraping pattern: Claude is off unless
 `CP_CLAUDE_ENABLED=true`, a monthly cap must be set (0 means unset and refuses),
@@ -18,20 +21,27 @@ is written to an append-only log after each call.
 from __future__ import annotations
 
 import json
+import sys
 import threading
+import time
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Final, Literal
+from types import TracebackType
+from typing import IO, TYPE_CHECKING, Final, Literal
 
 from pydantic import Field
 
 from src.core.schemas import StrictModel
+
+if TYPE_CHECKING:
+    from src.modules.content_processor.projects.store import ProjectStore
 
 __all__ = [
     "PRICES",
     "Budget",
     "DataClass",
     "DataPolicy",
+    "FileLock",
     "Price",
     "SpendLog",
     "UsageCost",
@@ -42,6 +52,86 @@ __all__ = [
 DataClass = Literal["public", "client_confidential"]
 
 _LOCK = threading.Lock()
+
+
+class FileLock:
+    """A lock other processes respect too: held on a file while the `with` block runs.
+
+    The web app's worker and the CLI are different processes, so a thread lock cannot
+    keep a limit between them; this one can (byte lock on Windows, `flock` elsewhere).
+    """
+
+    def __init__(self, path: Path) -> None:
+        """Bind to the lock file (created when first taken)."""
+        self.path = path
+        self._handle: IO[bytes] | None = None
+
+    def acquire(self, *, block: bool = True) -> bool:
+        """Take the lock; with `block=False` give up at once and return False when held."""
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        handle = self.path.open("a+b")
+        try:
+            while True:
+                try:
+                    if sys.platform == "win32":
+                        import msvcrt
+
+                        handle.seek(0)
+                        msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+                    else:
+                        import fcntl
+
+                        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except OSError:
+                    if not block:
+                        handle.close()
+                        return False
+                    time.sleep(0.05)
+        except BaseException:
+            handle.close()
+            raise
+        self._handle = handle
+        return True
+
+    def release(self) -> None:
+        """Give the lock back."""
+        handle, self._handle = self._handle, None
+        if handle is None:
+            return
+        try:
+            if sys.platform == "win32":
+                import msvcrt
+
+                handle.seek(0)
+                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                import fcntl
+
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        finally:
+            handle.close()
+
+    def held_elsewhere(self) -> bool:
+        """True when someone else holds it right now (a peek; nothing is kept)."""
+        if not self.acquire(block=False):
+            return True
+        self.release()
+        return False
+
+    def __enter__(self) -> FileLock:
+        """Take the lock (waiting for it)."""
+        self.acquire()
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> None:
+        """Give it back."""
+        self.release()
 
 
 class Price(StrictModel):
@@ -200,9 +290,14 @@ class Budget:
         return None
 
     def max_output_tokens(self, model: str, input_tokens_estimate: int, wanted: int) -> int:
-        """The largest output the remaining budget can pay for, counting input at full price."""
+        """The largest output the remaining budget can pay for.
+
+        The input is counted at its worst case: every call asks for prompt caching, and
+        tokens written to the cache are billed at the cache-write price (1.25 times the
+        input price in the table), not the plain input price.
+        """
         price = price_for(model)
-        input_usd = input_tokens_estimate * price.input / 1_000_000
+        input_usd = input_tokens_estimate * max(price.input, price.cache_write) / 1_000_000
         room = self.left - input_usd
         if room <= 0:
             return 0
@@ -218,23 +313,42 @@ class _PolicyFile(StrictModel):
 
 
 class DataPolicy:
-    """Each project's data class (`<root>/data_policy.json`); `public` unless set."""
+    """Each project's data class: `public` unless the project or the CLI file says otherwise.
 
-    def __init__(self, root: Path) -> None:
-        """Bind to the analyst folder."""
+    The CLI file is `<root>/data_policy.json`; the project's own flag is the
+    "Confidential" option of the app (`ProjectRecord.confidential`), read from the
+    project store when one is given. The stricter of the two wins, so a project marked
+    confidential in the app is refused by every Claude-run path exactly as
+    `client_confidential` set from the CLI is.
+    """
+
+    def __init__(self, root: Path, projects: ProjectStore | None = None) -> None:
+        """Bind to the analyst folder and, when given, the projects."""
         self.path = root / "data_policy.json"
+        self.projects = projects
 
     def _read(self) -> _PolicyFile:
         if not self.path.exists():
             return _PolicyFile()
         return _PolicyFile.model_validate_json(self.path.read_text(encoding="utf-8"))
 
+    def project_confidential(self, project_id: str) -> bool:
+        """The project's own "Confidential" option (False when unknown or no store)."""
+        if self.projects is None:
+            return False
+        try:
+            return bool(self.projects.get(project_id).confidential)
+        except (LookupError, ValueError):
+            return False
+
     def data_class(self, project_id: str) -> DataClass:
-        """The project's data class."""
+        """The project's data class (the stricter of the app's option and the CLI file)."""
+        if self.project_confidential(project_id):
+            return "client_confidential"
         return self._read().projects.get(project_id, "public")
 
     def set(self, project_id: str, data_class: DataClass) -> None:
-        """Set a project's data class."""
+        """Set a project's data class in the CLI file (the app's option is not changed)."""
         policy = self._read()
         policy.projects[project_id] = data_class
         self.path.parent.mkdir(parents=True, exist_ok=True)

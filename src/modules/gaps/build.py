@@ -29,7 +29,7 @@ from dataclasses import dataclass
 
 from src.modules.gaps.models import EvidenceItem, Finding, FindingKind, GapSettings
 from src.modules.monitoring.models import MonitorCheck
-from src.modules.research.competitors import CompetitorSuggestion
+from src.modules.research.competitors import CompetitorSuggestion, is_client_domain
 from src.modules.research.models import ResearchSnapshot, WebsiteResearch
 from src.modules.theming.models import Theme, ThemeMap
 
@@ -559,11 +559,15 @@ _CLOSE_COMMON = 50
 _CLOSE_RESULTS = 2
 
 
-def _unwatched_findings(suggested: Sequence[CompetitorSuggestion]) -> list[Finding]:
+def _unwatched_findings(
+    suggested: Sequence[CompetitorSuggestion], client_domains: Sequence[str] = ()
+) -> list[Finding]:
+    """Suggested competitors close enough to matter; never a client website of any project."""
     close = [
         s
         for s in suggested
         if s.status == "suggested"
+        and not is_client_domain(s.domain, client_domains)
         and (
             (s.relevance or 0.0) >= _CLOSE_RELEVANCE
             or s.common_keywords >= _CLOSE_COMMON
@@ -612,8 +616,14 @@ def build_findings(
     catalogs: Mapping[str, list[tuple[str, str | None]]] | None = None,
     suggested: Sequence[CompetitorSuggestion] = (),
     settings: GapSettings | None = None,
+    client_domains: Sequence[str] = (),
 ) -> list[Finding]:
-    """Every finding, highest priority first."""
+    """Every finding, highest priority first.
+
+    `client_domains` are addresses that are a client's website in any project: a
+    suggested competitor at one of them (a sister brand) is never an unwatched
+    competitor.
+    """
     demand = _theme_demand(research)
     findings = _theme_findings(theme_map, roles, demand)
     if research is not None:
@@ -622,5 +632,5 @@ def build_findings(
         findings += _momentum_findings(check, theme_map, roles, demand)
     if catalogs:
         findings += _offering_findings(catalogs, roles)
-    findings += _unwatched_findings(suggested)
+    findings += _unwatched_findings(suggested, client_domains)
     return sorted(findings, key=lambda f: (-f.priority, f.kind, f.title))
