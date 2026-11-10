@@ -124,8 +124,6 @@ __all__ = ["main"]
 
 _logger = get_logger("content_processor.cli")
 EXIT_PARENT_GONE = 75
-DOC_PARALLEL_TASKS = 4
-"""Images and documents read at once. They are local work: no request reaches a site."""
 TOOL_VERSIONS = {"engine": "0.2.0", "cli": "L6-1"}
 ALL_STAGES: tuple[StageName, ...] = ("fetch", "render", "docs")
 
@@ -366,7 +364,8 @@ async def _drive(
             worker_id=f"{worker_prefix}-docs",
             ocr_languages=scope.ocr_languages,
             locale=scope.locale,
-            parallel_tasks=DOC_PARALLEL_TASKS,
+            # Local work (no request reaches a site); CP_DOC_PARALLEL_TASKS caps it per machine.
+            parallel_tasks=get_settings().cp_doc_parallel_tasks,
         )
     try:
         return await execute_run(

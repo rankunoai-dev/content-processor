@@ -102,6 +102,9 @@ class Settings(BaseSettings):
     cp_url_history_root: Path = REPO_ROOT / "url_history"
     # App module 1: projects, their URL lists, runs and reports (never committed).
     cp_app_data_root: Path = REPO_ROOT / "app_data"
+    # Documents and images read at once during a scrape (local work, no requests to a
+    # site). 4 suits a workstation; set 1 or 2 in a container with 1-2 GB of memory.
+    cp_doc_parallel_tasks: int = Field(default=4, ge=1, le=16)
 
     # -- Content processor: knowledge base (RFC 0002 stages 5-7) -----------
     # Embedded vector store, used when Postgres with pgvector is not configured.
