@@ -45,6 +45,7 @@ from src.modules.content_processor.verify.detectors import (
     EvidenceProblem,
     PdfRegionRef,
     TextRegionDetector,
+    detect_screenshot_regions,
     evidence_problems,
     pdf_regions_from_evidence,
     screenshot_sha,
@@ -664,6 +665,36 @@ def _host_baselines(
     return {host: (float(statistics.median(ws)), len(ws)) for host, ws in words.items()}
 
 
+def _screenshot_regions(
+    resources: Iterable[Resource],
+    *,
+    histories: Mapping[str, Sequence[RunEvent]],
+    summaries: Mapping[str, Mapping[str, Any]],
+    evidence: EvidenceStore | None,
+    detector: TextRegionDetector | None,
+    workers: int,
+) -> dict[str, list[DetectedRegion] | None]:
+    """R6 text regions of every rendered page's screenshot, by resource id.
+
+    Pages without a render, a screenshot or a detector are left out (their
+    record gets None, as before). The screenshots are detected together, up to
+    `workers` at a time, one call per page in resource order, exactly as the
+    serial loop did.
+    """
+    if detector is None or evidence is None:
+        return {}
+    shot_of: dict[str, str] = {}
+    for res in resources:
+        if "render" not in summaries.get(res.resource_id, {}):
+            continue
+        shot = screenshot_sha(histories.get(res.resource_id, ()), res.resource_id)
+        if shot is not None and evidence.exists(shot):
+            shot_of[res.resource_id] = shot
+    images = [evidence.get(shot) for shot in shot_of.values()]
+    found = detect_screenshot_regions(detector, images, workers)
+    return dict(zip(shot_of, found, strict=True))
+
+
 def url_records_for_run(
     reader: RunReader,
     *,
@@ -677,6 +708,7 @@ def url_records_for_run(
     evidence: EvidenceStore | None = None,
     detector: TextRegionDetector | None = None,
     ocr_available: bool | None = None,
+    detect_workers: int = 1,
 ) -> list[UrlRecord]:
     """One record per scheduled URL plus one per excluded input.
 
@@ -700,6 +732,9 @@ def url_records_for_run(
         detector: Text-region detector for R6 (`default_detector()`); None when
             no engine is installed, which records warn about.
         ocr_available: Whether OCR could run (R8); None detects it.
+        detect_workers: How many screenshots the detector reads at once
+            (`CP_DOC_PARALLEL_TASKS`); the regions and their order per record
+            are the same as one by one.
     """
     expected = dict(expectations or {})
     ocr = is_ocr_available() if ocr_available is None else ocr_available
@@ -722,16 +757,22 @@ def url_records_for_run(
             )
     blocks_by_id = {r.resource_id: reader.get_blocks(r.resource_id) for r in resources.values()}
     baselines = _host_baselines(resources.values(), blocks_by_id)
+    ids = [r.resource_id for r in resources.values()]
+    histories = {rid: reader.get_events(run_id, rid) for rid in ids}
+    summaries_by_id = {rid: reader.get_summaries(rid) for rid in ids}
+    regions_by_id = _screenshot_regions(
+        resources.values(),
+        histories=histories,
+        summaries=summaries_by_id,
+        evidence=evidence,
+        detector=detector,
+        workers=detect_workers,
+    )
     records: list[UrlRecord] = []
     for key, res in resources.items():
-        history = reader.get_events(run_id, res.resource_id)
+        history = histories[res.resource_id]
         blocks = blocks_by_id[res.resource_id]
-        summaries = reader.get_summaries(res.resource_id)
-        regions: list[DetectedRegion] | None = None
-        if detector is not None and evidence is not None and "render" in summaries:
-            shot = screenshot_sha(history, res.resource_id)
-            if shot is not None and evidence.exists(shot):
-                regions = detector.detect(evidence.get(shot))
+        summaries = summaries_by_id[res.resource_id]
         records.append(
             assemble_url_record(
                 run_id=run_id,
@@ -745,7 +786,7 @@ def url_records_for_run(
                 work_outstanding=res.resource_id in outstanding,
                 tool_versions=tool_versions,
                 assume_discovery_closed=assume_discovery_closed,
-                visual_regions=regions,
+                visual_regions=regions_by_id.get(res.resource_id),
                 detector_name=detector.name if detector is not None else None,
                 pdf_regions=pdf_regions_for(res) if pdf_regions_for is not None else None,
                 ocr_available=ocr,

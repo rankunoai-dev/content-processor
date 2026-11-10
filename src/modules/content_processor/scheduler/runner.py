@@ -26,6 +26,7 @@ from typing import Any, Literal, Protocol
 
 from pydantic import Field
 
+from src.core.config import get_settings
 from src.core.logger import get_logger
 from src.core.schemas import StrictModel
 from src.integrations.evidence_store import EvidenceStore
@@ -527,6 +528,8 @@ def assemble_run_records(
         tool_versions=tool_versions,
         evidence=evidence,
         detector=default_detector(),
+        # R6 OCRs every rendered page's screenshot; several at once, same regions (K-perf).
+        detect_workers=get_settings().cp_doc_parallel_tasks,
     )
 
 

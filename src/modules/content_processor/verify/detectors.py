@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import hashlib
 from collections.abc import Callable, Iterable, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Literal, Protocol
 
 from pydantic import Field
@@ -32,6 +33,7 @@ __all__ = [
     "PdfRegionRef",
     "TextRegionDetector",
     "default_detector",
+    "detect_screenshot_regions",
     "evidence_problems",
     "group_lines",
     "pdf_regions_from_evidence",
@@ -139,6 +141,23 @@ def group_lines(words: Sequence[DetectedRegion]) -> list[DetectedRegion]:
 def default_detector() -> TextRegionDetector | None:
     """The baseline detector when Tesseract is installed, else None."""
     return OcrRegionDetector() if is_ocr_available() else None
+
+
+def detect_screenshot_regions(
+    detector: TextRegionDetector, images: Sequence[bytes], workers: int = 1
+) -> list[list[DetectedRegion] | None]:
+    """`detector.detect` over `images`, in order, with up to `workers` running at once.
+
+    Tesseract is a subprocess per call, so threads are enough to overlap the
+    work; each image is detected exactly once and the result list lines up with
+    `images`. With one worker (or one image) this is the plain serial loop.
+    """
+    if not images:
+        return []
+    if workers <= 1 or len(images) == 1:
+        return [detector.detect(image) for image in images]
+    with ThreadPoolExecutor(max_workers=min(workers, len(images))) as pool:
+        return list(pool.map(detector.detect, images))
 
 
 def screenshot_sha(history: Iterable[RunEvent], resource_id: str) -> str | None:
