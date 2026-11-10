@@ -70,6 +70,7 @@ import { MonitoringTab } from './MonitoringTab';
 import { ResearchTab } from './ResearchTab';
 import { GapsTab } from './GapsTab';
 import { ProjectReportsTab } from './ProjectReportsTab';
+import { RunProgressPanel } from './project/RunProgressPanel';
 import { StatusBar, StatusLegend } from '../components/StatusBar';
 import { PageHeading } from '../components/bits';
 import { moduleByTab } from '../modules';
@@ -805,6 +806,7 @@ function ScrapePanel({
           </Space>
         </Card>
       )}
+      <RunProgressPanel project={project} site={site} runs={runs} />
       <Card title={PROJECTS.history}>
         <Table
           rowKey="run_id"

@@ -1595,7 +1595,105 @@ export const PROJECTS = {
     ['.jsonl', 'The same data for other tools (JSON lines)'],
     ['_manifest.json', 'Technical summary of the run'],
   ] as [string, string][],
+  /** The live view of a scrape: its batches, the pages of a batch and the batch log. */
+  progressView: {
+    title: 'Batches and pages',
+    help: 'A scrape works through its addresses in batches. Click a batch to see its pages, the stage each one reached and how much of its content was captured.',
+    earlier: 'Batches and pages of earlier scrapes',
+    batch: 'Batch',
+    state: 'State',
+    pagesDone: 'Pages done',
+    results: 'Results',
+    attempt: 'Try',
+    attemptOf: (n: number) => `try ${n}`,
+    started: 'Started',
+    states: {
+      waiting: 'Waiting',
+      running: 'Scraping',
+      done: 'Done',
+      retrying: 'Trying again',
+    } as Record<string, string>,
+    inProgress: (p: { pages: number; fetched: number; rendered: number }) =>
+      `${p.fetched} of ${p.pages} downloaded · ${p.rendered} rendered`,
+    pagesOf: (n: number) => `Pages of batch ${n}`,
+    pickBatch: 'Click a batch to see its pages.',
+    url: 'Page',
+    stage: 'Stage',
+    stages: {
+      queued: 'Waiting',
+      downloaded: 'Downloaded',
+      rendered: 'Rendered in a browser',
+      done: 'Done',
+    } as Record<string, string>,
+    result: 'Result',
+    notYet: 'Not finished yet',
+    earlierTry: (n: number) => `Result of try ${n}; being done again`,
+    completeness: 'Content captured',
+    completenessHelp:
+      'Of the main-content blocks found on the page, the share whose text was verified as captured. Menus, footers and other page furniture are not counted. A dash means no main content was found, for example an image file or a blocked page.',
+    noCompleteness: '—',
+    reason: 'Why',
+    gaps: 'Open issues',
+    /** The first clause of the engine's reason, in plain words; anything else is shown as written. */
+    reasons: {
+      rendered: 'Rendered in a browser',
+      fetched: 'Downloaded',
+      'unchanged:http_304_not_modified': 'Unchanged since the last scrape',
+      image_extracted: 'Image file',
+      document_extracted: 'Document file',
+      'robots_disallow:parsed': 'The website asks robots not to read it',
+      lead_gen_form_wall: 'Behind a form',
+      login_wall: 'Behind a login',
+      paywall: 'Behind a paywall',
+      interactive_captcha: 'A human check (CAPTCHA) stood in the way',
+      transport_error: 'The website did not answer',
+      http_404: 'Page not found (404)',
+      http_403: 'Access refused (403)',
+      http_429: 'The website asked us to slow down (429)',
+      http_5xx: 'The website had an error',
+    } as Record<string, string>,
+    liveLog: 'Live log',
+    logTitle: (batch: number, attempt: number) => `Log of batch ${batch}, try ${attempt}`,
+    logHelp: 'What the scraper reports while it works on this batch, newest at the bottom.',
+    pause: 'Pause',
+    follow: 'Follow',
+    levels: { all: 'Everything', problems: 'Problems only' },
+    logEmpty: 'Nothing reported yet.',
+    logMissing: 'This batch has no log yet.',
+    logNoBatch: 'The log opens once a batch is running.',
+    /** The engine's log messages in plain words; others are shown with their underscores removed. */
+    logMessages: {
+      run_execution_started: 'The batch started',
+      run_execution_finished: 'The batch finished',
+      explore_click_failed: 'A control on the page could not be clicked',
+      image_open_error: 'An image could not be opened',
+      capture_not_reused: 'A saved copy could not be reused; the page is requested again',
+      capture_save_failed: 'A copy could not be saved; the scrape goes on',
+      fetch_failed: 'A download failed',
+      render_failed: 'A browser render failed',
+      robots_disallow: 'Skipped: the website asks robots not to read it',
+      host_backoff: 'Waiting before asking this website again',
+      budget_stopped: 'Stopped by the budget',
+    } as Record<string, string>,
+  },
 };
+
+/** A log message as a sentence a person can read. */
+export function describeLogMessage(message: string): string {
+  const known = PROJECTS.progressView.logMessages[message];
+  if (known) return known;
+  const words = message.replace(/[_.]+/g, ' ').trim();
+  return words ? words.charAt(0).toUpperCase() + words.slice(1) : message;
+}
+
+/** The first clause of a page's reason in plain words. */
+export function describeStageReason(reason: string): string {
+  if (!reason) return '';
+  const known = PROJECTS.progressView.reasons[reason];
+  if (known) return known;
+  const head = reason.split(':')[0] ?? reason;
+  return PROJECTS.progressView.reasons[head] ?? reason.replace(/_/g, ' ');
+}
 
 export function reportKind(name: string): { rank: number; text: string } {
   const index = PROJECTS.reportKinds.findIndex(([end]) => name.endsWith(end));

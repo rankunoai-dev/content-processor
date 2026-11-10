@@ -72,6 +72,7 @@ from src.modules.content_processor.projects.urls import (
     candidates_from_text,
 )
 from src.modules.content_processor.projects.websites import WebsiteGraph
+from src.modules.content_processor.webapi.run_progress import register_run_progress_routes
 
 __all__ = ["PROJECT_TOKEN_HEADER", "KnowledgeAccess", "register_project_routes"]
 
@@ -434,6 +435,7 @@ def register_project_routes(
 ) -> None:
     """Add the project and knowledge routes to the app (before its catch-all routes)."""
     attempts = limiter or AttemptLimiter()
+    register_run_progress_routes(app, store=store)  # live batches, pages and log of a run
 
     def project(project_id: str) -> ProjectRecord:
         try:
