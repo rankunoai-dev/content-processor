@@ -111,7 +111,11 @@ from src.modules.content_processor.scheduler.site_controls import (
 )
 from src.modules.content_processor.scope.frontier import FrontierPlan, build_frontier
 from src.modules.content_processor.scope.ssrf import EgressDecision, IpClass, check_host
-from src.modules.content_processor.verify.reverdict import reverdict_file, reverdict_folder
+from src.modules.content_processor.verify.reverdict import (
+    gate_recheck,
+    reverdict_file,
+    reverdict_folder,
+)
 from src.modules.content_processor.workers.doc_worker import DocWorker
 from src.modules.content_processor.workers.fetch_worker import FetchWorker, user_agent_for
 from src.modules.content_processor.workers.ports import LedgerPort
@@ -801,7 +805,14 @@ def cmd_fetch(args: argparse.Namespace) -> int:
 def cmd_reverdict(args: argparse.Namespace) -> int:
     """Remove false-alarm gaps from stored records and derive their badges again."""
     target = Path(args.records)
-    result = reverdict_folder(target) if target.is_dir() else reverdict_file(target)
+    recheck = None
+    if not args.no_recheck:
+        root = Path(args.evidence_root) if args.evidence_root else get_settings().cp_evidence_root
+        recheck = gate_recheck(LocalEvidenceStore(root, args.tenant))
+    if target.is_dir():
+        result = reverdict_folder(target, recheck=recheck)
+    else:
+        result = reverdict_file(target, recheck=recheck)
     _emit(result.as_dict())
     return 0
 
@@ -967,6 +978,13 @@ def main(argv: list[str] | None = None) -> int:
         help="re-score stored records after a verdict rule was corrected (no new scrape)",
     )
     p_rev.add_argument("--records", required=True, help="a .records.jsonl file or a run folder")
+    p_rev.add_argument("--tenant", default="rankuno-dev", help="whose evidence store to read")
+    p_rev.add_argument("--evidence-root", default=None, help="defaults to CP_EVIDENCE_ROOT")
+    p_rev.add_argument(
+        "--no-recheck",
+        action="store_true",
+        help="do not re-run the gate rules on the stored pages (rule-only re-scoring)",
+    )
     p_rev.set_defaults(func=cmd_reverdict)
 
     register_report_command(sub)

@@ -23,9 +23,12 @@ from src.modules.content_processor.enums import (
     EntityStatus,
     UrlBadge,
 )
+from src.modules.content_processor.governor.gates import GateFinding
 from src.modules.content_processor.recrawl.baseline import Baseline
+from src.modules.content_processor.verify.gaps import gap_for_gate
 from src.modules.content_processor.verify.record import assemble_url_record
 from src.modules.content_processor.verify.reverdict import (
+    gate_recheck,
     reverdict_file,
     reverdict_record,
 )
@@ -305,3 +308,61 @@ def test_reverdict_never_upgrades_a_blocked_or_failed_page(status: EntityStatus)
     )
     updated, _ = reverdict_record(stored)
     assert updated.badge is rec.badge
+
+
+# -- gate flags are checked again on the stored page -----------------------------
+
+
+class _Store:
+    def __init__(self, **objects: bytes) -> None:
+        self.objects = objects
+
+    def get(self, sha256: str) -> bytes:
+        return self.objects[sha256]
+
+
+def _gated_record(dom: bytes, text: str, kind: str = "lead_gen_form_wall"):
+    """A page the worker lowered to PARTIAL because of a gate, as the old rules saw it."""
+    finding = GateFinding(kind=kind, severity="partial", evidence=["x"], main_word_count=900)
+    gap, implied = gap_for_gate(RUN, "res-1", finding, ["evidence:dom", "evidence:txt"])
+    assert implied is EntityStatus.PARTIAL
+    target = _res(
+        status=EntityStatus.PARTIAL,
+        status_reason=f"rendered;all_rendered_blocks_verified;{kind};discovery_closed_within_scope",
+    )
+    rec = _record(target=target, recorded_gaps=[gap])
+    assert rec.badge is UrlBadge.PARTIAL
+    return rec, _Store(dom=dom, txt=text.encode("utf-8"))
+
+
+def test_a_gate_the_current_rules_no_longer_find_is_withdrawn_and_the_page_verified():
+    dom = b"<html><body><main><p>" + b"word " * 900 + b"</p></main></body></html>"
+    rec, store = _gated_record(dom, "word " * 900)
+    updated, dropped = reverdict_record(rec, gate_recheck(store))
+    assert dropped == 1
+    assert updated.badge is UrlBadge.VERIFIED_WITHIN_SCOPE
+    assert updated.resource_status is EntityStatus.VERIFIED_EXTRACTED
+    assert "gate_withdrawn:PARTIAL->VERIFIED_EXTRACTED" in updated.warnings
+
+
+def test_a_gate_still_found_on_the_stored_page_is_kept():
+    dom = (
+        b"<html><body><div class='modal'>Are you a healthcare professional? "
+        b"<button>Yes</button><button>No</button></div><main><p>short</p></main></body></html>"
+    )
+    rec, store = _gated_record(
+        dom, "Are you a healthcare professional? Yes No", "age_or_audience_gate"
+    )
+    recheck = gate_recheck(store)
+    verdict = recheck(rec.gaps[0])
+    if verdict is True:  # the current rules still gate this page
+        same, dropped = reverdict_record(rec, recheck)
+        assert dropped == 0 and same is rec
+    else:  # the rules changed under this test: it must then be withdrawn, never kept silently
+        assert verdict is False
+
+
+def test_unreadable_evidence_leaves_the_gate_in_place():
+    rec, _ = _gated_record(b"<html></html>", "")
+    same, dropped = reverdict_record(rec, gate_recheck(_Store()))
+    assert dropped == 0 and same is rec
