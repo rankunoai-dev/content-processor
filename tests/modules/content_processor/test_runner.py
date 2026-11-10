@@ -442,12 +442,15 @@ async def test_fine_poll_keeps_one_second_pacing_and_trims_the_overshoot(tmp_pat
     assert RunOptions().poll_s == 0.1
     fast = await _lease_gaps(tmp_path, poll_s=0.1)
     slow = await _lease_gaps(tmp_path, poll_s=0.5)
-    assert min(fast) >= 1.0 and min(slow) >= 1.0, "politeness: never two leases within 1 s"
+    # The ledger refuses any lease inside the host's 1 s on its own clock; the gaps here are
+    # taken around the call on a second clock, so allow a few milliseconds of jitter.
+    assert min(fast) >= 0.995 and min(slow) >= 0.995, "politeness: never two leases within 1 s"
     mean_fast = sum(fast) / len(fast)
     mean_slow = sum(slow) / len(slow)
-    # A 0.1 s poll overshoots the 1 s pace by at most ~0.1 s plus scheduling; 0.5 s by up to 0.5 s.
-    assert mean_fast <= 1.3
-    assert mean_fast <= max(mean_slow, 1.3)
+    # The loop sleeps until the host is ready (MemoryLedger.next_ready_in) and otherwise polls
+    # every 0.1 s, so the pace is overshot by milliseconds, not by up to a poll interval.
+    assert mean_fast <= 1.1
+    assert mean_fast <= max(mean_slow, 1.1)
 
 
 async def test_overlapped_run_reports_no_progress_only_when_both_chains_stall():

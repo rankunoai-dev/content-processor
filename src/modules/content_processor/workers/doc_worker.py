@@ -64,7 +64,7 @@ from src.modules.content_processor.enums import (
 )
 from src.modules.content_processor.ledger.serial import SerialLedger
 from src.modules.content_processor.provenance import stamp_blocks
-from src.modules.content_processor.workers.ports import LedgerPort
+from src.modules.content_processor.workers.ports import LedgerPort, ready_wait_s
 
 __all__ = ["DocWorker", "ExtractionPool", "run_isolated"]
 
@@ -391,8 +391,9 @@ class DocWorker:
             elif waited >= max_wait_s:
                 _logger.warning("doc_loop_gave_up_waiting", extra={"waited_s": waited})
                 break
-            waited += poll_s
-            await asyncio.sleep(poll_s)
+            delay = ready_wait_s(self._ledger, _KINDS, self._run_id, poll_s)
+            waited += delay
+            await asyncio.sleep(delay)
         return processed
 
     def process(self, task: Task) -> None:

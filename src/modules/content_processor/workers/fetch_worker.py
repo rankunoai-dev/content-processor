@@ -86,7 +86,7 @@ from src.modules.content_processor.scope.followups import (
 )
 from src.modules.content_processor.scope.normalize import InvalidInputUrl, normalize_url
 from src.modules.content_processor.verify.gaps import gap_for_gate, gap_id_for
-from src.modules.content_processor.workers.ports import LedgerPort, RobotsCache
+from src.modules.content_processor.workers.ports import LedgerPort, RobotsCache, ready_wait_s
 from src.modules.content_processor.workers.render_worker import RENDER_MAX_ATTEMPTS
 
 __all__ = ["FetchWorker", "extraction_kind_for", "user_agent_for", "visitor_user_agent"]
@@ -233,8 +233,9 @@ class FetchWorker:
                 elif waited >= max_wait_s:
                     _logger.warning("fetch_loop_gave_up_waiting", extra={"waited_s": waited})
                     break
-                waited += poll_s
-                await asyncio.sleep(poll_s)
+                delay = ready_wait_s(self._ledger, [TaskKind.FETCH], self._run_id, poll_s)
+                waited += delay
+                await asyncio.sleep(delay)
                 continue
             idle = 0
             waited = 0.0

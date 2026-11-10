@@ -25,7 +25,29 @@ from src.modules.content_processor.contracts import (
 from src.modules.content_processor.enums import TaskKind, TaskState
 from src.modules.content_processor.governor.escalation import HostAccessState
 
-__all__ = ["LedgerPort", "RobotsCache"]
+__all__ = ["LedgerPort", "RobotsCache", "ready_wait_s"]
+
+_MAX_EXACT_WAIT_S = 1.0
+
+
+def ready_wait_s(
+    ledger: Any, kinds: Sequence[TaskKind], run_id: str | None, poll_s: float
+) -> float:
+    """How long a worker loop should sleep after a refused lease.
+
+    A ledger that can say when its next task becomes leasable
+    (`next_ready_in`, the in-memory ledger) is slept on exactly, so a host's
+    1 s pace is met without the overshoot of a fixed poll; longer holds are
+    re-checked every second. Any other ledger, or a hold that is not a clock,
+    gets the plain `poll_s`.
+    """
+    hint = getattr(ledger, "next_ready_in", None)
+    if hint is None:
+        return poll_s
+    seconds = hint(kinds, run_id=run_id)
+    if seconds is None or seconds <= 0:
+        return poll_s
+    return min(float(seconds) + 0.002, max(poll_s, _MAX_EXACT_WAIT_S))
 
 
 class RobotsCache(StrictModel):

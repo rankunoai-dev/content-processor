@@ -144,6 +144,40 @@ class MemoryLedger:
             return task
         return None
 
+    def next_ready_in(self, kinds: Sequence[TaskKind], run_id: str | None = None) -> float | None:
+        """Seconds until the earliest pending task of these kinds may be leased, or None.
+
+        None means nothing is pending, or something is pending but its hold is
+        not a clock (a host slot in use, an open circuit): the caller then polls.
+        Lets a loop sleep exactly until a host's next allowed time instead of
+        overshooting it by a poll interval.
+        """
+        now = datetime.now(UTC)
+        soonest: datetime | None = None
+        for task in self._tasks.values():
+            if (
+                task.state is not TaskState.PENDING
+                or task.kind not in kinds
+                or (run_id is not None and task.run_id != run_id)
+            ):
+                continue
+            ready = task.not_before or now
+            if task.kind in HOST_SLOT_KINDS:
+                host = task.host
+                if self._in_flight.get(host, 0) >= self._max_concurrency:
+                    return None
+                state = self.hosts.get(host)
+                if state is not None and state.can_attempt(now).kind.value == "CIRCUIT_OPEN":
+                    return None
+                ready = max(
+                    ready, self._next_allowed.get(host, now), self._retry_after.get(host, now)
+                )
+            if ready <= now:
+                return None  # leasable now; a refusal has another cause, so poll
+            if soonest is None or ready < soonest:
+                soonest = ready
+        return None if soonest is None else max(0.0, (soonest - now).total_seconds())
+
     def pending_count(self, kinds: Sequence[TaskKind], run_id: str | None = None) -> int:
         """Non-terminal tasks of the given kinds (in one run when `run_id` is given)."""
         return sum(

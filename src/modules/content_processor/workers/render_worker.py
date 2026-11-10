@@ -49,7 +49,7 @@ from src.modules.content_processor.provenance import stamp_blocks
 from src.modules.content_processor.scheduler.capture_journal import CaptureJournal
 from src.modules.content_processor.verify.gaps import gap_for_gate, gap_id_for
 from src.modules.content_processor.verify.reconcile import reconcile_source_vs_rendered
-from src.modules.content_processor.workers.ports import LedgerPort
+from src.modules.content_processor.workers.ports import LedgerPort, ready_wait_s
 
 __all__ = ["Explorer", "RenderWorker", "Renderer"]
 
@@ -148,8 +148,9 @@ class RenderWorker:
                         break
                 elif waited >= max_wait_s:
                     break
-                waited += poll_s
-                await asyncio.sleep(poll_s)
+                delay = ready_wait_s(self._ledger, [TaskKind.RENDER], self._run_id, poll_s)
+                waited += delay
+                await asyncio.sleep(delay)
                 continue
             idle = 0
             waited = 0.0
