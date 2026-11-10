@@ -11,6 +11,12 @@ instructions say so, `list_projects` shows only those modules' state, and the we
 refuses any other module's tool on that connection. A module's own results may still
 mention what they were built from (a gap finding names its theme): that is the module's
 output, not a look-up in another module.
+
+**Confidential projects.** Every tool is marked `exposes_text`: whether its answer can
+carry verbatim page text (passages, sections, descriptions, FAQ questions, rewritten
+text). For a project marked confidential in the app, the web app runs only the tools
+that do not (counts, names, URLs, titles, themes, rankings, findings) and refuses the
+rest with a plain reason.
 """
 
 from __future__ import annotations
@@ -31,8 +37,10 @@ __all__ = [
     "MAX_DELIVERABLE_CHARS",
     "SCOPES",
     "Scope",
+    "TEXT_TOOLS",
     "ToolDef",
     "definitions",
+    "exposes_text",
     "instructions",
     "parse_scope",
     "scope_label",
@@ -41,6 +49,23 @@ __all__ = [
 
 MAX_DELIVERABLE_CHARS: Final = 200_000
 EXTRA_TOOLS: Final = ("list_projects", "check_deliverable", "present_answer")
+
+# The tools whose answers can carry verbatim page text. Decided per tool from what each
+# returns: search_knowledge (passages), get_page (every section), get_page_facts (meta
+# description, FAQ questions, CTA wording), get_changes (added and removed text, rewrites)
+# and get_monitoring_alerts (its alerts quote rewrites and changed text). The others
+# return counts, names, URLs, titles, page types, theme labels, keywords, search data or
+# findings written by the engine; check_deliverable and present_answer only check text
+# Claude wrote and hand back page titles and links as sources.
+TEXT_TOOLS: Final[frozenset[str]] = frozenset(
+    {"search_knowledge", "get_page", "get_page_facts", "get_changes", "get_monitoring_alerts"}
+)
+
+
+def exposes_text(tool: str) -> bool:
+    """True when the tool's answer can carry page text (refused for confidential projects)."""
+    return tool in TEXT_TOOLS
+
 
 Scope = frozenset[str] | None
 """None: every module. Otherwise the module keys this connection may use."""
@@ -119,6 +144,10 @@ How to work:
 5. You cannot scrape websites, pull from Semrush, change statuses or rebuild on request; say
    which button in the app does it when the user needs that.
 {scope_rule}
+7. A project listed with "confidential": true never shows you its page text: tools that
+   return passages, page sections, page facts or changed text are refused for it. Work from
+   what the other tools give (counts, names, themes, rankings, findings) and tell the user
+   plainly when a question needs the pages themselves.
 
 How to present answers to the user (readability comes first):
 - Give every answer with facts through present_answer: choose its type (answer, overview,
@@ -153,6 +182,8 @@ class ToolDef:
     description: str
     input_schema: dict[str, object]
     module: str | None = None
+    exposes_text: bool = False
+    """Whether its answer can carry page text (refused for confidential projects)."""
 
 
 def _with_project(schema: dict[str, object]) -> dict[str, object]:
@@ -223,13 +254,16 @@ def definitions(scope: Scope = None) -> list[ToolDef]:
         if scope is not None and key not in scope:
             continue
         label = SCOPES[key][1].split(" (")[0]
+        text = exposes_text(name)
         out.append(
             ToolDef(
                 name,
                 f"{label}: {_title(name)}",
-                f"[{label}] {spec.description} (read-only)",
+                f"[{label}] {spec.description} (read-only"
+                + ("; not available for confidential projects)" if text else ")"),
                 _with_project(spec.input_model.model_json_schema()),
                 key,
+                text,
             )
         )
     if scope is None or "themes" in scope:
