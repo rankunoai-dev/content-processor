@@ -20,6 +20,7 @@ from src.core.guardrails import AutoApproveProvider, GuardrailEngine
 from src.core.rate_limiter import CostLedger
 from src.core.registry import registry
 from src.core.schemas import RiskClass, ToolMetadata
+from src.modules.content_processor.adapters.ocr import reset_ocr_probe_cache
 from src.modules.content_processor.contracts import Authorization, Budgets, RunScope
 from src.modules.content_processor.enums import AccessTier, AuthorizationKind
 
@@ -50,6 +51,14 @@ def _isolate_registry() -> Iterator[None]:
     registry.clear()
     yield
     registry.clear()
+
+
+@pytest.fixture(autouse=True)
+def _forget_ocr_probes() -> Iterator[None]:
+    """The engine probes are cached per process; tests that fake the engine start clean."""
+    reset_ocr_probe_cache()
+    yield
+    reset_ocr_probe_cache()
 
 
 @pytest.fixture

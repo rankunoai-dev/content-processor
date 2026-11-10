@@ -9,6 +9,7 @@ to English silently.
 
 from __future__ import annotations
 
+import functools
 import importlib
 import io
 import os
@@ -34,6 +35,7 @@ __all__ = [
     "detect_script_from_text",
     "installed_packs",
     "ocr_engine_info",
+    "reset_ocr_probe_cache",
     "tessdata_dir",
     "tesseract_cmd",
     "is_ocr_available",
@@ -231,8 +233,14 @@ def _tesseract() -> Any:
     return module
 
 
+@functools.lru_cache(maxsize=1)
 def is_ocr_available() -> bool:
-    """True when a Tesseract executable is installed and answers a version probe."""
+    """True when a Tesseract executable is installed and answers a version probe.
+
+    The probe runs `tesseract --version` in a subprocess; the engine does not
+    come and go during a run, so the answer is kept for the life of the process
+    (`reset_ocr_probe_cache()` forgets it, for tests).
+    """
     if tesseract_cmd() is None:
         return False
     try:
@@ -242,8 +250,13 @@ def is_ocr_available() -> bool:
     return True
 
 
+@functools.lru_cache(maxsize=1)
 def installed_packs() -> list[str] | None:
-    """Language packs the local Tesseract can load, or None when the engine is unavailable."""
+    """Language packs the local Tesseract can load, or None when the engine is unavailable.
+
+    Probed once per process (`tesseract --list-langs`); callers read the list,
+    they must not change it.
+    """
     if not is_ocr_available():
         return None
     try:
@@ -251,6 +264,12 @@ def installed_packs() -> list[str] | None:
     except Exception:  # noqa: BLE001 - treat any probe failure as "unknown"
         return None
     return [str(lang) for lang in langs if lang != "osd"]
+
+
+def reset_ocr_probe_cache() -> None:
+    """Forget the engine and pack probes so the next call asks Tesseract again."""
+    is_ocr_available.cache_clear()
+    installed_packs.cache_clear()
 
 
 def ocr_engine_info() -> dict[str, Any]:

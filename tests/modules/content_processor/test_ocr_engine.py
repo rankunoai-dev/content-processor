@@ -11,6 +11,7 @@ import pytest
 from PIL import Image, ImageDraw, ImageFont
 
 from src.modules.content_processor.adapters import ocr
+from src.modules.content_processor.adapters.image import extract_image
 from src.modules.content_processor.verify.detectors import (
     DetectedRegion,
     OcrRegionDetector,
@@ -78,6 +79,65 @@ def test_engine_info_and_pytesseract_wiring(monkeypatch: pytest.MonkeyPatch):
     }
     assert fake.pytesseract.tesseract_cmd == "C:/T/tesseract.exe"
     assert calls["config"] == "--tessdata-dir C:/packs"
+
+
+def test_engine_probes_run_once_per_process_not_per_image(monkeypatch: pytest.MonkeyPatch):
+    """Ten images cost one `--version` and one `--list-langs` probe, not ~30."""
+    probes = {"version": 0, "languages": 0, "osd": 0, "data": 0}
+
+    def version() -> str:
+        probes["version"] += 1
+        return "5.4.0"
+
+    def languages(config: str) -> list[str]:
+        probes["languages"] += 1
+        return ["eng", "osd"]
+
+    def osd(image: Any, config: str) -> str:
+        probes["osd"] += 1
+        return "Script: Latin\nScript confidence: 2.0\n"
+
+    def data(image: Any, lang: str, config: str, output_type: Any) -> dict[str, list[Any]]:
+        probes["data"] += 1
+        return {
+            "text": ["Hello"],
+            "conf": ["91"],
+            "left": [1],
+            "top": [1],
+            "width": [40],
+            "height": [12],
+        }
+
+    fake = SimpleNamespace(
+        pytesseract=SimpleNamespace(tesseract_cmd="tesseract"),
+        Output=SimpleNamespace(DICT="dict"),
+        get_tesseract_version=version,
+        get_languages=languages,
+        image_to_osd=osd,
+        image_to_data=data,
+    )
+    monkeypatch.setattr(ocr.importlib, "import_module", lambda _name: fake)
+    monkeypatch.setattr(ocr, "tesseract_cmd", lambda: "C:/T/tesseract.exe")
+    monkeypatch.setattr(ocr, "tessdata_dir", lambda: None)
+    ocr.reset_ocr_probe_cache()
+    image = Image.new("RGB", (200, 100), "white")
+    buf = io.BytesIO()
+    image.save(buf, format="PNG")
+    for i in range(10):
+        extraction = extract_image(
+            buf.getvalue(),
+            resource_id=f"res-{i}",
+            run_id="run",
+            evidence_id="evidence:x",
+            media_type="image/png",
+        )
+        assert any("Hello" in b.normalized_text for b in extraction.blocks)
+    assert probes["osd"] == 10 and probes["data"] == 10, "the real OCR calls still happen"
+    assert probes["version"] == 1 and probes["languages"] == 1
+    assert ocr.installed_packs() == ["eng"] and ocr.is_ocr_available() is True
+    ocr.reset_ocr_probe_cache()
+    assert ocr.installed_packs() == ["eng"]
+    assert probes["version"] == 2 and probes["languages"] == 2, "reset forces one fresh probe"
 
 
 def _word(
