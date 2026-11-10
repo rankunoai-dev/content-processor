@@ -6,6 +6,14 @@ and text-bearing images, write blocks and gaps, and set the resource status.
 The worker never raises out of `process()`. A parser crash or hang cannot take
 the worker down because the adapter runs in a separate, killable process.
 
+The child processes are long-lived (`ExtractionPool`): `parallel_tasks`
+interpreters are started on first use and fed one task at a time over a pipe,
+instead of a fresh interpreter (1-3 s of imports) per document. A child that
+exceeds the time limit is killed and replaced (the task ends PARTIAL with a
+LIMIT_HIT gap, as before); a child that dies mid-task is replaced and the task
+is retried (`extraction_process_died`); every child is recycled after
+`recycle_after` tasks so a leaky parser cannot grow without bound.
+
 Statuses here are extraction outcomes. Nothing is VERIFIED_EXTRACTED at
 resource level: verification belongs to the verification lane.
 """
@@ -15,6 +23,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import multiprocessing
+import queue
 import threading
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
@@ -57,7 +66,7 @@ from src.modules.content_processor.ledger.serial import SerialLedger
 from src.modules.content_processor.provenance import stamp_blocks
 from src.modules.content_processor.workers.ports import LedgerPort
 
-__all__ = ["DocWorker"]
+__all__ = ["DocWorker", "ExtractionPool", "run_isolated"]
 
 _logger = get_logger("content_processor.doc_worker")
 
@@ -65,6 +74,7 @@ TOOL_VERSION = "doc_worker/1.0"
 _KINDS = (TaskKind.EXTRACT_DOC, TaskKind.EXTRACT_IMAGE)
 _RETRY_BACKOFF_S = (5, 30)
 _MAX_PDF_REGION_OCR = 50
+RECYCLE_CHILD_AFTER_TASKS = 50
 
 
 def _child_main(conn: Any, fn: Callable[..., Any], kwargs: dict[str, Any]) -> None:
@@ -78,11 +88,13 @@ def _child_main(conn: Any, fn: Callable[..., Any], kwargs: dict[str, Any]) -> No
 
 
 def run_isolated(fn: Callable[..., Any], kwargs: dict[str, Any], *, timeout_s: float) -> Any:
-    """Run `fn(**kwargs)` in a spawned child process and return its result.
+    """Run `fn(**kwargs)` in a fresh spawned child process and return its result.
 
-    Raises TimeoutError when the child exceeds `timeout_s` (it is killed) and
-    RuntimeError when the child fails or dies without a result. `fn` must be a
-    module-level callable and its arguments and result must be picklable.
+    One interpreter per call; the worker itself uses `ExtractionPool`, which
+    keeps its children. Raises TimeoutError when the child exceeds `timeout_s`
+    (it is killed) and RuntimeError when the child fails or dies without a
+    result. `fn` must be a module-level callable and its arguments and result
+    must be picklable.
     """
     ctx = multiprocessing.get_context("spawn")
     parent, child = ctx.Pipe(duplex=False)
@@ -104,6 +116,131 @@ def run_isolated(fn: Callable[..., Any], kwargs: dict[str, Any], *, timeout_s: f
             proc.kill()
         proc.join(timeout=5)
         parent.close()
+
+
+def _pool_child_main(conn: Any) -> None:
+    """Long-lived child: answer `(fn, kwargs)` requests until the parent closes the pipe."""
+    while True:
+        try:
+            fn, kwargs = conn.recv()
+        except (EOFError, OSError):
+            return
+        try:
+            reply = ("ok", fn(**kwargs))
+        except Exception as exc:  # noqa: BLE001 - boundary: report instead of dying silently
+            reply = ("err", f"{type(exc).__name__}:{exc}")
+        try:
+            conn.send(reply)
+        except (EOFError, OSError):
+            return
+
+
+class _Child:
+    """One spawned interpreter and the parent's end of its pipe."""
+
+    def __init__(self, ctx: Any) -> None:
+        self.conn, child_end = ctx.Pipe(duplex=True)
+        self.proc = ctx.Process(target=_pool_child_main, args=(child_end,), daemon=True)
+        self.proc.start()
+        child_end.close()
+        self.served = 0
+
+    @property
+    def pid(self) -> int | None:
+        return int(self.proc.pid) if self.proc.pid is not None else None
+
+    def alive(self) -> bool:
+        return bool(self.proc.is_alive())
+
+    def kill(self) -> None:
+        """Stop the child now and release the pipe."""
+        if self.proc.is_alive():
+            self.proc.kill()
+        self.proc.join(timeout=5)
+        self.conn.close()
+
+
+class ExtractionPool:
+    """`size` long-lived spawn children that run adapter calls one at a time each.
+
+    Children start on first use, so a run without documents starts none. A call
+    takes a free child (waiting for one when all are busy), sends the function
+    and its arguments, and waits up to `timeout_s` for the answer. A timeout
+    kills that child only; a child that dies mid-call is dropped; either way the
+    slot spawns a fresh child on its next use. A child is recycled after
+    `recycle_after` calls to bound its memory.
+    """
+
+    def __init__(self, size: int = 1, *, recycle_after: int = RECYCLE_CHILD_AFTER_TASKS) -> None:
+        """Reserve `size` slots; nothing is spawned yet."""
+        self.size = max(1, size)
+        self.recycle_after = max(1, recycle_after)
+        self.spawned = 0
+        self.closed = False
+        self._ctx = multiprocessing.get_context("spawn")
+        self._slots: queue.Queue[_Child | None] = queue.Queue()
+        for _ in range(self.size):
+            self._slots.put(None)
+        self._lock = threading.Lock()
+
+    def _ready(self, child: _Child | None) -> _Child:
+        """`child` if it can take another call, else a fresh one (the old one is stopped)."""
+        if child is not None and child.alive() and child.served < self.recycle_after:
+            return child
+        if child is not None:
+            child.kill()
+        with self._lock:
+            self.spawned += 1
+        return _Child(self._ctx)
+
+    def run(self, fn: Callable[..., Any], kwargs: dict[str, Any], *, timeout_s: float) -> Any:
+        """Run `fn(**kwargs)` in a pool child and return its result.
+
+        Raises TimeoutError when the call exceeds `timeout_s` (that child is
+        killed) and RuntimeError when the call fails or the child dies
+        (`extraction_process_died`). `fn` must be a module-level callable and its
+        arguments and result must be picklable.
+        """
+        if self.closed:
+            msg = "extraction_pool_closed"
+            raise RuntimeError(msg)
+        keep: _Child | None = None
+        child = self._slots.get()
+        try:
+            child = self._ready(child)
+            try:
+                child.conn.send((fn, kwargs))
+            except (OSError, EOFError, ValueError) as exc:
+                child.kill()
+                msg = "extraction_process_died"
+                raise RuntimeError(msg) from exc
+            if not child.conn.poll(timeout_s):
+                child.kill()
+                raise TimeoutError(f"extraction_timeout:{timeout_s:.0f}s")
+            try:
+                kind, value = child.conn.recv()
+            except (EOFError, OSError) as exc:
+                child.kill()
+                msg = "extraction_process_died"
+                raise RuntimeError(msg) from exc
+            child.served += 1
+            keep = child
+            if kind == "err":
+                raise RuntimeError(str(value))
+            return value
+        finally:
+            self._slots.put(keep)
+
+    def close(self) -> None:
+        """Stop every child; later calls are refused."""
+        self.closed = True
+        for _ in range(self.size):
+            try:
+                child = self._slots.get(timeout=5)
+            except queue.Empty:
+                break
+            if child is not None:
+                child.kill()
 
 
 def _extract_office_safely(
@@ -163,13 +300,16 @@ class DocWorker:
         osd_runner: Any = None,
         locale: str | None = None,
         parallel_tasks: int = 1,
+        pool: ExtractionPool | None = None,
     ) -> None:
         """Bind the worker to one run. `isolate=False` runs adapters in-process (tests).
 
         `parallel_tasks` is how many documents and images are read at once
         (`CP_DOC_PARALLEL_TASKS`); extraction never contacts a site, so this does
         not touch the per-host pace. A ledger the run already serialised
-        (`ledger/serial.py`) is used as it is; any other is wrapped here.
+        (`ledger/serial.py`) is used as it is; any other is wrapped here. With
+        `isolate=True` the adapters run in `pool` (one child per parallel task);
+        a worker given no pool makes its own and stops it in `close()`.
         """
         self.concurrent_tasks = max(1, parallel_tasks)
         self._ledger: LedgerPort = (
@@ -187,9 +327,26 @@ class DocWorker:
         self._ocr_runner = ocr_runner
         self._osd_runner = osd_runner
         self._locale = locale
+        self._pool = pool
+        self._owns_pool = False
+        self._pool_lock = threading.Lock()
+
+    @property
+    def pool(self) -> ExtractionPool | None:
+        """The extraction children in use (None until the first isolated call)."""
+        return self._pool
 
     def close(self) -> None:
-        """Release what the worker holds (nothing yet; isolation children come later)."""
+        """Stop the extraction children this worker started."""
+        if self._owns_pool and self._pool is not None:
+            self._pool.close()
+
+    def _children(self) -> ExtractionPool:
+        with self._pool_lock:
+            if self._pool is None:
+                self._pool = ExtractionPool(size=self.concurrent_tasks)
+                self._owns_pool = True
+            return self._pool
 
     # -- loop ---------------------------------------------------------------
 
@@ -282,7 +439,7 @@ class DocWorker:
 
     def _call(self, fn: Callable[..., Any], **kwargs: Any) -> Any:
         if self._isolate:
-            return run_isolated(fn, kwargs, timeout_s=self._timeout_s)
+            return self._children().run(fn, kwargs, timeout_s=self._timeout_s)
         return fn(**kwargs)
 
     def _do_image(self, task: Task, resource: Resource, payload: bytes, evidence_id: str) -> None:

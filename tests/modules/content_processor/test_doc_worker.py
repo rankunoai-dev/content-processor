@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
@@ -20,7 +21,11 @@ from src.modules.content_processor.enums import (
     TaskKind,
 )
 from src.modules.content_processor.ledger.memory import MemoryLedger
-from src.modules.content_processor.workers.doc_worker import DocWorker, run_isolated
+from src.modules.content_processor.workers.doc_worker import (
+    DocWorker,
+    ExtractionPool,
+    run_isolated,
+)
 
 RUN = "run-doc"
 RES = "res-doc"
@@ -230,9 +235,98 @@ def test_run_isolated_reports_child_error() -> None:
 
 def test_isolated_pdf_extraction_end_to_end(tmp_path: Path) -> None:
     env = Env(tmp_path, isolate=True, timeout_s=60)
-    env.worker.process(env.submit(_text_pdf(), "application/pdf", TaskKind.EXTRACT_DOC))
+    try:
+        env.worker.process(env.submit(_text_pdf(), "application/pdf", TaskKind.EXTRACT_DOC))
+    finally:
+        env.worker.close()
     assert env.resource.status is EntityStatus.EXTRACTED_UNVERIFIED
     assert env.ledger.get_blocks(RES)
+
+
+def _pid() -> int:
+    import os
+
+    return os.getpid()
+
+
+def _die(**_kwargs: Any) -> None:
+    """Stand in for an adapter and take the child interpreter down mid-task."""
+    import os
+
+    os._exit(3)
+
+
+def _pids(pool: ExtractionPool, n: int) -> set[int]:
+    """Run `_pid` on `n` children at once so every child of the pool answers."""
+    with ThreadPoolExecutor(max_workers=n) as tp:
+        return set(tp.map(lambda _i: int(pool.run(_pid, {}, timeout_s=60)), range(n)))
+
+
+def test_pool_reuses_one_child_across_tasks_and_recycles_it_after_k_tasks() -> None:
+    pool = ExtractionPool(size=1, recycle_after=3)
+    try:
+        first = pool.run(_pid, {}, timeout_s=60)
+        assert pool.run(_pid, {}, timeout_s=60) == first
+        assert pool.run(_pid, {}, timeout_s=60) == first
+        assert pool.run(_echo, {"value": "hi"}, timeout_s=60) == "hi"
+        assert pool.run(_pid, {}, timeout_s=60) != first, "recycled after K tasks"
+        assert pool.spawned == 2
+    finally:
+        pool.close()
+
+
+def test_pool_child_that_dies_mid_task_is_replaced_and_the_task_is_retried(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pool = ExtractionPool(size=1)
+    try:
+        before = pool.run(_pid, {}, timeout_s=60)
+        with pytest.raises(RuntimeError, match="extraction_process_died"):
+            pool.run(_die, {}, timeout_s=60)
+        assert pool.run(_pid, {}, timeout_s=60) != before, "a fresh child took over"
+        with pytest.raises(RuntimeError, match="bad input"):
+            pool.run(_raiser, {}, timeout_s=60)
+
+        # Through the worker: the adapter is the dying function, so the child dies mid-task
+        # and the task is scheduled for a retry, exactly as a crashed interpreter was before.
+        env = Env(tmp_path, isolate=True, pool=pool, timeout_s=60)
+        monkeypatch.setattr("src.modules.content_processor.workers.doc_worker.extract_pdf", _die)
+        env.worker.process(env.submit(_text_pdf(), "application/pdf", TaskKind.EXTRACT_DOC))
+        assert env.resource.status is EntityStatus.RETRY_SCHEDULED
+        assert "extraction_process_died" in (env.resource.status_reason or "")
+        assert pool.run(_echo, {"value": "still serving"}, timeout_s=60) == "still serving"
+    finally:
+        pool.close()
+
+
+def test_pool_timeout_kills_only_the_hung_child(tmp_path: Path) -> None:
+    pool = ExtractionPool(size=2)
+    try:
+        before = _pids(pool, 2)
+        assert len(before) == 2
+        with pytest.raises(TimeoutError):
+            pool.run(_sleepy, {"seconds": 60}, timeout_s=1)
+        after = _pids(pool, 2)
+        assert len(after) == 2
+        assert len(before & after) == 1, "one child survived, the hung one was replaced"
+
+        env = Env(tmp_path, isolate=True, pool=pool, timeout_s=1)
+        task = env.submit(_text_pdf(), "application/pdf", TaskKind.EXTRACT_DOC)
+        env.worker._call = lambda fn, **kw: pool.run(_sleepy, {"seconds": 60}, timeout_s=1)  # type: ignore[method-assign]  # noqa: SLF001
+        env.worker.process(task)
+        assert env.resource.status is EntityStatus.PARTIAL
+        assert [g.gap_type for g in env.ledger.get_gaps(RES)] == [GapType.LIMIT_HIT]
+    finally:
+        pool.close()
+
+
+def test_worker_owns_a_pool_when_none_is_given_and_closes_it(tmp_path: Path) -> None:
+    env = Env(tmp_path, isolate=True, timeout_s=60, parallel_tasks=2)
+    env.worker.process(env.submit(_text_pdf(), "application/pdf", TaskKind.EXTRACT_DOC))
+    pool = env.worker.pool
+    assert pool is not None and pool.size == 2 and pool.spawned == 1, "children spawn on demand"
+    env.worker.close()
+    assert pool.closed
 
 
 def _low_conf_ocr(_img: bytes, *, packs: Any = None, psm: int = 6) -> OcrResult:
