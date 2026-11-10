@@ -1,0 +1,45 @@
+# Never bake data, secrets or build caches into the image.
+.env
+.env.*
+.git
+.github
+.claude
+.vscode
+.idea
+
+# Runtime data: lives on the persistent volume (see deploy/README.md)
+app_data/
+evidence/
+exports/
+url_history/
+knowledge_store/
+model_cache/
+spend/
+logs/
+outputs/
+scratch/
+
+# Python and tooling caches
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+build/
+dist/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.testmondata*
+.coverage
+htmlcov/
+
+# The web app is built inside the image from its sources
+webui/node_modules/
+webui/dist/
+
+# Not needed at runtime
+tests/
+reports/
+research_notes/
+Content_Processor_Guide.docx

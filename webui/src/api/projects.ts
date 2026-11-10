@@ -462,13 +462,26 @@ export const projectKeys = {
 };
 
 const POLL_MS = 3000;
+/** The queue is polled more slowly while nothing runs, waits or is ready to start. */
+export const IDLE_POLL_MS = 5000;
 
-/** The shared queue of scrapes across every project; refreshed every few seconds. */
-export function useSharedQueue() {
+/** How often to ask for the queue: every 3 s while something is in it, else every 5 s. */
+export function queuePollInterval(queue: SharedQueue | undefined): number {
+  if (!queue) return POLL_MS;
+  const active = queue.running.length + queue.waiting.length + queue.ready.length;
+  return active > 0 ? POLL_MS : IDLE_POLL_MS;
+}
+
+/**
+ * The shared queue of scrapes across every project; refreshed every few seconds.
+ * `enabled: false` (a closed dialog) neither fetches nor polls.
+ */
+export function useSharedQueue(enabled = true) {
   return useQuery({
     queryKey: ['queue'] as const,
     queryFn: ({ signal }) => projectsApi.queue(signal),
-    refetchInterval: POLL_MS,
+    enabled,
+    refetchInterval: (q) => queuePollInterval(q.state.data),
   });
 }
 

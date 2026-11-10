@@ -78,6 +78,9 @@ from src.modules.content_processor.knowledge.kb_commands import register as regi
 from src.modules.content_processor.ledger.memory import MemoryLedger
 from src.modules.content_processor.ledger.tasks import TaskLedger, new_run_id
 from src.modules.content_processor.planner import fetch_tasks_for
+from src.modules.content_processor.projects.report_command import (
+    register as register_project_report_command,
+)
 from src.modules.content_processor.recrawl import (
     Baseline,
     HistoryBaseline,
@@ -250,6 +253,16 @@ def build_fetchers(scope: RunScope) -> tuple[Any, list[Any]]:
     return t1, escalation
 
 
+def browser_channel() -> str | None:
+    """The Playwright channel from `CP_BROWSER_CHANNEL`; None means the bundled Chromium.
+
+    "chrome" (the default) launches the installed Google Chrome and the renderer falls
+    back to the bundled Chromium by itself when Chrome is absent (containers).
+    """
+    channel = get_settings().cp_browser_channel
+    return None if channel == "chromium" else channel
+
+
 def build_renderer(scope: RunScope) -> Any:
     """T3 browser configured from the scope (not started)."""
     return BrowserRenderer(
@@ -260,6 +273,7 @@ def build_renderer(scope: RunScope) -> Any:
         viewport=scope.viewport,
         analytics_suppression=scope.analytics_suppression,
         limits=RenderLimits(),
+        channel=browser_channel(),
     )
 
 
@@ -988,6 +1002,7 @@ def main(argv: list[str] | None = None) -> int:
     p_rev.set_defaults(func=cmd_reverdict)
 
     register_report_command(sub)
+    register_project_report_command(sub)
     register_paid_commands(sub)
     register_stamp_command(sub)
     register_history_command(sub)

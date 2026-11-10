@@ -15,10 +15,10 @@ from __future__ import annotations
 from enum import StrEnum
 from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
-from pydantic import Field, SecretStr, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import Field, SecretStr, ValidationInfo, field_validator
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 from src.core.errors import ConfigurationError
 
@@ -105,6 +105,33 @@ class Settings(BaseSettings):
     # Documents and images read at once during a scrape (local work, no requests to a
     # site). 4 suits a workstation; set 1 or 2 in a container with 1-2 GB of memory.
     cp_doc_parallel_tasks: int = Field(default=4, ge=1, le=16)
+    # The browser scrapes render with: "chrome" is the installed Google Chrome (falls back
+    # to Playwright's bundled Chromium when Chrome is absent); "chromium" is the bundled
+    # Chromium straight away (containers: no Chrome is installed there).
+    cp_browser_channel: str = Field(default="chrome", pattern="^(chrome|chromium|msedge)$")
+
+    # -- Content processor: the web app server (webapi) --------------------
+    # Where the server listens. 127.0.0.1 is this machine only (the default, for a
+    # workstation); a container must bind 0.0.0.0 so the platform can reach it.
+    # The command-line flags --host and --port take precedence.
+    cp_bind_host: str = "127.0.0.1"
+    cp_bind_port: int = Field(default=8780, ge=1, le=65535)
+    # Host headers the server answers (DNS-rebinding guard; a comma-separated list).
+    # Add the public host name when deployed, for example "myapp.up.railway.app"
+    # or "*.up.railway.app"; "*" accepts any host (then the platform must front it).
+    cp_allowed_hosts: Annotated[list[str], NoDecode] = ["127.0.0.1", "localhost"]
+    # Origins a browser page may make changes from (comma-separated). Each entry is a host
+    # name ("myapp.up.railway.app", "*.example.com") compared with the Origin header's
+    # host, or a full origin ("https://myapp.up.railway.app") compared whole, scheme and
+    # port included. Hosts in CP_ALLOWED_HOSTS are always accepted as origins too, so this
+    # is needed only when the pages are served from another address than the API.
+    cp_allowed_origins: Annotated[list[str], NoDecode] = ["127.0.0.1", "localhost"]
+    # Fully parsed runs the analyst API keeps in memory (each holds every page's records
+    # and text). Small on purpose: run summaries for the list are cached separately.
+    cp_run_cache_entries: int = Field(default=4, ge=1, le=64)
+    # A project report (all of the client's websites) is built in its own process; it is
+    # stopped after this many seconds.
+    cp_project_report_timeout_s: float = Field(default=1800.0, gt=0.0)
 
     # -- Content processor: knowledge base (RFC 0002 stages 5-7) -----------
     # Embedded vector store, used when Postgres with pgvector is not configured.
@@ -203,6 +230,20 @@ class Settings(BaseSettings):
         default=REPO_ROOT / "spend",
         description="Append-only spend and approval logs for paid tiers.",
     )
+
+    @field_validator("cp_allowed_hosts", "cp_allowed_origins", mode="before")
+    @classmethod
+    def _split_names(cls, value: object, info: ValidationInfo) -> object:
+        """Accept a comma-separated string from the environment as well as a list.
+
+        An empty value (a blank line in `.env`) means "not set": the default applies,
+        because an empty list would lock everyone out.
+        """
+        if isinstance(value, str):
+            value = [part.strip() for part in value.split(",") if part.strip()]
+        if isinstance(value, list) and not value and info.field_name:
+            return list(cls.model_fields[info.field_name].default)
+        return value
 
     @field_validator("log_level")
     @classmethod

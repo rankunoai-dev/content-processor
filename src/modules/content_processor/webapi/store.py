@@ -5,6 +5,12 @@ A run is `<name>.records.jsonl` (one `UrlRecord` per line), with an optional
 folder written by the `report` command. A growing records file (a run still
 in progress) is re-read when its size or mtime changes; a line that is not a
 valid record (for example a half-written last line) is skipped and counted.
+
+Memory: a parsed run holds every page's records plus a search haystack, so
+only the `max_entries` most recently used runs stay in memory (least recently
+used first out). The run list needs only headline numbers; those are computed
+by streaming the file once, record by record, and kept in a separate small
+cache per run, so listing fifty runs never loads fifty runs.
 """
 
 from __future__ import annotations
@@ -13,8 +19,8 @@ import hashlib
 import json
 import re
 import threading
-from collections import Counter
-from collections.abc import Iterable, Sequence
+from collections import Counter, OrderedDict
+from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
@@ -50,6 +56,7 @@ from src.modules.content_processor.webapi.models import (
 )
 
 __all__ = [
+    "DEFAULT_CACHE_ENTRIES",
     "RECORDS_SUFFIX",
     "UNCONFIRMED_TEXT",
     "PageEntry",
@@ -61,6 +68,8 @@ __all__ = [
 ]
 
 RECORDS_SUFFIX = ".records.jsonl"
+DEFAULT_CACHE_ENTRIES = 4
+"""Fully parsed runs kept in memory when no cap is given (`CP_RUN_CACHE_ENTRIES`)."""
 UNCONFIRMED_TEXT = "UNCONFIRMED_TEXT"
 """Derived issue: the page has text that could not be matched on the live page, no gap says so."""
 
@@ -118,6 +127,11 @@ def page_key_for(record: UrlRecord) -> str:
 
 def _host(url: str) -> str:
     return (urlsplit(url).hostname or "").lower()
+
+
+def _reports_dir(records_path: Path, name: str) -> Path:
+    """Where the `report` command writes the run's files."""
+    return records_path.parent / f"{name}_reports"
 
 
 def _slug_title(url: str) -> str:
@@ -237,7 +251,7 @@ class RunData:
     @property
     def reports_dir(self) -> Path:
         """Where the `report` command writes this run's files."""
-        return self.path.parent / f"{self.name}_reports"
+        return _reports_dir(self.path, self.name)
 
     def key_for_url(self, url: str) -> str | None:
         """Page key of a URL of this run (requested, final or alias), if any."""
@@ -266,18 +280,82 @@ class PageQuery:
     size: int = 50
 
 
-def _parse(path: Path) -> tuple[list[UrlRecord], int]:
-    records: list[UrlRecord] = []
-    bad = 0
+def _iter_records(path: Path) -> Iterator[UrlRecord | None]:
+    """The file's records one at a time; None for a line that is not a record."""
     with path.open(encoding="utf-8") as handle:
         for line in handle:
             if not line.strip():
                 continue
             try:
-                records.append(UrlRecord.model_validate_json(line))
+                yield UrlRecord.model_validate_json(line)
             except (ValidationError, ValueError):
-                bad += 1
+                yield None
+
+
+def _parse(path: Path) -> tuple[list[UrlRecord], int]:
+    records: list[UrlRecord] = []
+    bad = 0
+    for record in _iter_records(path):
+        if record is None:
+            bad += 1
+        else:
+            records.append(record)
     return records, bad
+
+
+@dataclass
+class _Tally:
+    """Headline numbers of a run, gathered one record at a time (nothing kept)."""
+
+    badges: dict[str, int] = field(default_factory=lambda: {b.value: 0 for b in BADGE_PRECEDENCE})
+    hosts: set[str] = field(default_factory=set)
+    total: int = 0
+    issues: int = 0
+    pages_with_issues: int = 0
+    captured_from: datetime | None = None
+    captured_to: datetime | None = None
+    run_id: str | None = None
+    unreadable: int = 0
+
+    def add(self, record: UrlRecord) -> None:
+        badge = record.badge.value
+        self.badges[badge] = self.badges.get(badge, 0) + 1
+        host = _host(record.final_url or record.requested_url)
+        if host:
+            self.hosts.add(host)
+        if self.total == 0:
+            self.run_id = record.run_id
+        self.total += 1
+        issues = len(record.gaps) + len(_findings(record))
+        self.issues += issues
+        if issues:
+            self.pages_with_issues += 1
+        when = record.captured_at
+        if self.captured_from is None or when < self.captured_from:
+            self.captured_from = when
+        if self.captured_to is None or when > self.captured_to:
+            self.captured_to = when
+
+    def summary(self, name: str, path: Path, modified_at: datetime) -> RunSummary:
+        verified = self.badges.get(UrlBadge.VERIFIED_WITHIN_SCOPE.value, 0)
+        total = self.total
+        return RunSummary(
+            name=name,
+            run_id=self.run_id,
+            records_file=path.name,
+            page_count=total,
+            hosts=sorted(self.hosts),
+            badges=self.badges,
+            fully_captured_pct=round(100.0 * verified / total, 1) if total else 0.0,
+            issue_count=self.issues,
+            pages_with_issues=self.pages_with_issues,
+            captured_from=self.captured_from,
+            captured_to=self.captured_to,
+            file_modified_at=modified_at,
+            has_reports=_reports_dir(path, name).is_dir(),
+            running=self.badges.get(UrlBadge.RUNNING.value, 0),
+            unreadable_lines=self.unreadable,
+        )
 
 
 def _entries(records: Sequence[UrlRecord]) -> list[PageEntry]:
@@ -332,11 +410,22 @@ def _counts(values: Iterable[str | None]) -> list[Count]:
 class RunStore:
     """Finds runs in an exports folder and caches each parsed run by file signature."""
 
-    def __init__(self, exports_dir: Path) -> None:
-        """Remember the folder; nothing is read until a run is asked for."""
+    def __init__(self, exports_dir: Path, *, max_entries: int = DEFAULT_CACHE_ENTRIES) -> None:
+        """Remember the folder; nothing is read until a run is asked for.
+
+        `max_entries` fully parsed runs stay in memory (the most recently used ones);
+        run summaries are cached separately and are tiny, so they are all kept.
+        """
         self.exports_dir = exports_dir
-        self._cache: dict[str, RunData] = {}
+        self.max_entries = max(1, max_entries)
+        self._cache: OrderedDict[str, RunData] = OrderedDict()
+        self._summaries: dict[str, tuple[tuple[int, int], RunSummary]] = {}
         self._lock = threading.Lock()
+
+    def cached_names(self) -> list[str]:
+        """Runs held fully parsed right now, least recently used first (for tests)."""
+        with self._lock:
+            return list(self._cache)
 
     def names(self) -> list[str]:
         """Run names in the folder, newest records file first."""
@@ -361,6 +450,7 @@ class RunStore:
         with self._lock:
             cached = self._cache.get(name)
             if cached is not None and cached.signature == signature:
+                self._cache.move_to_end(name)
                 return cached
             records, bad = _parse(path)
             entries = _entries(records)
@@ -381,35 +471,66 @@ class RunStore:
                 file_modified_at=datetime.fromtimestamp(stat.st_mtime, tz=UTC),
             )
             self._cache[name] = data
+            self._cache.move_to_end(name)
+            while len(self._cache) > self.max_entries:
+                self._cache.popitem(last=False)
             return data
 
     # -- views -----------------------------------------------------------------
 
     def summary(self, run: RunData) -> RunSummary:
-        """Headline numbers for one run."""
-        badges = {b.value: 0 for b in BADGE_PRECEDENCE}
+        """Headline numbers for one run (also remembered for the run list)."""
+        tally = _Tally(unreadable=run.unreadable_lines)
         for entry in run.entries:
-            badges[entry.row.badge] = badges.get(entry.row.badge, 0) + 1
-        total = len(run.entries)
-        captured = [e.record.captured_at for e in run.entries]
-        verified = badges.get(UrlBadge.VERIFIED_WITHIN_SCOPE.value, 0)
-        return RunSummary(
-            name=run.name,
-            run_id=run.entries[0].record.run_id if run.entries else None,
-            records_file=run.path.name,
-            page_count=total,
-            hosts=sorted({e.row.host for e in run.entries if e.row.host}),
-            badges=badges,
-            fully_captured_pct=round(100.0 * verified / total, 1) if total else 0.0,
-            issue_count=sum(e.row.issues for e in run.entries),
-            pages_with_issues=sum(1 for e in run.entries if e.row.issues),
-            captured_from=min(captured) if captured else None,
-            captured_to=max(captured) if captured else None,
-            file_modified_at=run.file_modified_at,
-            has_reports=run.reports_dir.is_dir(),
-            running=badges.get(UrlBadge.RUNNING.value, 0),
-            unreadable_lines=run.unreadable_lines,
-        )
+            tally.add(entry.record)
+        summary = tally.summary(run.name, run.path, run.file_modified_at)
+        with self._lock:
+            self._summaries[run.name] = (run.signature, summary)
+        return summary
+
+    def summary_for(self, name: str) -> RunSummary:
+        """Headline numbers for a run by name, without keeping its pages in memory.
+
+        A summary made earlier for the same file (same size and mtime) is reused; a
+        run already fully parsed is summarised from memory; otherwise the file is
+        streamed once, one record at a time, and only the numbers are kept.
+        """
+        if not _RUN_NAME.match(name):
+            raise RunNotFoundError(name)
+        path = self.exports_dir / f"{name}{RECORDS_SUFFIX}"
+        if not path.is_file():
+            raise RunNotFoundError(name)
+        stat = path.stat()
+        signature = (stat.st_mtime_ns, stat.st_size)
+        with self._lock:
+            known = self._summaries.get(name)
+            if known is not None and known[0] == signature:
+                # The reports folder can appear after the file was last written.
+                has_reports = _reports_dir(path, name).is_dir()
+                return known[1].model_copy(update={"has_reports": has_reports})
+            loaded = self._cache.get(name)
+        if loaded is not None and loaded.signature == signature:
+            return self.summary(loaded)
+        tally = _Tally()
+        for record in _iter_records(path):
+            if record is None:
+                tally.unreadable += 1
+            else:
+                tally.add(record)
+        summary = tally.summary(name, path, datetime.fromtimestamp(stat.st_mtime, tz=UTC))
+        with self._lock:
+            self._summaries[name] = (signature, summary)
+        return summary
+
+    def summaries(self) -> list[RunSummary]:
+        """Every run's headline numbers, newest records file first."""
+        out: list[RunSummary] = []
+        for name in self.names():
+            try:
+                out.append(self.summary_for(name))
+            except RunNotFoundError:  # removed between the listing and the read
+                continue
+        return out
 
     def overview(self, run: RunData) -> Overview:
         """Everything the run overview screen needs."""

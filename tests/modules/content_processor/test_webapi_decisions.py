@@ -170,7 +170,7 @@ def test_saving_a_review_decision_with_a_note(client: TestClient):
             {"kind": "review", "key": "http://h/wall", "decision": "resolved", "reviewer": "a"},
             {"Origin": "https://evil.example"},
             403,
-            "locally",
+            "own address",
         ),
     ],
     ids=["unknown-page", "wrong-vocabulary", "blank-reviewer", "foreign-origin"],

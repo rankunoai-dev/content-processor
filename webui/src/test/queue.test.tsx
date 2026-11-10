@@ -1,7 +1,15 @@
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent, { PointerEventsCheckLevel } from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { useProjectTokens, type Project, type QueueItem, type RunState, type SharedQueue } from '../api/projects';
+import {
+  IDLE_POLL_MS,
+  queuePollInterval,
+  useProjectTokens,
+  type Project,
+  type QueueItem,
+  type RunState,
+  type SharedQueue,
+} from '../api/projects';
 import { renderApp } from './utils';
 
 const run = (over: Partial<RunState>): RunState => ({
@@ -72,8 +80,12 @@ interface Sent {
   body: unknown;
 }
 
+/** Every GET path asked for, in order (POSTs are returned by `fakeServer`). */
+const asked: string[] = [];
+
 function fakeServer(routes: Record<string, (body: unknown) => [number, unknown]>) {
   const sent: Sent[] = [];
+  asked.length = 0;
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -81,6 +93,7 @@ function fakeServer(routes: Record<string, (body: unknown) => [number, unknown]>
       const method = init?.method ?? 'GET';
       const body: unknown = init?.body ? JSON.parse(String(init.body)) : undefined;
       if (method === 'POST') sent.push({ path: url.pathname, body });
+      else asked.push(url.pathname);
       const handler = routes[`${method} ${url.pathname}`];
       const [status, payload] = handler ? handler(body) : [404, { detail: 'There is no such thing.' }];
       return new Response(JSON.stringify(payload), { status, headers: { 'Content-Type': 'application/json' } });
@@ -98,6 +111,31 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe('the shared scrape queue', () => {
+  it('is polled every 3 s while something is in it and every 5 s when empty', () => {
+    expect(queuePollInterval(undefined)).toBe(3000);
+    expect(queuePollInterval(queue)).toBe(3000);
+    const empty: SharedQueue = { ...queue, running: [], waiting: [], ready: [] };
+    expect(queuePollInterval(empty)).toBe(IDLE_POLL_MS);
+    expect(queuePollInterval({ ...empty, ready: queue.waiting.slice(0, 1) })).toBe(3000);
+  });
+
+  it('is not asked for by the start dialog until the dialog opens', async () => {
+    fakeServer({
+      'GET /api/queue': () => [200, queue],
+      'GET /api/projects/alpha-1': () => [200, project],
+      'GET /api/projects/alpha-1/runs': () => [200, []],
+      'GET /api/projects/alpha-1/sites/alpha/urls': () => [200, { total: 0, items: [] }],
+    });
+    useProjectTokens.getState().remember('alpha-1', 'tok', '2099-01-01T00:00:00Z');
+    const user = userEvent.setup({ pointerEventsCheck: PointerEventsCheckLevel.Never });
+    renderApp('/projects/alpha-1?site=alpha&view=scrape');
+    const startText = await screen.findByText('Start scraping: Alpha', {}, FIRST_PAINT);
+    expect(asked).toContain('/api/projects/alpha-1');
+    expect(asked).not.toContain('/api/queue');
+    await user.click(startText.closest('button') as HTMLElement);
+    await waitFor(() => expect(asked).toContain('/api/queue'), FIRST_PAINT);
+  }, 60_000);
+
   it('shows what runs, who waits in which order and roughly how long', async () => {
     fakeServer({ 'GET /api/queue': () => [200, queue] });
     renderApp('/queue');
