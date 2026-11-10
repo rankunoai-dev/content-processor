@@ -31,6 +31,7 @@ const project: Project = {
   url_count: 7,
   sites: [site],
   last_run: null,
+  confidential: false,
 };
 
 const run: RunState = {
