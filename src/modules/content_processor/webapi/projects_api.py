@@ -18,6 +18,9 @@ from __future__ import annotations
 
 import base64
 import binascii
+import os
+import tempfile
+import threading
 import zipfile
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -29,6 +32,7 @@ from fastapi import FastAPI, Header, HTTPException, Query
 from fastapi.responses import FileResponse
 from pydantic import Field
 
+from src.core.logger import get_logger
 from src.core.schemas import StrictModel
 from src.modules.content_processor.knowledge.embedders import Embedder
 from src.modules.content_processor.knowledge.federated import Space, federated_search
@@ -76,6 +80,7 @@ from src.modules.content_processor.projects.websites import WebsiteGraph
 __all__ = ["PROJECT_TOKEN_HEADER", "KnowledgeAccess", "register_project_routes"]
 
 PROJECT_TOKEN_HEADER = "X-Project-Token"  # noqa: S105 - a header name, not a secret
+_logger = get_logger("content_processor.webapi.projects")
 
 # The unlock token header; at module level so FastAPI can resolve the annotation.
 TokenHeader = Annotated[str | None, Header(alias=PROJECT_TOKEN_HEADER)]
@@ -490,6 +495,20 @@ def register_project_routes(
             )
         return record
 
+    def spaces_of(p: ProjectRecord) -> list[Space]:
+        """One project's websites as knowledge spaces."""
+        return [
+            Space(
+                namespace=runner.namespace(p.project_id, s.site_id),
+                project_id=p.project_id,
+                project_name=p.name,
+                site_id=s.site_id,
+                site_name=s.name,
+                role=s.role,
+            )
+            for s in p.sites
+        ]
+
     def run_state(project_id: str, site_id: str, run_id: str) -> RunState:
         site(project_id, site_id)
         try:
@@ -587,15 +606,32 @@ def register_project_routes(
     @app.post("/api/projects/{project_id}/update")
     def update(project_id: str, body: ProjectUpdate, token: TokenHeader = None) -> ProjectOut:
         require_token(project_id, token)
-        return out(store.update(project_id, name=body.name, client_name=body.client_name))
+        try:
+            record = store.update(project_id, name=body.name, client_name=body.client_name)
+        except ValueError:  # a name of spaces only, trimmed to nothing
+            raise HTTPException(
+                status_code=422, detail="Give the project and its client a name."
+            ) from None
+        return out(record)
 
     @app.post("/api/projects/{project_id}/delete")
     def delete(project_id: str, body: Unlock, token: TokenHeader = None) -> dict[str, str]:
-        require_token(project_id, token)
+        record = require_token(project_id, token)
         if not store.check_password(project_id, body.password):
             raise HTTPException(status_code=401, detail="That password is not right.")
         if any(r.status in RUN_ACTIVE for r in store.runs(project_id)):
             raise HTTPException(status_code=409, detail="Cancel the running scrapes first.")
+        if knowledge is not None:
+            for space in spaces_of(record):
+                try:
+                    knowledge_store = knowledge.open_store(space)
+                    try:
+                        if knowledge_store.meta():  # built at some point: empty it
+                            knowledge_store.reset()
+                    finally:
+                        knowledge_store.close()
+                except Exception:  # noqa: BLE001 - a knowledge store never blocks a delete
+                    _logger.exception("knowledge_space_delete_failed", extra={"space": space})
         store.delete(project_id)
         return {"deleted": project_id}
 
@@ -818,9 +854,7 @@ def register_project_routes(
         if not files:
             raise HTTPException(status_code=404, detail="This run has no reports yet.")
         archive = store.run_dir(project_id, site_id, run_id) / f"{run_id}_reports.zip"
-        newest = max(p.stat().st_mtime for p in files.values())
-        if not archive.is_file() or archive.stat().st_mtime < newest:
-            _zip(archive, files)
+        _zip(archive, files)
         return FileResponse(archive, filename=archive.name, content_disposition_type="attachment")
 
     @app.get("/api/projects/{project_id}/sites/{site_id}/runs/{run_id}/downloads/{file_name}")
@@ -894,20 +928,9 @@ def register_project_routes(
         """Every website of every project as a knowledge space (or only the selected)."""
         out_spaces: list[Space] = []
         for p in store.projects():
-            for s in p.sites:
-                namespace = runner.namespace(p.project_id, s.site_id)
-                if selected is not None and namespace not in selected:
-                    continue
-                out_spaces.append(
-                    Space(
-                        namespace=namespace,
-                        project_id=p.project_id,
-                        project_name=p.name,
-                        site_id=s.site_id,
-                        site_name=s.name,
-                        role=s.role,
-                    )
-                )
+            for space in spaces_of(p):
+                if selected is None or space.namespace in selected:
+                    out_spaces.append(space)
         return out_spaces
 
     @app.get("/api/knowledge/spaces")
@@ -1043,9 +1066,30 @@ def register_project_routes(
         )
 
 
+_ZIP_LOCK = threading.Lock()
+
+
 def _zip(archive: Path, files: dict[str, Path]) -> None:
-    tmp = archive.with_name(archive.name + ".tmp")
-    with zipfile.ZipFile(tmp, "w", compression=zipfile.ZIP_DEFLATED) as bundle:
-        for name, path in files.items():
-            bundle.write(path, arcname=name)
-    tmp.replace(archive)
+    """Make the archive unless it is newer than every file in it.
+
+    One archive is written at a time, through a temporary file of its own, so two
+    downloads at once never share a half-written file; the second finds it made.
+    """
+    newest = max(p.stat().st_mtime for p in files.values())
+    with _ZIP_LOCK:
+        if archive.is_file() and archive.stat().st_mtime >= newest:
+            return
+        fd, tmp_name = tempfile.mkstemp(
+            dir=archive.parent, prefix=f".{archive.name}.", suffix=".tmp"
+        )
+        tmp = Path(tmp_name)
+        try:
+            with (
+                os.fdopen(fd, "wb") as handle,
+                zipfile.ZipFile(handle, "w", compression=zipfile.ZIP_DEFLATED) as bundle,
+            ):
+                for name, path in files.items():
+                    bundle.write(path, arcname=name)
+            os.replace(tmp, archive)
+        finally:
+            tmp.unlink(missing_ok=True)

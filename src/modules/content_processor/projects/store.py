@@ -55,6 +55,7 @@ from src.modules.content_processor.projects.urls import (
 )
 
 __all__ = [
+    "PROJECT_DATA_MODULES",
     "ProjectNotFoundError",
     "ProjectStore",
     "RoutedImport",
@@ -66,6 +67,9 @@ __all__ = [
 ]
 
 _ID = re.compile(r"^[a-z0-9][a-z0-9-]{0,80}$")
+
+PROJECT_DATA_MODULES = ("theming", "monitoring", "gaps", "research")
+"""Modules that keep `<root>/<module>/<project id>/` (see each module's `store.py`)."""
 
 
 class ProjectNotFoundError(LookupError):
@@ -401,12 +405,22 @@ class ProjectStore:
             return record
 
     def delete(self, project_id: str) -> None:
-        """Remove the project and everything in it."""
+        """Remove the project and everything in it, including the other modules' data.
+
+        Themes, monitoring checks, gap reports, research pulls and the Claude Desktop
+        ledger each keep a folder or file per project next to `projects/` under the
+        same root; they go too. Evidence is shared across projects and stays.
+        """
         with self._lock:
             folder = self.project_dir(project_id)
             if not folder.is_dir():
                 raise ProjectNotFoundError(project_id)
             shutil.rmtree(folder)
+            for module in PROJECT_DATA_MODULES:
+                sibling = self.root / module / project_id
+                if sibling.is_dir():
+                    shutil.rmtree(sibling, ignore_errors=True)
+            (self.root / "mcp" / "ledgers" / f"{project_id}.json").unlink(missing_ok=True)
 
     # -- websites -------------------------------------------------------------
 
