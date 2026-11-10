@@ -470,7 +470,9 @@ async def test_approved_host_escalates_into_t4_and_is_charged(tmp_path: Path):
     res = ledger.resources[f"https://{HOST}/"]
     assert res.status is EntityStatus.EXTRACTED_UNVERIFIED
     assert res.acquired_at_tier is AccessTier.T4_PROXIED
-    assert ledger.hosts[HOST].tier is AccessTier.T4_PROXIED
+    # One blocked URL is bought at T4 on its own; the host moves to the paid tier
+    # only after HOST_ESCALATION_DISTINCT_URLS different URLs block at T3.
+    assert ledger.hosts[HOST].tier is AccessTier.T3_FIDELITY_BROWSER
     assert len(store.charges()) >= 1 and all(c.tier == "T4_PROXIED" for c in store.charges())
 
 

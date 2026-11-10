@@ -208,17 +208,32 @@ async def test_robots_disallow_is_excluded_without_fetching(worker_env):
     assert res.http_status is None and res.payload_sha256 is None
 
 
-async def test_challenge_page_is_blocked_and_host_escalates_to_browser(worker_env):
+async def test_challenge_page_is_blocked_and_only_that_url_escalates(worker_env):
     ledger, worker = worker_env
     res = await _run(ledger, worker, "http://testserver/challenge-200")
     assert res.status is EntityStatus.BLOCKED
     assert res.block_verdict is not None and res.block_verdict.vendor == "cloudflare"
     assert res.status_reason.startswith("js_challenge:cloudflare:fetched_at=T1_POLITE_HTTP")
     assert res.acquired_at_tier is AccessTier.T1_POLITE_HTTP
+    # One blocked page does not move the whole site to the browser tier.
+    assert ledger.hosts[HOST].tier is AccessTier.T1_POLITE_HTTP
+    assert not any(e.entity_type == "host" for e in ledger.events)
+
+
+async def test_host_moves_to_the_browser_tier_after_three_distinct_urls_block(worker_env):
+    ledger, worker = worker_env
+    for n in (1, 2):
+        await _run(ledger, worker, f"http://testserver/challenge-200?page={n}")
+        assert ledger.hosts[HOST].tier is AccessTier.T1_POLITE_HTTP
+    # The same URL blocking again is not a new URL.
+    await _run(ledger, worker, "http://testserver/challenge-200?page=2")
+    assert ledger.hosts[HOST].tier is AccessTier.T1_POLITE_HTTP
+    await _run(ledger, worker, "http://testserver/challenge-200?page=3")
     assert ledger.hosts[HOST].tier is AccessTier.T3_FIDELITY_BROWSER
-    assert any(
-        e.entity_type == "host" and e.reason.startswith("escalate_on") for e in ledger.events
-    )
+    moves = [e for e in ledger.events if e.entity_type == "host"]
+    assert [(e.old_state, e.new_state, e.reason) for e in moves] == [
+        ("T1_POLITE_HTTP", "T3_FIDELITY_BROWSER", "escalate_on:JS_CHALLENGE")
+    ]
 
 
 async def test_paid_tier_needed_emits_approval_event_not_spend(worker_env):
@@ -228,12 +243,38 @@ async def test_paid_tier_needed_emits_approval_event_not_spend(worker_env):
     )
     ledger.add("http://testserver/challenge-200")
     await worker.run_until_idle(idle_polls=1, poll_s=0, max_wait_s=0)
-    # JS challenge at T3 wants T4+ which is paid: ask, do not escalate.
+    # The host already stands at T3 and this run has no browser: the next step for a
+    # JS challenge is T4+, which is paid: ask, do not escalate.
     assert ledger.hosts[HOST].tier is AccessTier.T3_FIDELITY_BROWSER
     approvals = [
         e for e in ledger.events if e.reason and e.reason.startswith("paid_tier_available")
     ]
     assert approvals and approvals[0].reason == "paid_tier_available:T4_PROXIED"
+
+
+async def test_challenge_is_handed_to_the_browser_when_the_run_renders(worker_env, tmp_path: Path):
+    ledger, worker = worker_env
+    worker = FetchWorker(
+        ledger=ledger,
+        fetcher=worker._fetcher,
+        evidence=LocalEvidenceStore(tmp_path, "t1"),
+        scope=_scope(),
+        run_id="run-t",
+        worker_id="w1",
+        browser_handoff=True,
+    )
+    res = await _run(ledger, worker, "http://testserver/challenge-200")
+    assert res.status is EntityStatus.BLOCKED
+    assert res.status_reason.endswith(":handed_to_browser")
+    assert res.acquired_at_tier is None
+    assert [t.kind for t in ledger.followups] == [TaskKind.RENDER]
+    assert ledger.hosts[HOST].tier is AccessTier.T1_POLITE_HTTP
+    # A host that already stands at T3 still hands a T1-blocked page to the browser
+    # instead of asking for a paid tier the browser has not earned yet.
+    ledger.hosts[HOST].tier = AccessTier.T3_FIDELITY_BROWSER
+    res = await _run(ledger, worker, "http://testserver/challenge-200?page=2")
+    assert res.status_reason.endswith(":handed_to_browser")
+    assert not any((e.reason or "").startswith("paid_tier_available") for e in ledger.events)
 
 
 async def test_rate_limit_requeues_with_retry_after(worker_env):

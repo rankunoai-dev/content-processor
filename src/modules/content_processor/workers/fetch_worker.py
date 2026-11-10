@@ -7,10 +7,11 @@ unexpected exception becomes a retried task and, at max attempts, a FAILED
 resource with the error preserved.
 
 Tiers: each task runs on the highest configured HTTP fetcher at or below the
-host's current tier. When a block escalates the host to a tier that has a
-fetcher here (T2), the URL is re-queued for that tier instead of ending
-BLOCKED; tiers without an HTTP fetcher (T3 browser, paid tiers) keep the
-existing outcome.
+host's current tier (or the tier the URL itself was escalated to). A blocked
+URL is re-queued one tier up on its own when that tier has a fetcher here (T2),
+or handed to the browser (T3); the host as a whole moves up only after
+`HOST_ESCALATION_DISTINCT_URLS` different URLs blocked at its tier in this run.
+Tiers without an HTTP fetcher (paid tiers) keep the existing outcome.
 
 Follow-ups (A-1): an extracted page's embedded assets and linked downloads are
 queued one level deeper with the media type the page promised, so the block
@@ -55,7 +56,13 @@ from src.modules.content_processor.enums import (
     tier_rank,
 )
 from src.modules.content_processor.governor.block_classifier import classify_response
-from src.modules.content_processor.governor.escalation import Action, ActionKind, HostAccessState
+from src.modules.content_processor.governor.escalation import (
+    HOST_ESCALATION_DISTINCT_URLS,
+    Action,
+    ActionKind,
+    HostAccessState,
+    escalates,
+)
 from src.modules.content_processor.governor.gates import detect_gates
 from src.modules.content_processor.governor.robots import crawl_delay_for, evaluate_robots
 from src.modules.content_processor.governor.spend import Approval, apply_approval
@@ -189,6 +196,9 @@ class FetchWorker:
         # Per-process caches. Durable versions need contract changes (CR-004).
         self._expected_by_key: dict[str, Expectation] = {}
         self._payload_owner: dict[str, str] = {}
+        # (host, tier) -> schedule keys blocked there in this run. The host moves up
+        # a tier only once HOST_ESCALATION_DISTINCT_URLS different URLs blocked at it.
+        self._blocked_urls: dict[tuple[str, str], set[str]] = {}
         self._baseline = baseline
         self._approvals = approvals
         self._priors: dict[str, UrlRecord] = {}
@@ -272,6 +282,13 @@ class FetchWorker:
         if approval is not None and isinstance(approved_tier, str):
             # Re-queued after an approval: go straight to the approved tier.
             wanted = AccessTier(approved_tier)
+            if tier_rank(host_state.ceiling) >= tier_rank(wanted) > tier_rank(fetch_tier):
+                fetch_tier = wanted
+        escalated_to = task.payload.get("escalated_to")
+        if isinstance(escalated_to, str):
+            # This URL was blocked and re-queued one tier up on its own; the host
+            # may still be lower (it moves only after several URLs block).
+            wanted = AccessTier(escalated_to)
             if tier_rank(host_state.ceiling) >= tier_rank(wanted) > tier_rank(fetch_tier):
                 fetch_tier = wanted
         fetcher = self._fetcher_for(fetch_tier)
@@ -813,8 +830,24 @@ class FetchWorker:
             self._retry_or_fail(task, resource, f"http_{result.http_status}", action.not_before)
             return
 
-        action = host_state.record_block(block.kind)
+        fetched_at = AccessTier(fetcher.tier_name)
+        judged_at = fetched_at
+        if tier_rank(host_state.tier) > tier_rank(fetched_at) and not self._browser_can_try(
+            host_state.tier, expected
+        ):
+            # The host already stands above every tier this worker can fetch at and
+            # the browser cannot take the page: the next step is above the host tier
+            # (a paid tier the operator must approve), not a retry below it.
+            judged_at = host_state.tier
+        distinct_urls = HOST_ESCALATION_DISTINCT_URLS
+        if escalates(block.kind):
+            seen = self._blocked_urls.setdefault((task.host, judged_at.value), set())
+            seen.add(resource.schedule_key)
+            distinct_urls = len(seen)
+        host_tier_before = host_state.tier
+        action = host_state.record_block(block.kind, at_tier=judged_at, distinct_urls=distinct_urls)
         self._ledger.save_host_state(tenant, host_state)
+        host_moved = host_state.tier is not host_tier_before
         tier_note = (
             f"{block.kind.value.lower()}:{block.vendor or 'unknown'}"
             f":fetched_at={fetcher.tier_name}:host_tier={host_state.tier.value}"
@@ -833,15 +866,8 @@ class FetchWorker:
             )
         elif action.kind is ActionKind.ESCALATE and action.tier in self._fetchers:
             self._requeue_at_tier(task, resource, action, tier_note)
-            self._event("host", task.host, None, host_state.tier.value, action.reason)
-        elif (
-            self._browser_handoff
-            and action.kind is ActionKind.ESCALATE
-            and action.tier is AccessTier.T3_FIDELITY_BROWSER
-            and expected[0] == "text/html"
-        ):
+        elif action.kind is ActionKind.ESCALATE and self._browser_can_try(action.tier, expected):
             self._hand_to_browser(task, resource, tier_note)
-            self._event("host", task.host, None, host_state.tier.value, action.reason)
         else:
             self._upsert(task, resource, EntityStatus.BLOCKED, tier_note)
             if action.kind is ActionKind.NEEDS_APPROVAL and action.proposed_tier is not None:
@@ -852,8 +878,10 @@ class FetchWorker:
                     host_state.tier.value,
                     f"paid_tier_available:{action.proposed_tier.value}",
                 )
-            elif action.kind is ActionKind.ESCALATE:
-                self._event("host", task.host, None, host_state.tier.value, action.reason)
+        if host_moved:
+            self._event(
+                "host", task.host, host_tier_before.value, host_state.tier.value, action.reason
+            )
         self._ledger.complete(task.id or 0, self._worker_id)
 
     def _not_found(self, task: Task, resource: Resource, result: FetchResult) -> None:
@@ -895,6 +923,14 @@ class FetchWorker:
             )
         )
         self._upsert(task, resource, EntityStatus.EXTRACTED_UNVERIFIED, ";".join(reasons))
+
+    def _browser_can_try(self, tier: AccessTier, expected: Expectation) -> bool:
+        """True when `tier` is the browser, this run renders, and the page is HTML."""
+        return (
+            self._browser_handoff
+            and tier is AccessTier.T3_FIDELITY_BROWSER
+            and expected[0] == "text/html"
+        )
 
     def _hand_to_browser(self, task: Task, resource: Resource, note: str) -> None:
         """A bot check met by the download: let the real browser (T3) try the page.

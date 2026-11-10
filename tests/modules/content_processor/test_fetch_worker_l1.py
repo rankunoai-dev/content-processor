@@ -321,7 +321,8 @@ async def test_fingerprint_block_escalates_and_the_t2_fetcher_runs(tmp_path: Pat
         assert first.status is EntityStatus.RETRY_SCHEDULED
         assert first.status_reason.startswith("escalated_to:T2_IMPERSONATED_HTTP:fingerprint")
         assert first.acquired_at_tier is AccessTier.T1_POLITE_HTTP
-        assert env.ledger.hosts[HOST].tier is AccessTier.T2_IMPERSONATED_HTTP
+        # The URL is retried at T2 on its own; the host stays at T1 until more URLs block.
+        assert env.ledger.hosts[HOST].tier is AccessTier.T1_POLITE_HTTP
         retry = [t for t in env.fetch_tasks() if t.state is TaskState.PENDING]
         assert len(retry) == 1 and retry[0].payload["escalated_to"] == "T2_IMPERSONATED_HTTP"
         assert retry[0].not_before is not None  # escalation cooldown honoured
@@ -333,9 +334,8 @@ async def test_fingerprint_block_escalates_and_the_t2_fetcher_runs(tmp_path: Pat
     assert res.status is EntityStatus.EXTRACTED_UNVERIFIED
     assert res.acquired_at_tier is AccessTier.T2_IMPERSONATED_HTTP
     assert env.t2 is not None and env.t2.calls == [f"{BASE}/fingerprint-wall"]
-    assert any(
-        e.entity_type == "host" and e.reason == "escalate_on:FINGERPRINT" for e in env.ledger.events
-    )
+    assert env.ledger.hosts[HOST].tier is AccessTier.T1_POLITE_HTTP
+    assert not any(e.entity_type == "host" for e in env.ledger.events)
 
 
 async def test_host_already_at_t2_uses_t2_for_robots_and_pages(tmp_path: Path):
@@ -361,7 +361,7 @@ async def test_without_a_t2_fetcher_the_escalated_url_stays_blocked(tmp_path: Pa
         await env.close()
     res = env.res("/fingerprint-wall")
     assert res.status is EntityStatus.BLOCKED
-    assert res.status_reason.endswith("host_tier=T2_IMPERSONATED_HTTP")
+    assert res.status_reason.endswith("fetched_at=T1_POLITE_HTTP:host_tier=T1_POLITE_HTTP")
     assert [t.state for t in env.fetch_tasks()] == [TaskState.DONE]
 
 
@@ -377,4 +377,4 @@ async def test_t2_block_that_needs_the_browser_ends_blocked_at_t2(tmp_path: Path
     # JS challenge wants T3 (browser): no HTTP fetcher there, so no HTTP retry.
     assert res.status is EntityStatus.BLOCKED
     assert res.acquired_at_tier is AccessTier.T2_IMPERSONATED_HTTP
-    assert env.ledger.hosts[HOST].tier is AccessTier.T3_FIDELITY_BROWSER
+    assert env.ledger.hosts[HOST].tier is AccessTier.T2_IMPERSONATED_HTTP
