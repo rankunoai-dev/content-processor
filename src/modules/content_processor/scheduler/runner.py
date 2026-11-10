@@ -126,7 +126,15 @@ class RunOptions(StrictModel):
     )
     max_rounds: int = Field(default=10, ge=1, le=100)
     idle_polls: int = Field(default=3, ge=1, le=50)
-    poll_s: float = Field(default=0.5, gt=0.0)
+    poll_s: float = Field(
+        default=0.1,
+        gt=0.0,
+        description=(
+            "How often a worker asks the ledger again when a lease was refused (a host's next "
+            "allowed time has not passed). The host pace itself is enforced by the lease: a "
+            "finer poll only trims the overshoot past it (0.5 s overshot by ~0.25 s per request)."
+        ),
+    )
     max_wait_s: float = Field(
         default=360.0,
         ge=0.0,

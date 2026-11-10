@@ -412,6 +412,44 @@ async def test_documents_are_read_while_a_render_is_still_in_progress(tmp_path: 
     assert _comparable(overlapped) == _comparable(sequential)
 
 
+async def _lease_gaps(tmp_path: Path, poll_s: float) -> list[float]:
+    """Seconds between consecutive leases of one host when fetches pace at 1 s."""
+    scope = _scope(["/pages/static_ok", "/pages/soft_hyphen", "/pages/charset_entities"])
+    ledger, _plan = _ledger(scope)
+    ledger._base_delay = 1.0  # noqa: SLF001 - the politeness floor under test
+    times: list[float] = []
+    original = ledger.lease
+
+    def lease(worker: str, kinds: Any, run_id: str | None = None) -> Task | None:
+        task = original(worker, kinds, run_id=run_id)
+        if task is not None:
+            times.append(time.perf_counter())
+        return task
+
+    ledger.lease = lease  # type: ignore[method-assign]
+    evidence = LocalEvidenceStore(tmp_path / f"poll{poll_s}", scope.tenant_id)
+    fetcher, worker = _fetch_stage(ledger, scope, evidence)
+    options = RunOptions(stages=["fetch"], idle_polls=1, poll_s=poll_s, max_wait_s=5.0)
+    try:
+        execution = await execute_run(ledger, run_id=RUN, stages={"fetch": worker}, options=options)
+    finally:
+        await fetcher.aclose()
+    assert execution.stop_reason == "drained" and len(times) >= 3
+    return [b - a for a, b in zip(times, times[1:], strict=False)]
+
+
+async def test_fine_poll_keeps_one_second_pacing_and_trims_the_overshoot(tmp_path: Path):
+    assert RunOptions().poll_s == 0.1
+    fast = await _lease_gaps(tmp_path, poll_s=0.1)
+    slow = await _lease_gaps(tmp_path, poll_s=0.5)
+    assert min(fast) >= 1.0 and min(slow) >= 1.0, "politeness: never two leases within 1 s"
+    mean_fast = sum(fast) / len(fast)
+    mean_slow = sum(slow) / len(slow)
+    # A 0.1 s poll overshoots the 1 s pace by at most ~0.1 s plus scheduling; 0.5 s by up to 0.5 s.
+    assert mean_fast <= 1.3
+    assert mean_fast <= max(mean_slow, 1.3)
+
+
 async def test_overlapped_run_reports_no_progress_only_when_both_chains_stall():
     ledger = MemoryLedger(base_delay_s=0.0)
     ledger.enqueue(
