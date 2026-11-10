@@ -133,6 +133,7 @@ def classify_response(
     requested_mime_family: str = "text/html",
     final_url: str | None = None,
     body_size: int | None = None,
+    rendered: bool = False,
 ) -> BlockVerdict:
     """Classify one HTTP response.
 
@@ -144,6 +145,10 @@ def classify_response(
         final_url: URL after redirects, used to detect login redirects.
         body_size: Size of the whole body in bytes, when only a prefix is passed (a
             large page is never "minimal content").
+        rendered: The bytes are a browser's DOM after scripts ran. Server HTML with
+            a CAPTCHA script and almost no text is a JavaScript app shell until the
+            browser has tried it (JS_CHALLENGE, so the hand-off runs); the same
+            emptiness in a rendered DOM is a CAPTCHA wall (INTERACTIVE_CAPTCHA).
 
     Returns:
         A verdict with `kind == NONE` only when nothing fired.
@@ -184,6 +189,8 @@ def classify_response(
             why = _captcha_challenge(status, body, whole_body=whole)
             if why is None:
                 evidence.append(f"captcha_widget_on_content_page:{v}")
+            elif why.startswith("minimal_content") and not rendered:
+                fire(v, BlockKind.JS_CHALLENGE, f"captcha:{v}:{why}:app_shell", 0.8)
             else:
                 fire(v, BlockKind.INTERACTIVE_CAPTCHA, f"captcha:{v}:{why}", 0.8)
             break

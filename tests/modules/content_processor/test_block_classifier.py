@@ -260,8 +260,42 @@ def test_inline_script_does_not_count_towards_minimal_content():
         "</body></html>"
     ).encode()
     v = classify_response(status=200, headers={}, body_prefix=body, body_size=len(body))
-    assert v.kind is not BlockKind.NONE
+    assert v.kind is BlockKind.JS_CHALLENGE
     assert any("minimal_content" in e for e in v.evidence), v.evidence
+
+
+_SPA_SHELL = (
+    b"<!doctype html><html><head><title>Portal</title>"
+    b"<script src='https://www.google.com/recaptcha/api.js?render=6Lc_site_key'></script>"
+    b"<script src='/static/js/main.3f2a.js'></script></head>"
+    b"<body><noscript>You need to enable JavaScript to run this app.</noscript>"
+    b"<div id='root'></div></body></html>"
+)
+
+
+def test_spa_shell_with_a_global_recaptcha_goes_to_the_browser_not_a_captcha_wall():
+    # Server HTML of a JavaScript app: almost no text plus a site-wide reCAPTCHA
+    # script. At T1/T2 that is a page the browser must render, not a CAPTCHA wall
+    # (which would escalate towards paid tiers and end BLOCKED).
+    v = classify_response(
+        status=200,
+        headers={"content-type": "text/html"},
+        body_prefix=_SPA_SHELL,
+        body_size=len(_SPA_SHELL),
+    )
+    assert v.kind is BlockKind.JS_CHALLENGE, v
+    assert any(e.endswith(":app_shell") for e in v.evidence)
+
+
+def test_rendered_dom_that_is_still_only_a_captcha_is_a_captcha_wall():
+    body = (
+        b"<html><head><script src='https://www.google.com/recaptcha/api.js'></script></head>"
+        b"<body><div class='g-recaptcha'><iframe title='reCAPTCHA'></iframe></div></body></html>"
+    )
+    v = classify_response(
+        status=200, headers={}, body_prefix=body, body_size=len(body), rendered=True
+    )
+    assert v.kind is BlockKind.INTERACTIVE_CAPTCHA, v
 
 
 def test_large_page_cut_to_its_first_64kb_is_not_minimal():
@@ -271,10 +305,11 @@ def test_large_page_cut_to_its_first_64kb_is_not_minimal():
     prefix = (head + b"x" * 70000)[:65536]
     v = classify_response(status=200, headers={}, body_prefix=prefix, body_size=309_000)
     assert v.kind is BlockKind.NONE
-    v = classify_response(
-        status=200, headers={}, body_prefix=prefix[:2000] + b"</style></head></html>"
-    )
-    assert v.kind is BlockKind.INTERACTIVE_CAPTCHA, "the same page when that is all there is"
+    shell = prefix[:2000] + b"</style></head></html>"
+    v = classify_response(status=200, headers={}, body_prefix=shell)
+    assert v.kind is BlockKind.JS_CHALLENGE, "the same page when that is all the server sends"
+    v = classify_response(status=200, headers={}, body_prefix=shell, rendered=True)
+    assert v.kind is BlockKind.INTERACTIVE_CAPTCHA, "and a CAPTCHA wall once the browser ran it"
 
 
 @pytest.mark.parametrize(
@@ -297,12 +332,6 @@ def test_large_page_cut_to_its_first_64kb_is_not_minimal():
             b"<div class='h-captcha'></div></body></html>",
             "text:human_check",
         ),
-        (
-            200,
-            b"<html><head><script src='https://www.google.com/recaptcha/api.js'></script></head>"
-            b"<body><div class='g-recaptcha'></div></body></html>",
-            "minimal_content",
-        ),
     ],
 )
 def test_captcha_wall_is_still_a_challenge(status: int, body: bytes, why: str):
@@ -310,3 +339,13 @@ def test_captcha_wall_is_still_a_challenge(status: int, body: bytes, why: str):
     assert v.kind in (BlockKind.INTERACTIVE_CAPTCHA, BlockKind.RATE)
     if v.kind is BlockKind.INTERACTIVE_CAPTCHA:
         assert any(why in e for e in v.evidence), v.evidence
+
+
+def test_minimal_content_with_a_widget_is_a_challenge_for_the_browser():
+    body = (
+        b"<html><head><script src='https://www.google.com/recaptcha/api.js'></script></head>"
+        b"<body><div class='g-recaptcha'></div></body></html>"
+    )
+    v = classify_response(status=200, headers={}, body_prefix=body, body_size=len(body))
+    assert v.kind is BlockKind.JS_CHALLENGE
+    assert any("minimal_content" in e for e in v.evidence), v.evidence
