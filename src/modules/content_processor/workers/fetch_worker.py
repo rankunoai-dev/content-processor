@@ -33,6 +33,7 @@ from src.modules.content_processor.adapters.html_source import extract_html_sour
 from src.modules.content_processor.contracts import (
     BlockVerdict,
     FollowupRef,
+    Gap,
     RedirectHop,
     Resource,
     RunEvent,
@@ -46,6 +47,7 @@ from src.modules.content_processor.enums import (
     BlockKind,
     ChangeStatus,
     EntityStatus,
+    GapType,
     PriorityClass,
     RedirectKind,
     RobotsPolicy,
@@ -820,7 +822,7 @@ class FetchWorker:
         if action.kind is ActionKind.EXCLUDED:
             self._upsert(task, resource, EntityStatus.EXCLUDED_BY_POLICY, tier_note)
         elif block.kind is BlockKind.SOFT_404:
-            self._upsert(task, resource, EntityStatus.EXTRACTED_UNVERIFIED, "soft_404_suspected")
+            self._not_found(task, resource, result)
         elif block.kind is BlockKind.WRONG_PAYLOAD:
             mime, source = expected
             self._upsert(
@@ -853,6 +855,46 @@ class FetchWorker:
             elif action.kind is ActionKind.ESCALATE:
                 self._event("host", task.host, None, host_state.tier.value, action.reason)
         self._ledger.complete(task.id or 0, self._worker_id)
+
+    def _not_found(self, task: Task, resource: Resource, result: FetchResult) -> None:
+        """A "page not found" answer: a hard 404/410, or a 200 that reads like one.
+
+        Either way the page ends EXTRACTED_UNVERIFIED with a SOFT_404_SUSPECTED gap
+        (review confirms whether it exists) and no render or follow-ups are queued.
+        A suspect (HTTP 200) keeps its source blocks: the text may be a real page
+        whose title happens to mention "not found", so nothing is dropped.
+        """
+        status = result.http_status or 0
+        suspect = status < 400
+        reasons = ["soft_404_suspected"] if suspect else [f"not_found:http_{status}"]
+        if suspect and result.sniffed_mime == "text/html":
+            extraction = extract_html_source(
+                result.body,
+                base_url=result.final_url,
+                evidence_id=f"evidence:{resource.payload_sha256}",
+                resource_id=resource.resource_id,
+                state_id=f"{self._run_id}|source",
+            )
+            resource.content_fingerprint = content_fingerprint(extraction.blocks)
+            self._ledger.upsert_blocks(
+                resource.resource_id, stamp_blocks(extraction.blocks, resource)
+            )
+            reasons.append("source_extracted")
+        self._ledger.record_gap(
+            Gap(
+                gap_id=gap_id_for(self._run_id, resource.resource_id, "R10:soft_404"),
+                run_id=self._run_id,
+                resource_id=resource.resource_id,
+                gap_type=GapType.SOFT_404_SUSPECTED,
+                status=EntityStatus.EXTRACTED_UNVERIFIED,
+                reason=reasons[0],
+                evidence_ids=(
+                    [f"evidence:{resource.payload_sha256}"] if resource.payload_sha256 else []
+                ),
+                tier_reached=resource.acquired_at_tier,
+            )
+        )
+        self._upsert(task, resource, EntityStatus.EXTRACTED_UNVERIFIED, ";".join(reasons))
 
     def _hand_to_browser(self, task: Task, resource: Resource, note: str) -> None:
         """A bot check met by the download: let the real browser (T3) try the page.

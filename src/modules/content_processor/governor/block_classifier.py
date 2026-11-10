@@ -189,6 +189,12 @@ def classify_response(
         fire("generic", BlockKind.GEO_GATE, "status:451", 0.9)
     elif status == 401:
         fire("generic", BlockKind.AUTH_WALL, "status:401", 0.9)
+    elif status in (404, 410):
+        # A hard "not found" is never content, whatever the title says.
+        fire("generic", BlockKind.SOFT_404, f"status:{status}", 0.9)
+    elif status in (400, 405):
+        # The server refused the request itself: nothing to keep, retry later.
+        fire("generic", BlockKind.TRANSPORT, f"status:{status}", 0.5)
     elif status in (403, 406) and kind is BlockKind.NONE:
         fire(vendor or "generic", BlockKind.FINGERPRINT, f"status:{status}", 0.6)
     elif status == 503 and kind is BlockKind.NONE:

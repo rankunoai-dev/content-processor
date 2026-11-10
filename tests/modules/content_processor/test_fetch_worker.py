@@ -254,11 +254,31 @@ async def test_pay_per_crawl_is_excluded(worker_env):
     assert res.status_reason.startswith("pay_per_crawl")
 
 
-async def test_soft_404_is_flagged_for_review(worker_env):
+async def test_soft_404_is_flagged_for_review_but_its_text_is_kept(worker_env):
     ledger, worker = worker_env
     res = await _run(ledger, worker, "http://testserver/soft-404")
     assert res.status is EntityStatus.EXTRACTED_UNVERIFIED
-    assert res.status_reason == "soft_404_suspected"
+    assert res.status_reason == "soft_404_suspected;source_extracted"
+    texts = [b.normalized_text for b in ledger.blocks[res.resource_id]]
+    assert any("could not be found" in t for t in texts)
+    gaps = ledger.get_gaps(res.resource_id)
+    assert [g.gap_type.value for g in gaps] == ["SOFT_404_SUSPECTED"]
+    assert getattr(ledger, "followups", []) == []  # no render, no follow-ups
+    assert ledger.hosts[HOST].consecutive_failures == 0
+
+
+async def test_hard_404_ends_with_a_gap_and_no_content(worker_env):
+    ledger, worker = worker_env
+    res = await _run(ledger, worker, "http://testserver/pages/does_not_exist")
+    assert res.http_status == 404
+    assert res.status is EntityStatus.EXTRACTED_UNVERIFIED
+    assert res.status_reason == "not_found:http_404"
+    assert res.block_verdict is not None and res.block_verdict.kind.value == "SOFT_404"
+    assert res.resource_id not in ledger.blocks
+    assert [g.gap_type.value for g in ledger.get_gaps(res.resource_id)] == ["SOFT_404_SUSPECTED"]
+    assert getattr(ledger, "followups", []) == []
+    assert ledger.hosts[HOST].consecutive_failures == 0
+    assert ledger.hosts[HOST].circuit.value == "CLOSED"
 
 
 async def test_login_redirect_is_blocked_with_typed_chain(worker_env):

@@ -4,6 +4,7 @@ from datetime import UTC, datetime, timedelta
 
 from src.modules.content_processor.enums import AccessTier, BlockKind
 from src.modules.content_processor.governor.escalation import (
+    CONSECUTIVE_FAILURES_TO_OPEN,
     DECAY_AFTER_CLEAN,
     ActionKind,
     CircuitState,
@@ -111,7 +112,18 @@ def test_shadow_block_escalates_one_tier_from_current():
     assert a.kind is ActionKind.ESCALATE and s.tier is AccessTier.T4_PROXIED
 
 
-def test_soft404_and_wrong_payload_are_transient_not_escalation():
+def test_wrong_payload_is_transient_not_escalation():
     s = _state()
-    a = s.record_block(BlockKind.SOFT_404, now=T0)
+    a = s.record_block(BlockKind.WRONG_PAYLOAD, now=T0)
     assert a.kind is ActionKind.BACKOFF and s.tier is AccessTier.T1_POLITE_HTTP
+
+
+def test_not_found_pages_never_count_towards_the_breaker():
+    s = _state()
+    s.record_success()
+    for i in range(CONSECUTIVE_FAILURES_TO_OPEN + 2):
+        a = s.record_block(BlockKind.SOFT_404, now=T0 + timedelta(seconds=i))
+        assert a.kind is ActionKind.CONTINUE and a.reason == "not_found"
+    assert s.circuit is CircuitState.CLOSED
+    assert s.consecutive_failures == 0 and s.clean_streak == 1
+    assert s.tier is AccessTier.T1_POLITE_HTTP

@@ -96,6 +96,24 @@ def test_5xx_is_transport(status: int):
     assert v.kind is BlockKind.TRANSPORT
 
 
+@pytest.mark.parametrize("status", [404, 410])
+def test_hard_not_found_is_never_content_whatever_the_title(status: int):
+    body = (
+        b"<html><head><title>Terrorism insurance explained | Example</title></head>"
+        b"<body><h1>Terrorism insurance explained</h1><p>Full article text.</p></body></html>"
+    )
+    v = classify_response(status=status, headers={"content-type": "text/html"}, body_prefix=body)
+    assert v.kind is BlockKind.SOFT_404
+    assert f"status:{status}" in v.evidence
+
+
+@pytest.mark.parametrize("status", [400, 405])
+def test_client_errors_are_transient_failures_not_content(status: int):
+    body = b"<html><head><title>Bad request</title></head><body>Bad request</body></html>"
+    v = classify_response(status=status, headers={"content-type": "text/html"}, body_prefix=body)
+    assert v.kind is BlockKind.TRANSPORT
+
+
 def test_turnstile_is_interactive_captcha():
     body = b'<html><script src="https://challenges.cloudflare.com/turnstile/v0/api.js"></script></html>'
     v = classify_response(status=403, headers={"server": "cloudflare"}, body_prefix=body)

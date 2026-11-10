@@ -166,6 +166,9 @@ class HostAccessState:
     def record_block(self, kind: BlockKind, now: datetime | None = None) -> Action:
         """A classified block at the current tier. Decides escalate/blocked/excluded."""
         now = self._now(now)
+        if kind is BlockKind.SOFT_404:
+            # A missing page says nothing about the host: no backoff, no breaker count.
+            return Action(ActionKind.CONTINUE, self.tier, reason="not_found")
         self.clean_streak = 0
         self.block_score = min(1.0, self.block_score + 0.25)
 
@@ -178,7 +181,7 @@ class HostAccessState:
             if len(self.rate_hits) >= RATE_HITS_TO_OPEN:
                 return self._open_circuit(now, "rate_limited_repeatedly")
             return Action(ActionKind.BACKOFF, self.tier, now + timedelta(seconds=30), "rate")
-        if kind in (BlockKind.TRANSPORT, BlockKind.SOFT_404, BlockKind.WRONG_PAYLOAD):
+        if kind in (BlockKind.TRANSPORT, BlockKind.WRONG_PAYLOAD):
             return self.record_transient_failure(now)
 
         target = self._next_tier(_NEXT_FOR_KIND.get(kind))
