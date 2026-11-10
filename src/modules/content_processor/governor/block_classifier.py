@@ -202,14 +202,16 @@ def classify_response(
     elif status in (400, 405):
         # The server refused the request itself: nothing to keep, retry later.
         fire("generic", BlockKind.TRANSPORT, f"status:{status}", 0.5)
-    elif status in (403, 406) and kind is BlockKind.NONE:
+    # A weak hint (a vendor cookie at 0.35) must not decide an error status: a plain
+    # 500 on an Akamai-fronted host is a server error, not a JS challenge.
+    elif status in (403, 406) and confidence < 0.5:
         fire(vendor or "generic", BlockKind.FINGERPRINT, f"status:{status}", 0.6)
-    elif status == 503 and kind is BlockKind.NONE:
+    elif status == 503 and confidence < 0.5:
         fire("generic", BlockKind.TRANSPORT, "status:503", 0.5)
-    elif status >= 500 and kind is BlockKind.NONE:
+    elif status >= 500 and confidence < 0.5:
         fire("generic", BlockKind.TRANSPORT, f"status:{status}", 0.5)
 
-    if final_url and _LOGIN_PATH.search(final_url) and kind is BlockKind.NONE:
+    if final_url and _LOGIN_PATH.search(final_url) and confidence < 0.5:
         fire("generic", BlockKind.AUTH_WALL, "redirect:login_path", 0.7)
 
     html_returned = content_type.startswith(_HTML_TYPES) or body_lc.lstrip().startswith(

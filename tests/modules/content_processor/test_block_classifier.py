@@ -158,6 +158,28 @@ def test_5xx_is_transport(status: int):
     assert v.kind is BlockKind.TRANSPORT
 
 
+@pytest.mark.parametrize(
+    ("status", "expected"),
+    [
+        (500, BlockKind.TRANSPORT),
+        (503, BlockKind.TRANSPORT),
+        (404, BlockKind.SOFT_404),
+        (403, BlockKind.FINGERPRINT),
+    ],
+)
+def test_vendor_cookie_does_not_turn_an_error_status_into_a_challenge(
+    status: int, expected: BlockKind
+):
+    # Akamai sets bm_sz / _abck on every response of a fronted host, errors included.
+    v = classify_response(
+        status=status,
+        headers={"content-type": "text/html", "set-cookie": "bm_sz=abc; Path=/, _abck=x; Path=/"},
+        body_prefix=b"<html><body><h1>Internal server error</h1></body></html>",
+    )
+    assert v.kind is expected, v
+    assert any(e.startswith("cookie:") for e in v.evidence)
+
+
 @pytest.mark.parametrize("status", [404, 410])
 def test_hard_not_found_is_never_content_whatever_the_title(status: int):
     body = (
