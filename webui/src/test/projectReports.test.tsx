@@ -8,6 +8,7 @@ const project: Project = {
   project_id: 'ins-1',
   name: 'Insurer audit',
   owner_name: 'G',
+  confidential: false,
   client_name: 'Insurer',
   created_at: '2026-11-03T09:00:00Z',
   updated_at: '2026-11-03T09:00:00Z',

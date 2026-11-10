@@ -100,6 +100,15 @@ export interface Project {
   url_count: number;
   sites: Site[];
   last_run: RunState | null;
+  /** Page text from this project is never sent to Claude or shown to Claude Desktop. */
+  confidential: boolean;
+}
+
+/** Changes to the project itself; fields left out stay as they are. */
+export interface ProjectChange {
+  name?: string;
+  client_name?: string;
+  confidential?: boolean;
 }
 
 export interface Unlocked {
@@ -211,6 +220,8 @@ export interface NewProject {
   /** The client's other websites or brands: never its competitors. */
   client_brands?: SiteInput[];
   competitors: SiteInput[];
+  /** Page text from this project is never sent to Claude or shown to Claude Desktop. */
+  confidential?: boolean;
 }
 
 /** A website as entered in a form. */
@@ -370,6 +381,8 @@ export const projectsApi = {
   get: (id: string, signal?: AbortSignal) => get<Project>(projectPath(id), signal),
   create: (body: NewProject) => post<Unlocked>('/api/projects', body),
   unlock: (id: string, password: string) => post<Unlocked>(`${projectPath(id)}/unlock`, { password }),
+  update: (id: string, change: ProjectChange, token: string | null) =>
+    post<Project>(`${projectPath(id)}/update`, change, token),
   remove: (id: string, password: string, token: string | null) =>
     post<{ deleted: string }>(`${projectPath(id)}/delete`, { password }, token),
 

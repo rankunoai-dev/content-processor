@@ -10,6 +10,7 @@ const project: Project = {
   project_id: 'p1',
   name: 'Life cover',
   owner_name: 'Gaurav',
+  confidential: false,
   client_name: 'Example',
   created_at: '2026-11-01T09:00:00Z',
   updated_at: '2026-11-01T09:00:00Z',

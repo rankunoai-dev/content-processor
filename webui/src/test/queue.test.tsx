@@ -57,6 +57,7 @@ const project: Project = {
   project_id: 'alpha-1',
   name: 'Alpha',
   owner_name: 'Asha',
+  confidential: false,
   client_name: 'Alpha',
   created_at: '2026-11-03T09:00:00Z',
   updated_at: '2026-11-03T09:00:00Z',

@@ -6,7 +6,24 @@ import {
   RightOutlined,
   UserOutlined,
 } from '@ant-design/icons';
-import { Alert, Badge, Breadcrumb, Button, Card, Col, Divider, Empty, Form, Input, Modal, Row, Space, Tag, Typography } from 'antd';
+import {
+  Alert,
+  Badge,
+  Breadcrumb,
+  Button,
+  Card,
+  Checkbox,
+  Col,
+  Divider,
+  Empty,
+  Form,
+  Input,
+  Modal,
+  Row,
+  Space,
+  Tag,
+  Typography,
+} from 'antd';
 import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
@@ -35,6 +52,7 @@ interface CreateForm {
   client_note?: string;
   client_brands?: { name?: string; website?: string; note?: string }[];
   competitors?: { name?: string; website?: string; note?: string }[];
+  confidential?: boolean;
 }
 
 type Row = { name?: string; website?: string; note?: string };
@@ -131,6 +149,7 @@ function CreateProject({ open, onClose, module }: { open: boolean; onClose: () =
         ...(values.client_note?.trim() ? { client_note: values.client_note.trim() } : {}),
         ...(rows(values.client_brands).length > 0 ? { client_brands: rows(values.client_brands) } : {}),
         competitors: rows(values.competitors),
+        ...(values.confidential ? { confidential: true } : {}),
       });
       remember(created.project.project_id, created.token, created.expires_at);
       await client.invalidateQueries({ queryKey: projectKeys.all() });
@@ -261,6 +280,9 @@ function CreateProject({ open, onClose, module }: { open: boolean; onClose: () =
         >
           <Input.Password maxLength={200} autoComplete="new-password" />
         </Form.Item>
+        <Form.Item name="confidential" valuePropName="checked" extra={PROJECTS.form.confidentialHelp}>
+          <Checkbox>{PROJECTS.form.confidential}</Checkbox>
+        </Form.Item>
         {error ? <Alert type="error" showIcon message={error} /> : null}
       </Form>
     </Modal>
@@ -302,6 +324,11 @@ function ProjectCard({ project, module, status }: { project: Project; module?: M
           <span>
             <UserOutlined /> {PROJECTS.owner}: {project.owner_name}
           </span>
+          {project.confidential ? (
+            <Tag color="gold" bordered={false}>
+              {PROJECTS.confidential.tag}
+            </Tag>
+          ) : null}
         </Space>
         <Space size={[4, 4]} wrap>
           <GlobalOutlined />
