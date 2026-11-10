@@ -46,6 +46,7 @@ __all__ = [
     "CaptureJournal",
     "SavedFetch",
     "SavedRender",
+    "capture_path",
     "saved_capture_count",
     "write_durably",
 ]
@@ -84,6 +85,17 @@ class SavedRender:
 def saved_capture_count(root: Path) -> int:
     """How many captures a journal folder holds."""
     return sum(1 for _ in root.rglob("*.json")) if root.is_dir() else 0
+
+
+def capture_path(root: Path, kind: str, url: str, tier: str) -> Path:
+    """Where the journal under `root` keeps the `kind` ("fetch" or "render") of `url` at `tier`.
+
+    The name is a hash of the tier and the URL, so readers that only want to know
+    whether a page was already downloaded or rendered (the app's live progress view)
+    can look without listing the folder.
+    """
+    name = hashlib.sha256(f"{tier}|{url}".encode()).hexdigest()
+    return root / kind / name[:2] / f"{name}.json"
 
 
 class CaptureJournal:
@@ -170,8 +182,7 @@ class CaptureJournal:
     # -- files ----------------------------------------------------------------
 
     def _path(self, kind: str, url: str, tier: str) -> Path:
-        name = hashlib.sha256(f"{tier}|{url}".encode()).hexdigest()
-        return self.root / kind / name[:2] / f"{name}.json"
+        return capture_path(self.root, kind, url, tier)
 
     def _save(
         self,
