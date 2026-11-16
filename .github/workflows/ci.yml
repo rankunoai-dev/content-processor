@@ -40,7 +40,7 @@ jobs:
       - name: Python packages
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e ".[dev,browser,docs,unblock,office]"
+          python -m pip install -e ".[dev,browser,docs,unblock,office,pdf]"
 
       - name: Chromium for the browser tests
         run: python -m playwright install --with-deps chromium

@@ -39,7 +39,12 @@ from src.modules.analyst.runs import CardRunner
 from src.modules.analyst.tools import TOOLS
 from src.modules.content_processor.projects.security import TokenSigner
 from src.modules.content_processor.projects.store import ProjectNotFoundError
-from src.modules.reports.writers import markdown_to_docx, word_available
+from src.modules.reports.writers import (
+    markdown_to_docx,
+    markdown_to_pdf,
+    pdf_available,
+    word_available,
+)
 
 __all__ = ["AnalystWorker", "register_analyst_routes"]
 
@@ -47,6 +52,7 @@ TokenHeader = Annotated[str | None, Header(alias="X-Project-Token")]
 _MAX_TEXT = 2_000_000
 _EVENT_POLL_S = 0.5
 _EVENT_TIMEOUT_S = 1_800.0
+_WORD_MEDIA = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
 
 class CardSummary(StrictModel):
@@ -219,14 +225,18 @@ def register_analyst_routes(
                 media_type="text/markdown",
                 content_disposition_type="attachment",
             )
-        if file_name != "result.docx" or not word_available():
+        if file_name == "result.docx" and word_available():
+            convert, media = markdown_to_docx, _WORD_MEDIA
+        elif file_name == "result.pdf" and pdf_available():
+            convert, media = markdown_to_pdf, "application/pdf"
+        else:
             raise HTTPException(status_code=404, detail="There is no such download.")
         out = Path(tempfile.mkdtemp(prefix="cp-card-"))
-        path = markdown_to_docx(source.read_text(encoding="utf-8"), out / stem, title)
+        path = convert(source.read_text(encoding="utf-8"), out / stem, title)
         return FileResponse(
             path,
             filename=path.name,
-            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            media_type=media,
             content_disposition_type="attachment",
             background=BackgroundTask(shutil.rmtree, out, ignore_errors=True),
         )

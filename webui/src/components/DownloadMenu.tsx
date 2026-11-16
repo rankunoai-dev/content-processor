@@ -1,12 +1,12 @@
 /**
- * One "Download" button for a module's report: Excel, CSV or Word.
+ * One "Download" button for a module's report: Excel, CSV, Word or PDF.
  */
 import { DownloadOutlined, DownOutlined } from '@ant-design/icons';
 import { Button, Dropdown } from 'antd';
 import { exportsApi, type ExportFormat } from '../api/exports';
 import { EXPORTS } from '../vocabulary';
 
-const FORMATS: ExportFormat[] = ['xlsx', 'csv', 'docx'];
+const FORMATS: ExportFormat[] = ['xlsx', 'csv', 'docx', 'pdf'];
 
 export function DownloadMenu({
   projectId,

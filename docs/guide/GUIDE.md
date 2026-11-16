@@ -1,6 +1,6 @@
 # Content Processor: A Plain-Language Guide
 
-Last updated: 10 November 2026 · Code version: main after the November audit: false alarms removed from verdicts, a live batch view, confidential projects, a sleep-proof scrape clock, and a deployment recipe
+Last updated: 16 November 2026 · Code version: main plus PDF downloads (every report and analyst result also as a PDF)
 
 ## 1. What this is, in one paragraph
 
@@ -430,15 +430,16 @@ Two ways to use your own Claude account with the app, without an API key or API 
 
 Both send the project's data to Claude through your account, so they are for clients whose data may go to Claude (the data policy question is still open). Search now also works when the local meaning model is off: it falls back to exact words and says so.
 
-### Step 22: Downloads (every report, in Excel, CSV or Word)
+### Step 22: Downloads (every report, in Excel, CSV, Word or PDF)
 
-Everything the modules show can be taken away as a file. Each module tab (Themes, Monitoring, Research, Gaps, and the Suggested competitors panel) has a **Download** button with three choices:
+Everything the modules show can be taken away as a file. Each module tab (Themes, Monitoring, Research, Gaps, and the Suggested competitors panel) has a **Download** button with four choices:
 
 - **Excel (.xlsx)**: every row and the full text, one sheet per table. The file to work in.
 - **CSV**: the same tables for other tools (one file, or a zip with one file per table).
 - **Word (.docx)**: the report laid out for reading and sharing: a title, what it is and when its data was made, a short summary, then each table. Word is not made for thousands of rows, so a long table shows its first 300 rows and a very long cell its first 600 characters, each time with a line saying so; the Excel file always has everything.
+- **PDF (.pdf)**: the same document as Word, for anyone who only needs to read it or print it: the same title, summary and tables with the same limits and notes, the page turned sideways for wide tables, the column headings repeated on every page, and page numbers. One limit to know: the PDF's built-in lettering covers English and the other Latin-alphabet languages. Text in Hindi, Tamil, Arabic, Chinese or Japanese appears as question marks, and a line under the table says how many characters were affected and that the Excel file has the full text. Giving the server a font file that has those letters (a setting, `CP_PDF_FONT`) removes the limit.
 
-A project's **Downloads** tab lists every report at once (project overview with its websites and scrapes, themes, monitoring, search data, suggested competitors, gaps, analyst card runs), says which are ready and, for the others, what to do first ("Build the theme map in the Themes tab first"), and has **Download everything (zip)**: every ready report in all three formats, with a short read-me. Each analyst card result can also be downloaded as a Word document next to the Markdown file. Reports are made on request from each module's latest results: nothing is scraped, pulled or paid for to make them. The page-by-page scrape reports stay in the Reports and Project reports tabs.
+A project's **Downloads** tab lists every report at once (project overview with its websites and scrapes, themes, monitoring, search data, suggested competitors, gaps, analyst card runs), says which are ready and, for the others, what to do first ("Build the theme map in the Themes tab first"), and has **Download everything (zip)**: every ready report in all four formats, with a short read-me. Each analyst card result can also be downloaded as a Word document or a PDF next to the Markdown file. Reports are made on request from each module's latest results: nothing is scraped, pulled or paid for to make them. The page-by-page scrape reports stay in the Reports and Project reports tabs.
 
 ## 5. Safety and cost promises
 
@@ -506,6 +507,7 @@ A project's **Downloads** tab lists every report at once (project overview with 
 
 | Date | Significant change |
 |---|---|
+| 2026-11-16 | PDF downloads: every report (overview, themes, monitoring, search data, suggested competitors, gaps, analyst runs) and every analyst card result can be downloaded as a PDF next to Excel, CSV and Word, in every module's Download button, the Downloads tab and the everything-zip. Same content and limits as Word, wide tables sideways, headings repeated on each page, page numbers. Latin alphabets only unless the server is given a font file; other scripts show as question marks with a note. Made with a pure-Python library, nothing to install on the server. |
 | 2026-11-10 | Images are downloaded once: the browser's own download of each image is kept, with the same checks, evidence and reading step as before, and anything the browser did not load is downloaded as before. About 85% fewer requests to a site per batch and 3 to 4 minutes saved per batch of 25 pages. |
 | 2026-11-10 | Faster without changing results: documents and images are read while pages are still being fetched and rendered; file readers stay running instead of starting a new program per file; the text-recognition program is probed once per run; end-of-batch screenshot reading runs several pages at once; the engine waits exactly the courtesy gap between requests. Records on the test sites are identical before and after. |
 | 2026-11-10 | Access rules corrected: missing pages (404/410) are never content; soft-404 needs whole words and body text; a header login form is not a login wall; scripts are not text; security cookies do not turn errors into bot checks; app shells go to the browser first; a blocked page escalates alone and a site only after three blocked pages. Gates tightened: audience gates need a pop-up with a button; lead-gen walls are judged per section and never over a whole article. |

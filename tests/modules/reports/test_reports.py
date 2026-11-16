@@ -1,8 +1,9 @@
-"""Downloads: every module's report in Excel, CSV and Word, one by one or all in one zip."""
+"""Downloads: every module's report in Excel, CSV, Word and PDF, one by one or all in one zip."""
 
 from __future__ import annotations
 
 import io
+import re
 import time
 import zipfile
 from pathlib import Path
@@ -19,7 +20,7 @@ from src.modules.gaps.service import build_project_gaps
 from src.modules.monitoring.service import run_project_check
 from src.modules.reports import writers
 from src.modules.reports.catalog import REPORTS, build_report
-from src.modules.reports.writers import Report, markdown_to_docx, write_report
+from src.modules.reports.writers import Report, markdown_to_docx, markdown_to_pdf, write_report
 from src.modules.research.service import pull_project
 from src.modules.theming.service import build_project_themes
 from tests.modules.analyst.conftest import World
@@ -34,6 +35,16 @@ def _doc_text(data: bytes) -> str:
     doc = Document(io.BytesIO(data))
     cells = [c.text for t in doc.tables for r in t.rows for c in r.cells]
     return "\n".join([p.text for p in doc.paragraphs] + cells)
+
+
+def _pdf_pages(data: bytes) -> list[str]:
+    """The text of each page (pypdf), or one empty entry per page without it."""
+    assert data.startswith(b"%PDF-")
+    try:
+        from pypdf import PdfReader
+    except ImportError:  # pragma: no cover - pypdf is in the docs extra
+        return [""] * len(re.findall(rb"/Type\s*/Page[^s]", data))
+    return [page.extract_text() for page in PdfReader(io.BytesIO(data)).pages]
 
 
 def test_writers_keep_every_row_in_excel_and_csv_and_say_what_word_shortens(
@@ -80,6 +91,70 @@ def test_writers_keep_every_row_in_excel_and_csv_and_say_what_word_shortens(
     assert section.page_width > section.page_height  # an 8-column table turns the page
 
 
+def test_pdf_has_the_word_limits_landscape_repeated_headers_and_page_numbers(
+    tmp_path: Path,
+) -> None:
+    long = "x" * (writers.WORD_CELL + 50)
+    rows = [{"Name": f"row {i}", "Text": long if i == 0 else "short"} for i in range(400)]
+    wide = Table(
+        "Wide",
+        [f"Column {i}" for i in range(8)] + ["Row id"],
+        [{f"Column {i}": i * 1.5 for i in range(8)} | {"Row id": "r1"}],
+    )
+    report = Report(
+        "demo",
+        "Demo & report",
+        "Built today",
+        ["One line."],
+        [Table("Rows", ["Name", "Text"], rows), wide, Table("Empty", ["A"], [])],
+    )
+    pdf = write_report(report, "pdf", tmp_path, "demo")
+    assert pdf.suffix == ".pdf"
+    pages = _pdf_pages(pdf.read_bytes())
+    assert len(pages) >= 5
+    text = "\n".join(pages)
+    if not text.strip():  # pragma: no cover - no pypdf
+        return
+    assert "Demo & report" in text and "One line." in text and "Built today" in text
+    assert "row 299" in text and "row 300" not in text
+    assert f"first {writers.WORD_ROWS:,} of 400 rows" in text and "1 long cell(s) shortened" in text
+    assert "Row id" not in text and "r1" not in text and "Nothing to list" in text
+    assert all("Name" in page and "Text" in page for page in pages[:4])  # header on every page
+    assert all(f"Page {n}" in page for n, page in enumerate(pages, start=1))
+    from pypdf import PdfReader
+
+    box = PdfReader(str(pdf)).pages[0].mediabox
+    assert box.width > box.height  # a 9-column table turns the page
+
+    portrait = write_report(Report("p", "Portrait", "now", tables=[]), "pdf", tmp_path, "p")
+    box = PdfReader(str(portrait)).pages[0].mediabox
+    assert box.height > box.width
+
+
+def test_pdf_shows_missing_glyphs_as_question_marks_and_says_so(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv(writers.PDF_FONT_SETTING, raising=False)
+    report = Report(
+        "hi",
+        "\u0928\u092e\u0938\u094d\u0924\u0947 \u0926\u0941\u0928\u093f\u092f\u093e",
+        "Built today",
+        ["Chinese: \u4f60\u597d; fine: caf\u00e9 & <tag>"],
+        [Table("T", ["Word"], [{"Word": "\u3053\u3093\u306b\u3061\u306f"}])],
+    )
+    pdf = write_report(report, "pdf", tmp_path, "hi")
+    text = "\n".join(_pdf_pages(pdf.read_bytes()))
+    if text.strip():
+        assert "?????" in text and "<tag>" in text
+        assert "character(s) in a script this PDF's font does not include" in text
+    md_pdf = markdown_to_pdf(
+        "# T\u00edtulo\n\n\u0391\u03bb\u03c6\u03b1 and **bold**\n", tmp_path / "md", "T\u00edtulo"
+    )
+    text = "\n".join(_pdf_pages(md_pdf.read_bytes()))
+    if text.strip():
+        assert "???? and bold" in text and "Markdown download has the full text" in text
+
+
 def test_markdown_becomes_a_word_document(tmp_path: Path) -> None:
     md = (
         "# Executive briefing\n\n> **In short:** the client trails on pet insurance [1].\n\n"
@@ -94,6 +169,13 @@ def test_markdown_becomes_a_word_document(tmp_path: Path) -> None:
     text = _doc_text(path.read_bytes())
     assert "link (https://example.com/pet)" in text and "Pet" in text and "3" in text
     assert "**" not in text and "|" not in text
+
+    pdf = markdown_to_pdf(md + "```\nx = 1 < 2\n```\n", tmp_path / "brief", "Briefing")
+    text = "\n".join(_pdf_pages(pdf.read_bytes()))
+    if text.strip():
+        assert "Executive briefing" in text and "In short:" in text and "1. Write a pillar" in text
+        assert "link (https://example.com/pet)" in text and "x = 1 < 2" in text
+        assert "**" not in text and "|" not in text and "Page 1" in text
 
 
 def test_catalog_builds_from_each_module_and_says_what_is_missing(themed: World) -> None:
@@ -132,7 +214,8 @@ def test_api_downloads(themed: World, tmp_path: Path) -> None:
     pid = themed.project_id
     base = f"/api/projects/{pid}/exports"
     listed = client.get(base).json()
-    assert [f["key"] for f in listed["formats"]] == ["xlsx", "csv", "docx"]
+    assert [f["key"] for f in listed["formats"]] == ["xlsx", "csv", "docx", "pdf"]
+    assert [f["label"] for f in listed["formats"]] == ["Excel", "CSV", "Word", "PDF"]
     by = {r["key"]: r for r in listed["reports"]}
     assert set(by) == {d.key for d in REPORTS}
     assert by["overview"]["available"] and not by["themes"]["available"]
@@ -140,7 +223,7 @@ def test_api_downloads(themed: World, tmp_path: Path) -> None:
     missing = client.get(f"{base}/themes.xlsx")
     assert missing.status_code == 404 and "Build the theme map" in missing.json()["detail"]
     assert client.get(f"{base}/nope.xlsx").status_code == 404
-    assert client.get(f"{base}/overview.pdf").status_code == 404
+    assert client.get(f"{base}/overview.html").status_code == 404
     assert client.get("/api/projects/zzz/exports").status_code == 404
 
     build_project_themes(themed.store, themed.access, pid)
@@ -149,6 +232,9 @@ def test_api_downloads(themed: World, tmp_path: Path) -> None:
     assert "_themes_" in excel.headers["content-disposition"]
     word = client.get(f"{base}/themes.docx")
     assert word.status_code == 200 and "themes" in _doc_text(word.content).lower()
+    pdf = client.get(f"{base}/themes.pdf")
+    assert pdf.status_code == 200 and pdf.headers["content-type"] == "application/pdf"
+    assert pdf.content.startswith(b"%PDF-") and ".pdf" in pdf.headers["content-disposition"]
     csv = client.get(f"{base}/overview.csv")
     assert csv.status_code == 200 and csv.headers["content-type"] == "application/zip"
 
@@ -167,13 +253,16 @@ def test_api_downloads(themed: World, tmp_path: Path) -> None:
     assert md.status_code == 200 and b"# Context pack" in md.content
     card_word = client.get(f"{run_base}/result/result.docx")
     assert card_word.status_code == 200 and "Context pack" in _doc_text(card_word.content)
-    assert client.get(f"{run_base}/result/result.pdf").status_code == 404
+    card_pdf = client.get(f"{run_base}/result/result.pdf")
+    assert card_pdf.status_code == 200 and card_pdf.content.startswith(b"%PDF-")
+    assert client.get(f"{run_base}/result/result.html").status_code == 404
 
     everything = client.get(f"{base}/all.zip")
     assert everything.status_code == 200
     with zipfile.ZipFile(io.BytesIO(everything.content)) as archive:
         names = archive.namelist()
         readme = archive.read("README.txt").decode()
-    assert sum(1 for n in names if "_themes_" in n) == 3  # xlsx, csv, docx
-    assert sum(1 for n in names if "_analyst_" in n) == 3
+    assert sum(1 for n in names if "_themes_" in n) == 4  # xlsx, csv, docx, pdf
+    assert sum(1 for n in names if "_analyst_" in n) == 4
+    assert any(n.endswith(".pdf") for n in names) and "PDF are for reading" in readme
     assert "Not included yet:" in readme and "Gaps: Build the gap analysis" in readme

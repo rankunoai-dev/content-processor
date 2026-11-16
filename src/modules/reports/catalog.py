@@ -284,7 +284,7 @@ def _analyst(ctx: Context) -> Report | None:
         summary=[
             f"{sum(1 for r in runs if r.status == 'finished')} finished; total cost "
             f"${sum(r.cost_usd for r in runs):.2f}.",
-            "Each run's own result downloads from the Analyst cards tab (Markdown or Word).",
+            "Each run's own result downloads from the Analyst cards tab (Markdown, Word or PDF).",
         ],
         tables=[Table("Analyst runs", list(rows[0]), rows, wrap_columns=frozenset({"Message"}))],
     )
