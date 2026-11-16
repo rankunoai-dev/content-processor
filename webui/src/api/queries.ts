@@ -1,4 +1,6 @@
 import {
+  MutationCache,
+  QueryCache,
   QueryClient,
   keepPreviousData,
   useMutation,
@@ -26,7 +28,16 @@ export const queryKeys = {
 const POLL_MS = 5000;
 
 export function createQueryClient(): QueryClient {
-  return new QueryClient({
+  // A 401 means the session ended (expired, signed out elsewhere, password changed):
+  // ask who is signed in again, and the gate shows the sign-in page.
+  const signedOut = (error: unknown) => {
+    if (error instanceof ApiError && error.status === 401 && !/password|token/i.test(error.message)) {
+      void client.invalidateQueries({ queryKey: ['auth', 'me'] });
+    }
+  };
+  const client: QueryClient = new QueryClient({
+    queryCache: new QueryCache({ onError: signedOut }),
+    mutationCache: new MutationCache({ onError: signedOut }),
     defaultOptions: {
       queries: {
         staleTime: 30_000,
@@ -38,6 +49,7 @@ export function createQueryClient(): QueryClient {
       },
     },
   });
+  return client;
 }
 
 /**

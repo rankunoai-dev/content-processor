@@ -4,6 +4,11 @@ Passwords are stored only as salted scrypt hashes. Entering the right password
 unlocks one project for `TOKEN_TTL`: the server returns a token signed with an
 app secret (HMAC-SHA256) that names the project and its expiry; every write
 must carry it. Wrong passwords are slowed down per project.
+
+With team accounts (`src/modules/accounts`), a signed-in person's role decides what
+they may change, checked for every request before it reaches a route; the request
+then runs with `ACTING` set to their user name and every project check passes, so
+project passwords no longer apply.
 """
 
 from __future__ import annotations
@@ -16,9 +21,11 @@ import json
 import os
 import secrets
 import time
+from contextvars import ContextVar
 from pathlib import Path
 
 __all__ = [
+    "ACTING",
     "MIN_PASSWORD_LENGTH",
     "TOKEN_TTL_S",
     "AttemptLimiter",
@@ -28,6 +35,8 @@ __all__ = [
 ]
 
 MIN_PASSWORD_LENGTH = 8
+ACTING: ContextVar[str | None] = ContextVar("acting_account", default=None)
+"""The signed-in account of the request (set by the accounts gate after its role check)."""
 TOKEN_TTL_S = 8 * 3600
 _SCRYPT = {"n": 2**14, "r": 8, "p": 1, "dklen": 32}
 
@@ -92,6 +101,10 @@ class TokenSigner:
     def _mac(self, payload: bytes) -> bytes:
         return hmac.new(self._secret, payload, hashlib.sha256).digest()
 
+    def subkey(self, label: str) -> bytes:
+        """A separate key for another purpose (session cookies), derived from the secret."""
+        return hmac.new(self._secret, b"subkey:" + label.encode(), hashlib.sha256).digest()
+
     def issue(self, project_id: str, *, now: float | None = None) -> tuple[str, float]:
         """A token for one project and its expiry time (epoch seconds)."""
         expires = (time.time() if now is None else now) + self.ttl_s
@@ -99,7 +112,12 @@ class TokenSigner:
         return f"{_b64(payload)}.{_b64(self._mac(payload))}", float(int(expires))
 
     def check(self, token: str | None, project_id: str, *, now: float | None = None) -> bool:
-        """True when the token is genuine, unexpired and for this project."""
+        """True when the token is genuine, unexpired and for this project.
+
+        Always true for a request of a signed-in account: its role was checked first.
+        """
+        if ACTING.get() is not None:
+            return True
         if not token or token.count(".") != 1:
             return False
         body, mac = token.split(".")

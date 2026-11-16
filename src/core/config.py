@@ -129,6 +129,8 @@ class Settings(BaseSettings):
     # Fully parsed runs the analyst API keeps in memory (each holds every page's records
     # and text). Small on purpose: run summaries for the list are cached separately.
     cp_run_cache_entries: int = Field(default=4, ge=1, le=64)
+    # How long a sign-in lasts (hours) once team accounts exist (`accounts create-admin`).
+    cp_session_hours: float = Field(default=12.0, gt=0, le=24 * 30)
     # A project report (all of the client's websites) is built in its own process; it is
     # stopped after this many seconds.
     cp_project_report_timeout_s: float = Field(default=1800.0, gt=0.0)

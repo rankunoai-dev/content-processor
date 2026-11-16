@@ -11,11 +11,13 @@ from an allowed origin; every other method or path is refused as read-only. The
 server binds `CP_BIND_HOST` (127.0.0.1 unless set; see `__main__`), accepts only
 the Host headers in `CP_ALLOWED_HOSTS` (DNS-rebinding guard; local names unless
 set), accepts changes only from the origins in `CP_ALLOWED_ORIGINS` plus those
-hosts, and sends a strict Content-Security-Policy. Every GET route is open
-(no login): exposing the server beyond one machine needs read access control in
-front of it. Downloads are limited to the files that exist in the
-run's reports folder; a name is matched against the folder listing, never
-joined onto a path, so `..` and absolute paths cannot escape it.
+hosts, and sends a strict Content-Security-Policy. Once an admin account
+exists (`accounts create-admin`), every request needs a signed-in account or a
+personal access token and each role may do only its share (`src/modules/accounts`);
+before that, every GET route is open and the server must stay on this machine.
+Downloads are limited to the files that exist in the run's reports folder; a name
+is matched against the folder listing, never joined onto a path, so `..` and
+absolute paths cannot escape it.
 """
 
 from __future__ import annotations
@@ -69,6 +71,7 @@ from src.modules.content_processor.webapi.store import (
 )
 
 if TYPE_CHECKING:
+    from src.modules.accounts.store import AccountStore
     from src.modules.analyst.runs import CardRunner
 
 __all__ = [
@@ -86,6 +89,10 @@ _DECISIONS_PATH = re.compile(r"^/api/runs/[^/]+/decisions$")
 _PROJECT_WRITE_PATH = re.compile(r"^/api/projects(/[A-Za-z0-9_.-]+)*$")
 # Read-only tool calls of the local MCP server (POST only to carry the arguments).
 _MCP_CALL_PATH = re.compile(r"^/api/mcp/call$")
+# Signing in and out, one's own password, and account management (admins).
+_ACCOUNT_PATH = re.compile(
+    r"^/api/(auth/(login|logout|password)|accounts(/[a-z0-9._-]+/(update|password))?)$"
+)
 
 DEFAULT_ALLOWED_HOSTS: tuple[str, ...] = ("127.0.0.1", "localhost")
 _CSP = (
@@ -118,6 +125,7 @@ def create_app(
     projects: tuple[ProjectStore, ScrapeRunner, TokenSigner] | None = None,
     knowledge: KnowledgeAccess | None = None,
     analyst: CardRunner | None = None,
+    accounts: AccountStore | None = None,
 ) -> FastAPI:
     """Build the app for one exports folder (and, optionally, the built web app).
 
@@ -298,6 +306,17 @@ def create_app(
 
     if projects is not None:
         project_store, runner, signer = projects
+        from src.modules.accounts.access import SessionSigner
+        from src.modules.accounts.api import install_accounts
+        from src.modules.accounts.store import AccountStore
+
+        account_store = accounts or AccountStore(Path(str(project_store.root)) / "accounts")
+        app.state.accounts = account_store
+        install_accounts(
+            app,
+            accounts=account_store,
+            sessions=SessionSigner(signer.subkey("session"), hours=settings.cp_session_hours),
+        )
         register_project_routes(
             app, store=project_store, runner=runner, signer=signer, knowledge=knowledge
         )
@@ -414,7 +433,10 @@ def _write_refusal(request: Request, allowed_origins: Sequence[str]) -> JSONResp
     """
     path = request.url.path
     if request.method != "POST" or not (
-        _DECISIONS_PATH.match(path) or _PROJECT_WRITE_PATH.match(path) or _MCP_CALL_PATH.match(path)
+        _DECISIONS_PATH.match(path)
+        or _PROJECT_WRITE_PATH.match(path)
+        or _MCP_CALL_PATH.match(path)
+        or _ACCOUNT_PATH.match(path)
     ):
         return JSONResponse({"detail": "This server is read-only."}, status_code=405)
     if request.headers.get(WRITE_HEADER) != WRITE_HEADER_VALUE:

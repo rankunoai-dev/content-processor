@@ -6,6 +6,7 @@ answers with how to start it instead of failing silently.
 
 from __future__ import annotations
 
+import os
 from typing import Any, Final
 
 import httpx
@@ -33,6 +34,17 @@ SERVER_NAME: Final = "content-processor"
 DEFAULT_APP_URL: Final = "http://127.0.0.1:8780"
 _HEADERS: Final = {"X-Requested-With": "content-processor", "Accept": "application/json"}
 _TIMEOUT: Final = httpx.Timeout(180.0, connect=5.0)
+TOKEN_ENV: Final = "CP_APP_TOKEN"  # noqa: S105 - the variable name, not a secret
+
+
+def request_headers() -> dict[str, str]:
+    """The app's write header, plus the personal access token when the app has accounts.
+
+    The token (`accounts token --username ... --label "Claude Desktop" --token-role
+    viewer`) goes in the connector's `env` as `CP_APP_TOKEN`, never on the command line.
+    """
+    token = os.environ.get(TOKEN_ENV, "").strip()
+    return {**_HEADERS, "Authorization": f"Bearer {token}"} if token else dict(_HEADERS)
 
 
 def _start_hint(app_url: str) -> str:
@@ -173,7 +185,9 @@ def build_server(
 
 async def serve(app_url: str = DEFAULT_APP_URL, scope: Scope = None) -> None:
     """Serve over stdin and stdout until Claude Desktop closes the connection."""
-    async with httpx.AsyncClient(base_url=app_url, headers=_HEADERS, timeout=_TIMEOUT) as client:
+    async with httpx.AsyncClient(
+        base_url=app_url, headers=request_headers(), timeout=_TIMEOUT
+    ) as client:
         server = build_server(client, app_url, scope)
         async with stdio_server() as (read_stream, write_stream):
             await server.run(read_stream, write_stream, server.create_initialization_options())

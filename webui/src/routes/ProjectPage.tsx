@@ -1,3 +1,4 @@
+import { useMe } from '../api/auth';
 import {
   CloudDownloadOutlined,
   DeleteOutlined,
@@ -75,7 +76,7 @@ import { RunProgressPanel } from './project/RunProgressPanel';
 import { StatusBar, StatusLegend } from '../components/StatusBar';
 import { PageHeading } from '../components/bits';
 import { moduleByTab } from '../modules';
-import { MODULES_TEXT, PROJECTS, PROJECT_REPORTS, QUEUE, formatDate, reportKind, roughDuration, ANALYST, EXPORTS, GAPS, MONITORING, RESEARCH, THEMES } from '../vocabulary';
+import { MODULES_TEXT, PROJECTS, PROJECT_REPORTS, QUEUE, formatDate, reportKind, roughDuration, ANALYST, EXPORTS, GAPS, MONITORING, RESEARCH, THEMES, AUTH } from '../vocabulary';
 
 const STATUS_COLOR: Record<string, string> = {
   queued: 'default',
@@ -1129,6 +1130,9 @@ function SearchTab({ project }: { project: Project }) {
 
 function SettingsTab({ project, token }: { project: Project; token: string | null }) {
   const [form] = Form.useForm<{ password: string }>();
+  const me = useMe();
+  const accountsOn = me.data?.accounts === true;
+  const canDelete = accountsOn ? me.data?.account?.role === 'admin' : token !== null;
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const forget = useProjectTokens((s) => s.forget);
@@ -1138,7 +1142,7 @@ function SettingsTab({ project, token }: { project: Project; token: string | nul
     setBusy(true);
     setError(null);
     try {
-      await projectsApi.remove(project.project_id, password, token);
+      await projectsApi.remove(project.project_id, accountsOn ? null : password, token);
       forget(project.project_id);
       void message.success(PROJECTS.deleted);
       navigate('/projects');
@@ -1165,16 +1169,18 @@ function SettingsTab({ project, token }: { project: Project; token: string | nul
       <Card title={PROJECTS.deleteTitle}>
         <Typography.Paragraph type="secondary">{PROJECTS.deleteText}</Typography.Paragraph>
         <Form form={form} layout="inline" onFinish={(v) => void submit(v)}>
-          <Form.Item name="password" rules={[{ required: true, message: PROJECTS.form.required }]}>
-            <Input.Password
-              aria-label={PROJECTS.lock.password}
-              placeholder={PROJECTS.lock.password}
-              disabled={token === null}
-              autoComplete="current-password"
-            />
-          </Form.Item>
-          <Guarded unlocked={token !== null}>
-            <Button danger htmlType="submit" loading={busy} disabled={token === null}>
+          {accountsOn ? null : (
+            <Form.Item name="password" rules={[{ required: true, message: PROJECTS.form.required }]}>
+              <Input.Password
+                aria-label={PROJECTS.lock.password}
+                placeholder={PROJECTS.lock.password}
+                disabled={token === null}
+                autoComplete="current-password"
+              />
+            </Form.Item>
+          )}
+          <Guarded unlocked={canDelete}>
+            <Button danger htmlType="submit" loading={busy} disabled={!canDelete}>
               {PROJECTS.deleteButton}
             </Button>
           </Guarded>
@@ -1193,6 +1199,9 @@ export default function ProjectPage() {
   const forget = useProjectTokens((s) => s.forget);
   const { message } = AntApp.useApp();
   const [unlocking, setUnlocking] = useState(false);
+  const me = useMe();
+  const accountsOn = me.data?.accounts === true;
+  const role = me.data?.account?.role;
   const [anySite, setAnySite] = useState(false);
   const [addingSite, setAddingSite] = useState(false);
   const [params, setParams] = useSearchParams();
@@ -1210,7 +1219,11 @@ export default function ProjectPage() {
 
   const lockControl = useMemo(
     () =>
-      token ? (
+      accountsOn ? (
+        token ? null : (
+          <Tag icon={<LockOutlined />}>{AUTH.noRole(AUTH.roles[role ?? 'viewer'] ?? '')}</Tag>
+        )
+      ) : token ? (
         <Space wrap>
           <Tag icon={<UnlockOutlined />} color="success">
             {PROJECTS.lock.unlocked}
@@ -1227,7 +1240,7 @@ export default function ProjectPage() {
           </Button>
         </Space>
       ),
-    [token, forget, projectId],
+    [token, forget, projectId, accountsOn, role],
   );
 
   return (

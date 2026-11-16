@@ -54,6 +54,7 @@ from src.integrations.browser_client import BrowserRenderer, RenderLimits
 from src.integrations.evidence_store import EvidenceStore, LocalEvidenceStore
 from src.integrations.http_client import FetchLimits, HttpFetcher
 from src.integrations.impersonated_client import ImpersonatedFetcher, impersonation_available
+from src.modules.accounts.commands import register as register_account_commands
 from src.modules.analyst.commands import register as register_analyst_commands
 from src.modules.content_processor.contracts import InteractionPolicy, RunScope
 from src.modules.content_processor.enums import AccessTier, tier_rank
@@ -1024,6 +1025,7 @@ def main(argv: list[str] | None = None) -> int:
     register_monitoring_commands(sub)
     register_research_commands(sub)
     register_gap_commands(sub)
+    register_account_commands(sub)
 
     p_status = sub.add_parser("status", help="durable: task and resource counts")
     p_status.add_argument("--run", required=True)

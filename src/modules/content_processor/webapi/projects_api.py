@@ -19,6 +19,7 @@ from __future__ import annotations
 import base64
 import binascii
 import os
+import secrets
 import tempfile
 import threading
 import zipfile
@@ -59,6 +60,7 @@ from src.modules.content_processor.projects.project_reports import (
 )
 from src.modules.content_processor.projects.runner import QueueEntry, ScrapeRunner
 from src.modules.content_processor.projects.security import (
+    ACTING,
     MIN_PASSWORD_LENGTH,
     AttemptLimiter,
     TokenSigner,
@@ -166,7 +168,12 @@ class ProjectCreate(StrictModel):
     name: str = Field(min_length=1, max_length=120)
     owner_name: str = Field(min_length=1, max_length=120)
     client_name: str = Field(min_length=1, max_length=120)
-    password: str = Field(min_length=MIN_PASSWORD_LENGTH, max_length=200)
+    password: str | None = Field(
+        default=None,
+        min_length=MIN_PASSWORD_LENGTH,
+        max_length=200,
+        description="Needed without team accounts; with them, roles decide and it is not used",
+    )
     client_website: str | None = Field(default=None, max_length=500)
     client_note: str = Field(default="", max_length=MAX_NOTE_LENGTH)
     client_tags: list[str] = Field(default_factory=list, max_length=MAX_SITE_TAGS)
@@ -219,6 +226,12 @@ class Unlock(StrictModel):
     """The project password."""
 
     password: str = Field(min_length=1, max_length=200)
+
+
+class DeleteIn(StrictModel):
+    """Deleting a project: its password without team accounts (with them, an admin)."""
+
+    password: str | None = Field(default=None, max_length=200)
 
 
 class Unlocked(StrictModel):
@@ -501,6 +514,18 @@ def register_project_routes(
             confidential=record.confidential,
         )
 
+    def project_password(given: str | None) -> str:
+        """The password a new project is stored with.
+
+        Without team accounts it is required (it guards every change). With them, roles
+        decide and the project gets an unguessable password nobody needs.
+        """
+        if given:
+            return given
+        if ACTING.get() is not None:
+            return secrets.token_urlsafe(24)
+        raise HTTPException(status_code=422, detail="Give the project a password.")
+
     def require_token(project_id: str, token: str | None) -> ProjectRecord:
         record = project(project_id)
         if not signer.check(token, project_id):
@@ -585,7 +610,7 @@ def register_project_routes(
                 name=body.name,
                 owner_name=body.owner_name,
                 client_name=body.client_name,
-                password=body.password,
+                password=project_password(body.password),
                 client_site=SiteSpec(
                     name=body.client_name,
                     website=body.client_website,
@@ -636,9 +661,10 @@ def register_project_routes(
         return out(record)
 
     @app.post("/api/projects/{project_id}/delete")
-    def delete(project_id: str, body: Unlock, token: TokenHeader = None) -> dict[str, str]:
+    def delete(project_id: str, body: DeleteIn, token: TokenHeader = None) -> dict[str, str]:
         record = require_token(project_id, token)
-        if not store.check_password(project_id, body.password):
+        # with team accounts, only an admin reaches this route (the gate checked it)
+        if ACTING.get() is None and not store.check_password(project_id, body.password or ""):
             raise HTTPException(status_code=401, detail="That password is not right.")
         if any(r.status in RUN_ACTIVE for r in store.runs(project_id)):
             raise HTTPException(status_code=409, detail="Cancel the running scrapes first.")

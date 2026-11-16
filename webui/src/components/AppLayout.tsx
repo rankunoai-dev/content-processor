@@ -23,6 +23,7 @@ import { MODULES } from '../modules';
 import { APP, MODULES_TEXT, PROJECTS, QUEUE, RUNS } from '../vocabulary';
 import { ErrorBoundary } from './ErrorBoundary';
 import { RouteFallback } from './RouteFallback';
+import { UserMenu } from './UserMenu';
 
 const { Header, Sider, Content } = Layout;
 
@@ -202,6 +203,7 @@ export function AppLayout() {
             )}
           </Space>
           <Space>
+            <UserMenu />
             <Tooltip title={dark ? APP.toLight : APP.toDark}>
               <Button
                 type="text"

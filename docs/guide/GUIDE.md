@@ -1,6 +1,6 @@
 # Content Processor: A Plain-Language Guide
 
-Last updated: 10 November 2026 · Code version: main after the November audit: false alarms removed from verdicts, a live batch view, confidential projects, a sleep-proof scrape clock, and a deployment recipe
+Last updated: 16 November 2026 · Code version: main after team accounts (sign-in and roles), the November audit: false alarms removed from verdicts, a live batch view, confidential projects, a sleep-proof scrape clock, and a deployment recipe
 
 ## 1. What this is, in one paragraph
 
@@ -440,6 +440,27 @@ Everything the modules show can be taken away as a file. Each module tab (Themes
 
 A project's **Downloads** tab lists every report at once (project overview with its websites and scrapes, themes, monitoring, search data, suggested competitors, gaps, analyst card runs), says which are ready and, for the others, what to do first ("Build the theme map in the Themes tab first"), and has **Download everything (zip)**: every ready report in all three formats, with a short read-me. Each analyst card result can also be downloaded as a Word document next to the Markdown file. Reports are made on request from each module's latest results: nothing is scraped, pulled or paid for to make them. The page-by-page scrape reports stay in the Reports and Project reports tabs.
 
+### Step 23: Team accounts (sign in from anywhere, each person with a role)
+
+The app can be used by the whole team, from anywhere, once it is put online: everyone signs in with their own user name and password, and what they may do depends on their **role**:
+
+| Role | May |
+|---|---|
+| Viewer | read everything and download reports |
+| Reviewer | also approve or reject verdicts and findings |
+| Editor | also create and change projects, scrape, pull search data, build analyses |
+| Admin | also manage accounts and delete projects |
+
+How it works:
+
+- **The first admin** is created on the server with one command (`accounts create-admin`). From that moment sign-in is required everywhere: nothing is shown and nothing can be downloaded without it.
+- **Admins add people** on the Accounts page, with a temporary password. At their first sign-in, each person must choose their own password, which nobody else knows.
+- **Changing a role, disabling an account or resetting a password** signs that person out on every device at once. The last admin can never be removed.
+- **Project passwords and the Unlock button disappear:** the role decides. Every change is tied to a named person.
+- **Sign-ins last 12 hours** (adjustable). Passwords are stored only in scrambled form, and wrong passwords are slowed down.
+- **Programs such as the Claude Desktop connector** use a personal access token instead of a password, created on the server with the role it may use (usually Viewer).
+- **Until the first admin exists,** the app works as before, but only on this computer: it refuses to listen to other machines without accounts.
+
 ## 5. Safety and cost promises
 
 - Read-only: the engine never submits forms, logs in, buys, unsubscribes or clicks anything that changes the website.
@@ -450,6 +471,7 @@ A project's **Downloads** tab lists every report at once (project overview with 
 - How paid access works: when a website blocks every free method, the engine stops and asks. An operator can approve that one website, for a set amount (for example $5 per run), with one command; nothing else changes. Before every paid request the engine checks the kill switch, the approval and every limit (per run, per day, per month, per website and per page), and refuses rather than overspend. Every paid request is written to a spending log, and one command shows what has been spent and which websites are approved. Prices are counted on the high side, so the log never understates the bill.
 - Private networks are off-limits: the engine checks every address before contacting it, at every redirect. The basic downloader also connects only to the exact public address it checked, so a trick that swaps the address mid-way cannot redirect it into a private network (the browser and the Chrome-like downloader re-check each request instead).
 - Evidence first: originals are stored before anything is changed, so every claim can be proven.
+- Signed in or nothing: once team accounts exist, every page, report and download needs a signed-in person (or a program's access token), and each role can do only its share; the app refuses to be reachable from other machines before the first admin exists.
 
 ## 6. Results so far
 
@@ -506,6 +528,7 @@ A project's **Downloads** tab lists every report at once (project overview with 
 
 | Date | Significant change |
 |---|---|
+| 2026-11-16 | Team accounts: sign in with a personal user name and password, from anywhere; four roles (viewer, reviewer, editor, admin) decide what each person may do; admins add people with a temporary password each person replaces at first sign-in; project passwords and the Unlock button go away; programs such as the Claude Desktop connector use access tokens. |
 | 2026-11-10 | Images are downloaded once: the browser's own download of each image is kept, with the same checks, evidence and reading step as before, and anything the browser did not load is downloaded as before. About 85% fewer requests to a site per batch and 3 to 4 minutes saved per batch of 25 pages. |
 | 2026-11-10 | Faster without changing results: documents and images are read while pages are still being fetched and rendered; file readers stay running instead of starting a new program per file; the text-recognition program is probed once per run; end-of-batch screenshot reading runs several pages at once; the engine waits exactly the courtesy gap between requests. Records on the test sites are identical before and after. |
 | 2026-11-10 | Access rules corrected: missing pages (404/410) are never content; soft-404 needs whole words and body text; a header login form is not a login wall; scripts are not text; security cookies do not turn errors into bot checks; app shells go to the browser first; a blocked page escalates alone and a site only after three blocked pages. Gates tightened: audience gates need a pop-up with a button; lead-gen walls are judged per section and never over a whole article. |
