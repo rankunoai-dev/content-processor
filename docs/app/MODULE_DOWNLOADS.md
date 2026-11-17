@@ -13,6 +13,7 @@
 | `competitors` | research | the competitor book (status, sources, relevance, overlap, traffic, top 10, examples, seen) | a suggestion exists |
 | `gaps` | gaps | `gap_tables(latest report)` | the gap analysis is built |
 | `analyst` | analyst | the project's card runs (card, backend, status, times, cost, check, inputs, message) | a run exists (and the app has the analyst runner) |
+| `semantic_similarity` | content | the latest project report's semantic sheets (`<prefix>_semantic_similarity.json` sidecar, read back as tables) | a project report with the semantic workbook exists |
 
 Each report is a `Report` (title, subtitle with when its data was made, summary lines, tables).
 
