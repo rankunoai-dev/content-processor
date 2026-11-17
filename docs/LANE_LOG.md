@@ -999,3 +999,9 @@ git worktree add ../content-processor-lane4 -b lane/L4-verify
 - **Plan:** `docs/rfc/0004-multilingual-embeddings-bge-m3.md`: current state, 12 breaking points, architecture, four slices, acceptance, decisions needed, edge cases.
 - **Slice 1 landed:** `retrieval.hybrid_search` refuses a query prepared with a different model than the store's vectors (`EmbedderMismatchError`, a `RuntimeError`). Before, a size mismatch crashed with a raw `ValueError` and a same-size mismatch would rank silently. Federated search already falls back to exact words on this error.
 - **Not done:** Ollama is not installed here; bge-m3 has not been run. Slices 2–4 need the decisions in RFC section 7.
+
+## [2026-11-17] Branch feat/multilingual-bge-m3: RFC 0004 slice 2
+
+- **Landed:** `_embed_all` splits a batch that fails twice into halves (B4); every vector must match the first one's size or the run stops (B7); before an upgrade clears the store, the new model must answer a probe, so a model server that is down keeps the store's vectors (B5, partly: a failure halfway through still needs resume, which slice 3 covers).
+- **Tests:** `test_index_upgrade_safety.py` (split, size, probe).
+- **Known, not caused by this branch:** `test_cli::test_plan_johnhancock_scope_is_single_host_t3_ceiling` fails on main too. Browser tests (`test_explorer`, `test_single_pass_capture`, `test_site_controls`) fail intermittently under `pytest -n auto` on main and here; each passes alone.
