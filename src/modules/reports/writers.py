@@ -1,4 +1,4 @@
-"""Write a report as Excel, CSV or Word, and turn Markdown into a Word document.
+"""Write a report as Excel, CSV, Word, PDF or JSON, and turn Markdown into a Word document.
 
 A **report** is a title, a line saying what it is and when its data was made, a few
 summary lines, and tables (the same tables the module's workbook has).
@@ -14,14 +14,21 @@ summary lines, and tables (the same tables the module's workbook has).
   pointing to the Excel file, which has everything. Internal id columns are left
   out of Word (they stay in Excel and CSV). Wide tables turn the page landscape.
   Needs `python-docx` (the `office` extra); without it Word is not offered.
+- **PDF** (`.pdf`): the same content and the same limits as Word, ready to print or
+  attach. Table headings repeat on every page; wide tables turn the page landscape.
+  Needs `reportlab` (the `office` extra); without it PDF is not offered.
+- **JSON** (`.json`): every table with every row and nothing shortened, plus the
+  module's own raw record when the report has one (`data`), for other tools.
 """
 
 from __future__ import annotations
 
+import json
 import re
 import zipfile
 from collections.abc import Sequence
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Final, Literal
 
@@ -35,12 +42,13 @@ __all__ = [
     "Report",
     "file_slug",
     "markdown_to_docx",
+    "pdf_available",
     "word_available",
     "write_report",
 ]
 
-Format = Literal["xlsx", "csv", "docx"]
-FORMATS: Final[tuple[Format, ...]] = ("xlsx", "csv", "docx")
+Format = Literal["xlsx", "csv", "docx", "pdf", "json"]
+FORMATS: Final[tuple[Format, ...]] = ("xlsx", "csv", "docx", "pdf", "json")
 WORD_ROWS: Final = 300
 WORD_CELL: Final = 600
 _WIDE: Final = 6
@@ -55,12 +63,23 @@ class Report:
     subtitle: str
     summary: list[str] = field(default_factory=list)
     tables: list[Table] = field(default_factory=list)
+    data: Any = None
+    """The module's own record (JSON-ready), added to the JSON download as `data`."""
 
 
 def word_available() -> bool:
     """True when python-docx is installed."""
     try:
         import docx  # noqa: F401
+    except ImportError:
+        return False
+    return True
+
+
+def pdf_available() -> bool:
+    """True when reportlab is installed."""
+    try:
+        import reportlab  # noqa: F401
     except ImportError:
         return False
     return True
@@ -188,6 +207,171 @@ def _write_docx(report: Report, path: Path) -> Path:
     return target
 
 
+# -- JSON --------------------------------------------------------------------------------------
+
+
+def _write_json(report: Report, path: Path) -> Path:
+    target = path.with_suffix(".json")
+    body: dict[str, Any] = {
+        "report": report.key,
+        "title": report.title,
+        "subtitle": report.subtitle,
+        "generated_at": datetime.now(UTC).isoformat(timespec="seconds"),
+        "summary": list(report.summary),
+        "tables": [
+            {
+                "name": t.name,
+                "columns": list(t.columns),
+                "rows": [{c: row.get(c) for c in t.columns} for row in t.rows],
+            }
+            for t in report.tables
+            if t.columns
+        ],
+    }
+    if report.data is not None:
+        body["data"] = report.data
+    target.write_text(json.dumps(body, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+    return target
+
+
+# -- PDF ---------------------------------------------------------------------------------------
+
+_PDF_FONTS: Final = (
+    ("reportlab", "Vera.ttf", "VeraBd.ttf"),
+    ("/usr/share/fonts/truetype/dejavu", "DejaVuSans.ttf", "DejaVuSans-Bold.ttf"),
+    ("C:/Windows/Fonts", "arial.ttf", "arialbd.ttf"),
+)
+
+
+def _pdf_fonts() -> tuple[str, str, bool]:
+    """(regular, bold, unicode): a TrueType pair when one is found, else Helvetica."""
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
+
+    for folder, regular, bold in _PDF_FONTS:
+        if folder == "reportlab":
+            import reportlab
+
+            base = Path(reportlab.__file__).parent / "fonts"
+        else:
+            base = Path(folder)
+        if not (base / regular).is_file() or not (base / bold).is_file():
+            continue
+        name = f"CP-{Path(regular).stem}"
+        try:
+            if name not in pdfmetrics.getRegisteredFontNames():
+                pdfmetrics.registerFont(TTFont(name, str(base / regular)))
+                pdfmetrics.registerFont(TTFont(f"{name}-Bold", str(base / bold)))
+        except Exception:  # noqa: BLE001, S112 - a broken font file means try the next one
+            continue
+        return name, f"{name}-Bold", True
+    return "Helvetica", "Helvetica-Bold", False
+
+
+def _pdf_text(value: str, unicode_font: bool) -> str:
+    from xml.sax.saxutils import escape
+
+    if not unicode_font:
+        value = value.encode("latin-1", "replace").decode("latin-1")
+    return escape(value).replace("\n", "<br/>")
+
+
+def _write_pdf(report: Report, path: Path) -> Path:
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4, landscape
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.lib.units import mm
+    from reportlab.platypus import LongTable, Paragraph, SimpleDocTemplate, Spacer, TableStyle
+
+    target = path.with_suffix(".pdf")
+    regular, bold, uni = _pdf_fonts()
+    wide = any(len(_readable_columns(t)) > _WIDE for t in report.tables)
+    size = landscape(A4) if wide else A4
+    margin = 12 * mm
+    doc = SimpleDocTemplate(
+        str(target),
+        pagesize=size,
+        leftMargin=margin,
+        rightMargin=margin,
+        topMargin=margin,
+        bottomMargin=margin,
+        title=report.title,
+    )
+    title = ParagraphStyle("t", fontName=bold, fontSize=18, leading=22, spaceAfter=4)
+    heading = ParagraphStyle("h", fontName=bold, fontSize=13, leading=16, spaceBefore=10)
+    body = ParagraphStyle("b", fontName=regular, fontSize=9, leading=12)
+    note = ParagraphStyle("n", parent=body, textColor=colors.HexColor("#555555"))
+    head_cell = ParagraphStyle("hc", fontName=bold, fontSize=7.5, leading=9)
+    cell = ParagraphStyle("c", fontName=regular, fontSize=7, leading=8.5)
+    bullet = "\u2022" if uni else "-"
+
+    def para(text: str, style: ParagraphStyle) -> Paragraph:
+        return Paragraph(_pdf_text(text, uni), style)
+
+    story: list[Any] = [para(report.title, title), para(report.subtitle, note), Spacer(1, 4)]
+    story += [para(f"{bullet} {line}", body) for line in report.summary]
+    usable = size[0] - 2 * margin
+    for table in report.tables:
+        if not table.columns:
+            continue
+        story.append(para(table.name, heading))
+        if not table.rows:
+            story.append(para("Nothing to list.", note))
+            continue
+        columns = _readable_columns(table)
+        clipped = 0
+        grid: list[list[Any]] = [[para(c, head_cell) for c in columns]]
+        for row in table.rows[:WORD_ROWS]:
+            line = []
+            for name in columns:
+                text = _text(row.get(name))
+                if len(text) > WORD_CELL:
+                    text = text[:WORD_CELL].rstrip() + " ..."
+                    clipped += 1
+                line.append(para(text, cell))
+            grid.append(line)
+        weights = [max(1.0, float(table.widths.get(c, 14))) for c in columns]
+        total = sum(weights)
+        out = LongTable(grid, colWidths=[usable * w / total for w in weights], repeatRows=1)
+        out.setStyle(
+            TableStyle(
+                [
+                    ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#999999")),
+                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#E8EEF4")),
+                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 3),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 3),
+                ]
+            )
+        )
+        story.append(out)
+        if len(table.rows) > WORD_ROWS:
+            story.append(
+                para(
+                    f"Showing the first {WORD_ROWS:,} of {len(table.rows):,} rows; the "
+                    "Excel download has every row.",
+                    note,
+                )
+            )
+        if clipped:
+            story.append(
+                para(
+                    f"{clipped:,} long cell(s) shortened here; the Excel download has the "
+                    "full text.",
+                    note,
+                )
+            )
+
+    def footer(canvas: Any, _doc: Any) -> None:
+        canvas.saveState()
+        canvas.setFont(regular, 7)
+        canvas.drawRightString(size[0] - margin, 7 * mm, f"Page {canvas.getPageNumber()}")
+        canvas.restoreState()
+
+    doc.build(story, onFirstPage=footer, onLaterPages=footer)
+    return target
+
+
 def write_report(report: Report, fmt: Format, folder: Path, name: str) -> Path:
     """Write the report in one format into `folder`; returns the file (its suffix by format)."""
     folder.mkdir(parents=True, exist_ok=True)
@@ -198,6 +382,10 @@ def write_report(report: Report, fmt: Format, folder: Path, name: str) -> Path:
         return target
     if fmt == "csv":
         return _write_csv(report, base)
+    if fmt == "json":
+        return _write_json(report, base)
+    if fmt == "pdf":
+        return _write_pdf(report, base)
     return _write_docx(report, base)
 
 

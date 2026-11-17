@@ -5,7 +5,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { moduleRequest } from './research';
 
-export type ExportFormat = 'xlsx' | 'csv' | 'docx';
+export type ExportFormat = 'xlsx' | 'csv' | 'docx' | 'pdf' | 'json';
 
 export interface ExportReport {
   key: string;

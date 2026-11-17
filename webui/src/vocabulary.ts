@@ -1912,6 +1912,7 @@ export const RECRAWL = {
 };
 
 export const MONITORING = {
+  downloadHistory: 'Download history',
   tab: 'Monitoring',
   intro:
     'What changed on the client’s and competitors’ websites between scrapes: new and removed pages, rewrites, price changes, and how each theme moved. A check reads the scrapes already made; nothing is fetched and it costs nothing.',
@@ -1966,7 +1967,7 @@ export const MONITORING = {
 export const EXPORTS = {
   tab: 'Downloads',
   button: 'Download',
-  formats: { xlsx: 'Excel (.xlsx)', csv: 'CSV', docx: 'Word (.docx)' } as Record<string, string>,
+  formats: { xlsx: 'Excel (.xlsx)', csv: 'CSV', docx: 'Word (.docx)', pdf: 'PDF (.pdf)', json: 'JSON (.json)' } as Record<string, string>,
   intro:
     "Every report of this project, one per module, built from each module's latest results. Excel has every row and the full text; CSV is for other tools (a zip when a report has several tables); Word is for reading and sharing (long tables show their first rows). Nothing is scraped or paid for to make them.",
   all: 'Download everything (zip)',

@@ -137,6 +137,112 @@ def _monitoring(ctx: Context) -> Report | None:
         subtitle=f"Check of {_when(found.created_at)}",
         summary=[f"{len(found.alerts)} alert(s), {high} high; {len(found.websites)} website(s)."],
         tables=check_tables(found),
+        data=found.model_dump(mode="json"),
+    )
+
+
+_HISTORY_CHECKS: Final = 200
+_SEVERITIES: Final = ("high", "medium", "low", "info")
+
+
+def _monitoring_history(ctx: Context) -> Report | None:
+    from src.modules.monitoring.service import monitor_store
+
+    store = monitor_store(ctx.projects)
+    pid = ctx.project.project_id
+    ids = store.history(pid)
+    checks = []
+    for check_id in ids[:_HISTORY_CHECKS]:
+        try:
+            checks.append(store.get(pid, check_id))
+        except (KeyError, ValueError):
+            continue
+    if not checks:
+        return None
+    checks.sort(key=lambda c: c.created_at)
+    runs: list[dict[str, Cell]] = []
+    alerts: list[dict[str, Cell]] = []
+    recurring: dict[tuple[str, str, str], dict[str, Cell]] = {}
+    for check in checks:
+        when = _when(check.created_at)
+        row: dict[str, Cell] = {
+            "Check": check.check_id,
+            "Date": when,
+            "Trigger": check.trigger,
+            "Websites": len(check.websites),
+            "Alerts": len(check.alerts),
+        }
+        for level in _SEVERITIES:
+            row[level.capitalize()] = sum(1 for a in check.alerts if a.severity == level)
+        row["New pages"] = sum(len(d.new_pages) for d in check.websites)
+        row["Removed pages"] = sum(len(d.removed_pages) for d in check.websites)
+        row["Changed pages"] = sum(len(d.changed_pages) for d in check.websites)
+        runs.append(row)
+        for a in check.alerts:
+            alerts.append(
+                {
+                    "Date": when,
+                    "Severity": a.severity,
+                    "Kind": a.kind.replace("_", " "),
+                    "Website": a.website,
+                    "Alert": a.title,
+                    "Detail": a.detail,
+                    "Pages": "\n".join(a.urls[:10]),
+                    "Check": check.check_id,
+                }
+            )
+            key = (a.kind, a.website, a.severity)
+            seen = recurring.setdefault(
+                key,
+                {
+                    "Kind": a.kind.replace("_", " "),
+                    "Website": a.website,
+                    "Severity": a.severity,
+                    "Checks raised": 0,
+                    "First seen": when,
+                    "Last seen": when,
+                    "Latest alert": a.title,
+                },
+            )
+            seen["Checks raised"] = int(seen["Checks raised"] or 0) + 1
+            seen["Last seen"] = when
+            seen["Latest alert"] = a.title
+    alerts.reverse()
+    order = {s: i for i, s in enumerate(_SEVERITIES)}
+    repeat = sorted(
+        recurring.values(),
+        key=lambda r: (order.get(str(r["Severity"]), 9), -int(r["Checks raised"] or 0)),
+    )
+    wrap = frozenset({"Detail", "Pages", "Alert", "Latest alert"})
+    first, last = checks[0], checks[-1]
+    summary = [
+        f"{len(checks)} check(s) from {_when(first.created_at)} to {_when(last.created_at)}; "
+        f"{len(alerts)} alert(s) in all, {sum(1 for a in alerts if a['Severity'] == 'high')} high.",
+    ]
+    if len(ids) > _HISTORY_CHECKS:
+        summary.append(f"Only the latest {_HISTORY_CHECKS} of {len(ids)} checks are included.")
+    return Report(
+        key="monitoring_history",
+        title=f"{ctx.project.name}: monitoring history",
+        subtitle=f"Every check up to {_when(last.created_at)}",
+        summary=summary,
+        tables=[
+            Table("Checks", list(runs[0]), runs),
+            Table(
+                "All alerts",
+                ["Date", "Severity", "Kind", "Website", "Alert", "Detail", "Pages", "Check"],
+                alerts,
+                wrap,
+                {"Alert": 50, "Detail": 70, "Pages": 60},
+            ),
+            Table(
+                "Recurring alerts",
+                list(repeat[0]) if repeat else ["Kind"],
+                repeat,
+                wrap,
+                {"Latest alert": 60},
+            ),
+        ],
     )
 
 
@@ -314,6 +420,15 @@ REPORTS: Final[tuple[ReportDef, ...]] = (
         "Alerts ranked by severity, what changed on each website and theme drift.",
         "Run a monitoring check in the Monitoring tab first.",
         _monitoring,
+    ),
+    ReportDef(
+        "monitoring_history",
+        "monitoring",
+        "Monitoring history",
+        "Every monitoring check over time: alert counts per check, every alert ever raised "
+        "and the alerts that keep coming back.",
+        "Run a monitoring check in the Monitoring tab first.",
+        _monitoring_history,
     ),
     ReportDef(
         "recrawl",

@@ -35,6 +35,8 @@ const catalog: ExportCatalog = {
     { key: 'xlsx', label: 'Excel' },
     { key: 'csv', label: 'CSV' },
     { key: 'docx', label: 'Word' },
+    { key: 'pdf', label: 'PDF' },
+    { key: 'json', label: 'JSON' },
   ],
   reports: [
     {
@@ -46,7 +48,7 @@ const catalog: ExportCatalog = {
       missing: '',
       subtitle: 'Client Example',
       rows: 4,
-      formats: ['xlsx', 'csv', 'docx'],
+      formats: ['xlsx', 'csv', 'docx', 'pdf', 'json'],
     },
     {
       key: 'gaps',
@@ -57,7 +59,7 @@ const catalog: ExportCatalog = {
       missing: 'Build the gap analysis in the Gaps tab first.',
       subtitle: '',
       rows: 0,
-      formats: ['xlsx', 'csv', 'docx'],
+      formats: ['xlsx', 'csv', 'docx', 'pdf', 'json'],
     },
   ],
 };
@@ -86,6 +88,8 @@ describe('downloads tab', () => {
     expect(await screen.findByText('Project overview', {}, { timeout: 15_000 })).toBeInTheDocument();
     expect(screen.getByText('1 of 2 reports ready.')).toBeInTheDocument();
     expect(screen.getByLabelText('Project overview Word')).toHaveAttribute('href', '/api/projects/p1/exports/overview.docx');
+    expect(screen.getByLabelText('Project overview PDF')).toHaveAttribute('href', '/api/projects/p1/exports/overview.pdf');
+    expect(screen.getByLabelText('Project overview JSON')).toHaveAttribute('href', '/api/projects/p1/exports/overview.json');
     expect(screen.getByLabelText('Project overview Excel')).toHaveAttribute('href', '/api/projects/p1/exports/overview.xlsx');
     expect(screen.queryByLabelText('Gaps Excel')).not.toBeInTheDocument();
     expect(screen.getByText('Build the gap analysis in the Gaps tab first.')).toBeInTheDocument();

@@ -1,6 +1,6 @@
 # Content Processor: A Plain-Language Guide
 
-Last updated: 10 November 2026 · Code version: main after the November audit: false alarms removed from verdicts, a live batch view, confidential projects, a sleep-proof scrape clock, and a deployment recipe
+Last updated: 17 November 2026 · Code version: main with monitoring downloads: PDF and JSON for every report, competitor moves, price and template changes, and the monitoring history
 
 ## 1. What this is, in one paragraph
 
@@ -430,15 +430,19 @@ Two ways to use your own Claude account with the app, without an API key or API 
 
 Both send the project's data to Claude through your account, so they are for clients whose data may go to Claude (the data policy question is still open). Search now also works when the local meaning model is off: it falls back to exact words and says so.
 
-### Step 22: Downloads (every report, in Excel, CSV or Word)
+### Step 22: Downloads (every report, in Excel, CSV, Word, PDF or JSON)
 
-Everything the modules show can be taken away as a file. Each module tab (Themes, Monitoring, Research, Gaps, and the Suggested competitors panel) has a **Download** button with three choices:
+Everything the modules show can be taken away as a file. Each module tab (Themes, Monitoring, Research, Gaps, and the Suggested competitors panel) has a **Download** button with five choices:
 
 - **Excel (.xlsx)**: every row and the full text, one sheet per table. The file to work in.
 - **CSV**: the same tables for other tools (one file, or a zip with one file per table).
 - **Word (.docx)**: the report laid out for reading and sharing: a title, what it is and when its data was made, a short summary, then each table. Word is not made for thousands of rows, so a long table shows its first 300 rows and a very long cell its first 600 characters, each time with a line saying so; the Excel file always has everything.
+- **PDF (.pdf)**: the same as Word, ready to print or attach to an email. Table headings repeat on every page and pages are numbered.
+- **JSON (.json)**: every table in full, for other tools and developers. The monitoring download also includes the complete check exactly as the app stored it.
 
-A project's **Downloads** tab lists every report at once (project overview with its websites and scrapes, themes, monitoring, search data, suggested competitors, gaps, analyst card runs), says which are ready and, for the others, what to do first ("Build the theme map in the Themes tab first"), and has **Download everything (zip)**: every ready report in all three formats, with a short read-me. Each analyst card result can also be downloaded as a Word document next to the Markdown file. Reports are made on request from each module's latest results: nothing is scraped, pulled or paid for to make them. The page-by-page scrape reports stay in the Reports and Project reports tabs.
+**Monitoring downloads.** The latest check's download has every insight the Monitoring tab shows: the alerts, each website's summary, every changed page (words before and after, headings added and removed, new tables or pricing blocks), new and removed pages, theme drift, and three lists that used to be visible only in the tab: **Competitor moves** (competitor pages that grew by 500 words or more, had their title or main heading rewritten, gained new subjects in their headings, new tables, pricing blocks, FAQs or forms, or changed a price; biggest growth first), **Price changes** (each amount that changed, before and after, with the words around it) and **Template changes** (a line added to or removed from many pages at once, such as a menu or footer item). Next to it, **Download history** covers every check so far (up to the latest 200): one row per check with its alert counts and page changes, every alert ever raised, and **recurring alerts** (the same kind of alert on the same website check after check, with when it was first and last seen), so trends over weeks can be followed.
+
+A project's **Downloads** tab lists every report at once (project overview with its websites and scrapes, themes, monitoring, monitoring history, search data, suggested competitors, gaps, analyst card runs), says which are ready and, for the others, what to do first ("Build the theme map in the Themes tab first"), and has **Download everything (zip)**: every ready report in all five formats, with a short read-me. Each analyst card result can also be downloaded as a Word document next to the Markdown file. Reports are made on request from each module's latest results: nothing is scraped, pulled or paid for to make them. The page-by-page scrape reports stay in the Reports and Project reports tabs.
 
 ## 5. Safety and cost promises
 
@@ -506,6 +510,7 @@ A project's **Downloads** tab lists every report at once (project overview with 
 
 | Date | Significant change |
 |---|---|
+| 2026-11-17 | Monitoring insights downloadable in more formats: every report can now also be downloaded as PDF (ready to print) and JSON (for other tools). The monitoring download adds Competitor moves, Price changes and Template changes, and a new Monitoring history download covers every check over time with recurring alerts. |
 | 2026-11-10 | Images are downloaded once: the browser's own download of each image is kept, with the same checks, evidence and reading step as before, and anything the browser did not load is downloaded as before. About 85% fewer requests to a site per batch and 3 to 4 minutes saved per batch of 25 pages. |
 | 2026-11-10 | Faster without changing results: documents and images are read while pages are still being fetched and rendered; file readers stay running instead of starting a new program per file; the text-recognition program is probed once per run; end-of-batch screenshot reading runs several pages at once; the engine waits exactly the courtesy gap between requests. Records on the test sites are identical before and after. |
 | 2026-11-10 | Access rules corrected: missing pages (404/410) are never content; soft-404 needs whole words and body text; a header login form is not a login wall; scripts are not text; security cookies do not turn errors into bot checks; app shells go to the browser first; a blocked page escalates alone and a site only after three blocked pages. Gates tightened: audience gates need a pop-up with a button; lead-gen walls are judged per section and never over a whole article. |
