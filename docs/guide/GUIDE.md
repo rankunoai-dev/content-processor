@@ -1,6 +1,6 @@
 # Content Processor: A Plain-Language Guide
 
-Last updated: 16 November 2026 · Code version: main after team accounts (sign-in and roles), the November audit: false alarms removed from verdicts, a live batch view, confidential projects, a sleep-proof scrape clock, and a deployment recipe
+Last updated: 16 November 2026 · Code version: main after reviewing verdicts in the app, team accounts (sign-in and roles), the November audit: false alarms removed from verdicts, a live batch view, confidential projects, a sleep-proof scrape clock, and a deployment recipe
 
 ## 1. What this is, in one paragraph
 
@@ -461,6 +461,20 @@ How it works:
 - **Programs such as the Claude Desktop connector** use a personal access token instead of a password, created on the server with the role it may use (usually Viewer).
 - **Until the first admin exists,** the app works as before, but only on this computer: it refuses to listen to other machines without accounts.
 
+### Step 24: Reviewing the engine's verdicts in the app
+
+Every page of a scrape gets a verdict from the engine: fully captured, partly captured, needs a check, site blocked us, couldn't load or excluded. The project's **Review** tab lists them per website and scrape. It opens on the pages that need attention: anything not fully captured, or already rejected. You can also show all pages, the undecided ones or the decided ones, with files and images included or not.
+
+For each page a reviewer either **approves** the verdict, or **rejects** it. A rejection needs a reason, for example "the rate table at the bottom is missing", and a next step:
+
+- **Scrape again:** the next scrape of that website captures the page again in full. It does not reuse the earlier capture, even when the website says nothing changed.
+- **Get it by hand:** the page is marked for someone to collect its content.
+- **Exclude from reports:** the page is left out of the project reports.
+
+Each decision is saved with who made it and when, and earlier decisions are kept as its history (shown when you hover over the name). A decision can be undone. The scrape's own review report reads the decisions too. With team accounts the reviewer is the signed-in person; reviewers, editors and admins may decide, viewers only read. Without accounts, the project must be unlocked and the reviewer types their name.
+
+On the John Hancock scrape the Review tab opens on four pages out of 306: a PDF that needs a check, the error page, the newsletter page and a placeholder. Images, tracking pixels and pages left out on purpose are hidden until asked for.
+
 ## 5. Safety and cost promises
 
 - Read-only: the engine never submits forms, logs in, buys, unsubscribes or clicks anything that changes the website.
@@ -528,6 +542,7 @@ How it works:
 
 | Date | Significant change |
 |---|---|
+| 2026-11-17 | Reviewing verdicts in the app: a Review tab lists each scrape's pages with the engine's verdict; reviewers approve it, or reject it with a reason and a next step (scrape again in full on the next scrape, get it by hand, or exclude from the project reports), saved with who, when and the history. |
 | 2026-11-16 | Team accounts: sign in with a personal user name and password, from anywhere; four roles (viewer, reviewer, editor, admin) decide what each person may do; admins add people with a temporary password each person replaces at first sign-in; project passwords and the Unlock button go away; programs such as the Claude Desktop connector use access tokens. |
 | 2026-11-10 | Images are downloaded once: the browser's own download of each image is kept, with the same checks, evidence and reading step as before, and anything the browser did not load is downloaded as before. About 85% fewer requests to a site per batch and 3 to 4 minutes saved per batch of 25 pages. |
 | 2026-11-10 | Faster without changing results: documents and images are read while pages are still being fetched and rendered; file readers stay running instead of starting a new program per file; the text-recognition program is probed once per run; end-of-batch screenshot reading runs several pages at once; the engine waits exactly the courtesy gap between requests. Records on the test sites are identical before and after. |

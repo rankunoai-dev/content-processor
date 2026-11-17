@@ -64,6 +64,7 @@ from src.modules.content_processor.export.tabular import (
 )
 from src.modules.content_processor.projects.models import ProjectRecord, RunState, SiteRecord
 from src.modules.content_processor.projects.store import ProjectStore
+from src.modules.content_processor.projects.verdicts import excluded_urls
 
 if TYPE_CHECKING:
     from src.modules.content_processor.projects.report_command import Builder, BuildOutcome
@@ -253,7 +254,10 @@ def _load(sources: Sequence[ReportSource]) -> tuple[list[UrlRecord], dict[str, s
     for source in sources:
         if source.records is None:
             continue
+        excluded = excluded_urls(source.records, source.run_id or "")
         for record in load_records(source.records):
+            if record.requested_url in excluded:
+                continue  # a reviewer excluded it from the reports
             records.append(record)
             websites[record.requested_url] = source.site_name
     return records, websites
@@ -376,7 +380,12 @@ def _write_project_report(
 
     With one client website, its scrape already wrote exactly this workbook: it is copied.
     """
-    if len(clients) == 1 and clients[0].records is not None and clients[0].run_id:
+    if (
+        len(clients) == 1
+        and clients[0].records is not None
+        and clients[0].run_id
+        and not excluded_urls(clients[0].records, clients[0].run_id)  # else rebuilt without them
+    ):
         reports = clients[0].records.parent / "reports"
         existing = report_file(reports, clients[0].run_id, "project_report.xlsx")
         if existing is not None:

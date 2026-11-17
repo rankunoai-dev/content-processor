@@ -27,11 +27,11 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
-from fastapi import FastAPI, Header, HTTPException, Query
+from fastapi import FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import FileResponse
-from pydantic import Field
+from pydantic import Field, ValidationError
 
 from src.core.logger import get_logger
 from src.core.schemas import StrictModel
@@ -76,6 +76,12 @@ from src.modules.content_processor.projects.urls import (
     UnreadableFileError,
     candidates_from_file,
     candidates_from_text,
+)
+from src.modules.content_processor.projects.verdicts import (
+    VerdictDecisionOut,
+    VerdictList,
+    page_verdicts,
+    save_verdict,
 )
 from src.modules.content_processor.projects.websites import WebsiteGraph
 from src.modules.content_processor.webapi.memo import TimedMemo
@@ -226,6 +232,18 @@ class Unlock(StrictModel):
     """The project password."""
 
     password: str = Field(min_length=1, max_length=200)
+
+
+class VerdictIn(StrictModel):
+    """A reviewer's decision about one page's verdict ("" clears it)."""
+
+    url: str = Field(min_length=1, max_length=4096)
+    decision: Literal["approved", "rejected", ""]
+    next_step: Literal["scrape_again", "obtain_manually", "exclude", ""] = ""
+    note: str = Field(default="", max_length=2000, description="The reason, for a rejection")
+    reviewer: str | None = Field(
+        default=None, max_length=80, description="Without team accounts: who decides"
+    )
 
 
 class DeleteIn(StrictModel):
@@ -885,6 +903,46 @@ def register_project_routes(
             return runner.resume(project_id, site_id, run_id)
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from None
+
+    @app.get("/api/projects/{project_id}/sites/{site_id}/runs/{run_id}/verdicts")
+    def verdicts(project_id: str, site_id: str, run_id: str) -> VerdictList:
+        run_state(project_id, site_id, run_id)
+        return page_verdicts(store, project_id, site_id, run_id)
+
+    @app.post("/api/projects/{project_id}/sites/{site_id}/runs/{run_id}/verdicts")
+    def save_page_verdict(
+        project_id: str,
+        site_id: str,
+        run_id: str,
+        body: VerdictIn,
+        request: Request,
+        token: TokenHeader = None,
+    ) -> VerdictDecisionOut:
+        require_token(project_id, token)  # with accounts: a reviewer or above (the gate)
+        run_state(project_id, site_id, run_id)
+        caller = getattr(request.state, "caller", None)
+        reviewer = caller.account.display_name if caller is not None else (body.reviewer or "")
+        if not reviewer.strip():
+            raise HTTPException(status_code=422, detail="Say who is deciding (your name).")
+        try:
+            return save_verdict(
+                store,
+                project_id,
+                site_id,
+                run_id,
+                url=body.url,
+                decision=body.decision,
+                next_step=body.next_step,
+                note=body.note,
+                reviewer=reviewer,
+            )
+        except KeyError:
+            raise HTTPException(
+                status_code=404, detail="That page is not part of this scrape."
+            ) from None
+        except ValidationError as exc:
+            reason = exc.errors()[0].get("msg", "invalid decision").removeprefix("Value error, ")
+            raise HTTPException(status_code=422, detail=f"Not saved: {reason}.") from None
 
     @app.get("/api/projects/{project_id}/sites/{site_id}/runs/{run_id}/downloads")
     def downloads(project_id: str, site_id: str, run_id: str) -> list[ReportFile]:

@@ -1401,6 +1401,53 @@ export const QUEUE = {
   startReady: 'Start',
 };
 
+export const REVIEW_TAB = {
+  tab: 'Review',
+  intro:
+    "Check the engine's verdict on each page of a scrape. Approve it when it is right; reject it with a reason and what should happen next. Every decision is kept with who made it and when, and the next scrape and the reports follow it.",
+  noScrape: 'No finished scrape to review yet.',
+  website: 'Website',
+  scrape: 'Scrape',
+  yourName: 'Your name',
+  nameFirst: 'Type your name first: it is saved with each decision.',
+  roleNeeded: 'Reviewing needs the reviewer, editor or admin role.',
+  unlockNeeded: 'Unlock the project to record decisions.',
+  show: { attention: 'Needs attention', undecided: 'Not decided', decided: 'Decided', all: 'All pages' } as Record<string, string>,
+  files: 'Include files and images',
+  summary: (open: number, approved: number) => `${open} not decided · ${approved} approved`,
+  nothing: 'Nothing to show with these filters.',
+  page: 'Page',
+  verdict: "Engine's verdict",
+  issues: 'Issues',
+  decision: 'Decision',
+  undecided: 'Not decided',
+  approved: 'Approved',
+  rejected: 'Rejected',
+  cleared: 'decision removed',
+  approve: 'Approve',
+  reject: 'Reject',
+  clear: 'Undo',
+  saved: 'Decision saved.',
+  history: 'History',
+  byWhen: (who: string, when: string) => `${who}, ${when}`,
+  rejectTitle: 'Reject the verdict',
+  reason: 'Why',
+  reasonNeeded: 'Say why the verdict is wrong.',
+  reasonPlaceholder: 'For example: the rate table at the bottom is missing',
+  nextStep: 'What should happen next',
+  nextStepNeeded: 'Choose what happens next.',
+  nextSteps: {
+    scrape_again: 'Scrape again',
+    obtain_manually: 'Get it by hand',
+    exclude: 'Exclude from reports',
+  } as Record<string, string>,
+  nextStepHelp: {
+    scrape_again: 'the next scrape of this website captures the page again in full',
+    obtain_manually: 'someone collects the content by hand',
+    exclude: 'the page is left out of the project reports',
+  } as Record<string, string>,
+};
+
 export const AUTH = {
   signInTitle: 'Sign in',
   signInHelp: 'Use the user name and password an admin gave you.',

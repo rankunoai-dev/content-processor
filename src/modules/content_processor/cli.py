@@ -470,6 +470,14 @@ def _apply_skip_plan(args: argparse.Namespace, baseline: Baseline | None) -> Non
     baseline.plan_skips(plan.get("urls", []), plan.get("reason"))
 
 
+def _apply_force_fetch(args: argparse.Namespace, baseline: Baseline | None) -> None:
+    """Pages a reviewer sent back are fetched in full, never reused."""
+    path = getattr(args, "force_fetch", None)
+    if not path or baseline is None:
+        return
+    baseline.force_fresh(json.loads(Path(path).read_text(encoding="utf-8")).get("urls", []))
+
+
 def _baseline_info(baseline: Baseline | None, source: str | None) -> dict[str, Any] | None:
     if baseline is None:
         return None
@@ -618,6 +626,7 @@ async def _dryrun_with(
     if baseline is None:
         baseline, baseline_source = _history_baseline(args, history, evidence)
     _apply_skip_plan(args, baseline)
+    _apply_force_fetch(args, baseline)
     journal_root = getattr(args, "capture_journal", None)
     journal = CaptureJournal(Path(journal_root), evidence) if journal_root else None
     execution = await _drive(
@@ -888,6 +897,11 @@ def _add_drive_options(p: argparse.ArgumentParser) -> None:
     p.add_argument("--stages", default=None, help="comma list of fetch,render,docs")
     p.add_argument("--no-render", action="store_true", help="skip the T3 render stage")
     p.add_argument("--no-docs", action="store_true", help="skip the document/OCR stage")
+    p.add_argument(
+        "--force-fetch",
+        default=None,
+        help="JSON file: {'urls': [...]} of pages a reviewer sent back; fetched in full",
+    )
     p.add_argument(
         "--skip-fetch",
         default=None,
