@@ -24,10 +24,14 @@ computer sleeps (on Windows it does), so a batch that was asleep for a night
 would wake up over its runtime budget and end its remaining pages
 BUDGET_EXHAUSTED. The meter therefore adds time in the increments it observes,
 each time it is consulted, and drops any single increment longer than
-`SLEEP_GAP_S`: the engine consults the meter between tasks, and nothing in a
+the meter's sleep gap: the engine consults the meter between tasks, and nothing in a
 batch blocks that long between two consultations (the longest legitimate waits
 are one wait for held tasks, `--max-wait` 360 s, plus one render of up to
-`max_page_time_s` 150 s). Dropped gaps are reported as `runtime_s.excluded_s`.
+`RenderLimits.max_page_time_s`, 150 s by default and `CP_RENDER_MAX_PAGE_TIME_S`
+up to 1,200 s). The gap is `SLEEP_GAP_S` (600 s) or, when those two waits plus a
+margin add up to more, that sum (`sleep_gap_for`), so a long render allowed by
+the setting is never mistaken for sleep. Dropped gaps are reported as
+`runtime_s.excluded_s`.
 """
 
 from __future__ import annotations
@@ -42,18 +46,32 @@ from src.integrations.http_client import FetchResult
 from src.modules.content_processor.contracts import Budgets
 
 __all__ = [
+    "SLEEP_GAP_MARGIN_S",
     "SLEEP_GAP_S",
     "BudgetMeter",
     "BudgetName",
     "MeteredEvidenceStore",
     "MeteredFetcher",
     "MeteredRenderer",
+    "sleep_gap_for",
 ]
 
 BudgetName = Literal["runtime", "requests", "bytes", "evidence_bytes"]
 
 SLEEP_GAP_S = 600.0
 """A single unobserved stretch longer than this is the computer asleep, not the run working."""
+
+SLEEP_GAP_MARGIN_S = 90.0
+"""Headroom added to the longest legitimate wait when the render cap pushes the gap up."""
+
+
+def sleep_gap_for(max_page_time_s: float, max_wait_s: float = 360.0) -> float:
+    """The sleep gap for a batch whose renders may take `max_page_time_s`.
+
+    `SLEEP_GAP_S` unless one held-task wait plus one full render plus the margin is
+    longer; with the default caps (360 s + 150 s + 90 s) the two are equal.
+    """
+    return max(SLEEP_GAP_S, max_wait_s + max_page_time_s + SLEEP_GAP_MARGIN_S)
 
 
 class BudgetMeter:
@@ -65,10 +83,15 @@ class BudgetMeter:
         *,
         seed_bytes: int = 0,
         clock: Callable[[], float] = time.monotonic,
+        sleep_gap_s: float = SLEEP_GAP_S,
     ) -> None:
-        """Start the runtime clock now; `seed_bytes` carries bytes already spent."""
+        """Start the runtime clock now; `seed_bytes` carries bytes already spent.
+
+        `sleep_gap_s`: an unobserved stretch longer than this is sleep (`sleep_gap_for`).
+        """
         self.budgets = budgets
         self._clock = clock
+        self.sleep_gap_s = sleep_gap_s
         self._last_tick = clock()
         self._used_s = 0.0
         self._excluded_s = 0.0
@@ -77,13 +100,13 @@ class BudgetMeter:
         self.evidence_bytes = 0
 
     def _tick(self) -> None:
-        """Credit the time since the last look; a gap longer than `SLEEP_GAP_S` was sleep."""
+        """Credit the time since the last look; a gap longer than `sleep_gap_s` was sleep."""
         now = self._clock()
         gap = now - self._last_tick
         self._last_tick = now
         if gap <= 0:
             return
-        if gap > SLEEP_GAP_S:
+        if gap > self.sleep_gap_s:
             self._excluded_s += gap
         else:
             self._used_s += gap

@@ -5,7 +5,13 @@ from __future__ import annotations
 import pytest
 from pydantic import SecretStr, ValidationError
 
-from src.core.config import Environment, Settings, get_settings, reset_settings_cache
+from src.core.config import (
+    RENDER_PAGE_TIME_MARGIN_S,
+    Environment,
+    Settings,
+    get_settings,
+    reset_settings_cache,
+)
 from src.core.errors import ConfigurationError
 
 
@@ -71,3 +77,64 @@ def test_secrets_are_not_exposed_by_repr(tmp_path):
 def test_get_settings_is_cached():
     reset_settings_cache()
     assert get_settings() is get_settings()
+
+
+def test_render_timeouts_default_to_the_former_fixed_caps():
+    settings = Settings(_env_file=None)
+    assert settings.cp_render_navigation_timeout_s == 30.0
+    assert settings.cp_render_max_page_time_s == 150.0
+    assert settings.cp_render_settle_window_s == 12.0
+
+
+def test_render_timeouts_are_read_from_the_environment(monkeypatch):
+    monkeypatch.setenv("CP_RENDER_NAVIGATION_TIMEOUT_S", "120")
+    monkeypatch.setenv("CP_RENDER_MAX_PAGE_TIME_S", "400.5")
+    monkeypatch.setenv("CP_RENDER_SETTLE_WINDOW_S", "30")
+    settings = Settings(_env_file=None)
+    assert settings.cp_render_navigation_timeout_s == 120.0
+    assert settings.cp_render_max_page_time_s == 400.5
+    assert settings.cp_render_settle_window_s == 30.0
+
+
+@pytest.mark.parametrize(
+    ("name", "value"),
+    [
+        ("CP_RENDER_NAVIGATION_TIMEOUT_S", "4"),
+        ("CP_RENDER_NAVIGATION_TIMEOUT_S", "601"),
+        ("CP_RENDER_MAX_PAGE_TIME_S", "29"),
+        ("CP_RENDER_MAX_PAGE_TIME_S", "1201"),
+        ("CP_RENDER_SETTLE_WINDOW_S", "0.5"),
+        ("CP_RENDER_SETTLE_WINDOW_S", "121"),
+        ("CP_RENDER_SETTLE_WINDOW_S", "slow"),
+    ],
+)
+def test_render_timeouts_outside_their_range_are_refused(monkeypatch, name, value):
+    monkeypatch.setenv(name, value)
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None)
+
+
+def test_page_cap_under_navigation_plus_margin_is_raised_and_logged(monkeypatch, caplog):
+    monkeypatch.setenv("CP_RENDER_NAVIGATION_TIMEOUT_S", "300")
+    monkeypatch.setenv("CP_RENDER_MAX_PAGE_TIME_S", "150")
+    with caplog.at_level("WARNING", logger="src.core.config"):
+        settings = Settings(_env_file=None)
+    assert settings.cp_render_max_page_time_s == 300.0 + RENDER_PAGE_TIME_MARGIN_S
+    assert "CP_RENDER_MAX_PAGE_TIME_S=150" in caplog.text
+    assert "raised to 330" in caplog.text
+
+
+def test_page_cap_at_the_margin_is_kept(monkeypatch, caplog):
+    monkeypatch.setenv("CP_RENDER_NAVIGATION_TIMEOUT_S", "120")
+    monkeypatch.setenv("CP_RENDER_MAX_PAGE_TIME_S", "150")
+    with caplog.at_level("WARNING", logger="src.core.config"):
+        settings = Settings(_env_file=None)
+    assert settings.cp_render_max_page_time_s == 150.0
+    assert "CP_RENDER_MAX_PAGE_TIME_S" not in caplog.text
+
+
+def test_the_largest_navigation_timeout_still_fits_the_page_cap_range(monkeypatch):
+    monkeypatch.setenv("CP_RENDER_NAVIGATION_TIMEOUT_S", "600")
+    monkeypatch.setenv("CP_RENDER_MAX_PAGE_TIME_S", "30")
+    settings = Settings(_env_file=None)
+    assert settings.cp_render_max_page_time_s == 630.0

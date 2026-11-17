@@ -21,7 +21,13 @@ from typing import Any, Protocol
 from selectolax.parser import HTMLParser
 
 from src.core.logger import get_logger
-from src.integrations.browser_client import AssetStore, CapturedAsset, PageHook, RenderResult
+from src.integrations.browser_client import (
+    AssetStore,
+    CapturedAsset,
+    PageHook,
+    RenderResult,
+    is_render_timeout,
+)
 from src.integrations.evidence_store import EvidenceStore
 from src.integrations.sniff import sniff_media_type
 from src.modules.content_processor.adapters.html_source import extract_html_source, match_key
@@ -92,6 +98,21 @@ class Explorer(Protocol):
     async def explore(self, page: Any, *, time_left_s: float | None = None) -> ExplorationResult:
         """Explore one live page within `time_left_s` when given."""
         ...
+
+
+def _render_failure(result: RenderResult) -> str:
+    """Why a render produced no document, for the task failure and the record's reason.
+
+    A render that only ran out of time keeps the renderer's `render_timeout:<step>`
+    (too slow for us: the fix is `CP_RENDER_NAVIGATION_TIMEOUT_S`, not the site);
+    any other transport error is `transport:<what the renderer saw>` (the site or the
+    network broke); a document that arrived empty says so.
+    """
+    if result.transport_error is None:
+        return "empty_document"
+    if is_render_timeout(result.transport_error):
+        return result.transport_error
+    return f"transport:{result.transport_error}"
 
 
 def _default_explorer(policy: InteractionPolicy) -> Explorer:
@@ -220,6 +241,9 @@ class RenderWorker:
                 result = await self._renderer.render(url, on_page=explore_hook, asset_store=store)
             exploration = holder.get("result")
         if not result.rendered:
+            # The breaker counts a timeout like any transport failure (it protects the
+            # site either way); the reason tells "too slow for us" from "site broken".
+            failure = _render_failure(result)
             action = host_state.record_transient_failure()
             self._ledger.save_host_state(tenant, host_state)
             not_before = action.not_before
@@ -230,14 +254,12 @@ class RenderWorker:
             state = self._ledger.fail(
                 task.id or 0,
                 self._worker_id,
-                f"render:{result.transport_error}",
+                f"render:{failure}",
                 retry=True,
                 not_before=not_before,
             )
             if state is not None and state.value == "FAILED":
-                self._set_status(
-                    task, resource, EntityStatus.PARTIAL, f"render_failed:{result.transport_error}"
-                )
+                self._set_status(task, resource, EntityStatus.PARTIAL, f"render_failed:{failure}")
                 self._settle_deferred(task, resource, None)
             return
 

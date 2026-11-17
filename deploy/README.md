@@ -67,6 +67,7 @@ Set these on the service (see `.env.example` for every setting):
 | `CP_APP_BASE_URL` | `https://myapp.up.railway.app` | links in queue emails |
 | `CP_BROWSER_CHANNEL` | `chromium` (image default) | no Google Chrome in the image; the bundled Chromium is used |
 | `CP_DOC_PARALLEL_TASKS` | `1` (image default) | see Memory |
+| `CP_RENDER_NAVIGATION_TIMEOUT_S`, `CP_RENDER_MAX_PAGE_TIME_S`, `CP_RENDER_SETTLE_WINDOW_S` | `30`, `150`, `12` | how long the browser waits for a page to arrive, for one whole page, and for it to stop changing; raise the first two on a slow link, where every render would otherwise fail as `render_timeout` and open the website's circuit |
 | `CP_DATABASE_URL` | optional Postgres DSN | the task ledger and, with pgvector, the knowledge base; without it the SQLite store under `/data` is used |
 | `CP_SMTP_*`, `CP_SMTP_FROM` | optional | queue emails; otherwise they are written to `/data/app_data/outbox/` |
 | `ENVIRONMENT` | `production` | refuses to boot with guardrails off |
