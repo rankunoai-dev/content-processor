@@ -1,5 +1,5 @@
 /**
- * Downloads: every report of a project (one per module) in Excel, CSV or Word, built
+ * Downloads: every report of a project (one per module) in Excel, CSV, Word or PDF, built
  * on request from each module's latest data, and everything at once as a zip.
  */
 import { useQuery } from '@tanstack/react-query';
@@ -32,7 +32,7 @@ export const exportsApi = {
   url: (projectId: string, key: string, format: ExportFormat) =>
     `/api/projects/${enc(projectId)}/exports/${enc(key)}.${format}`,
   allUrl: (projectId: string) => `/api/projects/${enc(projectId)}/exports/all.zip`,
-  cardResultUrl: (projectId: string, runId: string, format: 'md' | 'docx') =>
+  cardResultUrl: (projectId: string, runId: string, format: 'md' | 'docx' | 'pdf') =>
     `/api/projects/${enc(projectId)}/analyst/runs/${enc(runId)}/result/result.${format}`,
 };
 

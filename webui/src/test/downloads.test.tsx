@@ -91,6 +91,7 @@ describe('downloads tab', () => {
     expect(screen.getByLabelText('Project overview PDF')).toHaveAttribute('href', '/api/projects/p1/exports/overview.pdf');
     expect(screen.getByLabelText('Project overview JSON')).toHaveAttribute('href', '/api/projects/p1/exports/overview.json');
     expect(screen.getByLabelText('Project overview Excel')).toHaveAttribute('href', '/api/projects/p1/exports/overview.xlsx');
+    expect(screen.getByLabelText('Project overview PDF')).toHaveAttribute('href', '/api/projects/p1/exports/overview.pdf');
     expect(screen.queryByLabelText('Gaps Excel')).not.toBeInTheDocument();
     expect(screen.getByText('Build the gap analysis in the Gaps tab first.')).toBeInTheDocument();
     expect(screen.getByText('Download everything (zip)').closest('a')).toHaveAttribute(

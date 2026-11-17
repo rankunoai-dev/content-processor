@@ -8,6 +8,7 @@ import {
   DownloadOutlined,
   ExportOutlined,
   FileSearchOutlined,
+  FilePdfOutlined,
   FileWordOutlined,
   PlayCircleOutlined,
 } from '@ant-design/icons';
@@ -412,6 +413,13 @@ function RunDrawer({
                         href={exportsApi.cardResultUrl(project.project_id, record.run_id, 'docx')}
                       >
                         {EXPORTS.word}
+                      </Button>
+                      <Button
+                        size="small"
+                        icon={<FilePdfOutlined />}
+                        href={exportsApi.cardResultUrl(project.project_id, record.run_id, 'pdf')}
+                      >
+                        {EXPORTS.pdf}
                       </Button>
                     </Space>
                   ) : null

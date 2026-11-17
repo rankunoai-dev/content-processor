@@ -39,18 +39,18 @@ __all__ = ["formats", "register_report_routes"]
 _MEDIA = {
     "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    "csv": "text/csv",
     "pdf": "application/pdf",
+    "csv": "text/csv",
     "json": "application/json",
     "zip": "application/zip",
 }
 _LABELS = {"xlsx": "Excel", "csv": "CSV", "docx": "Word", "pdf": "PDF", "json": "JSON"}
+_NEEDS: dict[str, Callable[[], bool]] = {"docx": word_available, "pdf": pdf_available}
 
 
 def formats() -> list[Format]:
     """The formats this installation can write (Word needs python-docx, PDF reportlab)."""
-    needs = {"docx": word_available, "pdf": pdf_available}
-    return [f for f in FORMATS if f not in needs or needs[f]()]
+    return [f for f in FORMATS if f not in _NEEDS or _NEEDS[f]()]
 
 
 def _name(project_name: str, key: str) -> str:
@@ -62,10 +62,9 @@ def _readme(project_name: str, built: list[tuple[Report, list[str]]], missing: l
         f"{project_name}: every report, downloaded {datetime.now(UTC):%d %b %Y %H:%M} UTC",
         "",
         "Excel (.xlsx) has every row and the full text. CSV has one file per table (a zip when",
-        "a report has several). Word (.docx) is for reading and sharing; long tables show",
-        "their first rows there. PDF (.pdf) is the same as Word, ready to print or attach.",
-        "JSON (.json) has every table in full, plus the raw record where there is one,",
-        "for other tools.",
+        "a report has several). Word (.docx) and PDF are for reading and sharing; long",
+        "tables show their first rows there. JSON (.json) has every table in full, plus",
+        "the raw record where there is one, for other tools.",
         "",
     ]
     for report, files in built:
