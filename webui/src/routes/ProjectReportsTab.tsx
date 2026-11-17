@@ -46,6 +46,7 @@ const FILE_ORDER = [
   'contradictions_by_topic.xlsx',
   'project_report.xlsx',
   'duplication.xlsx',
+  'semantic_similarity.xlsx',
   'competitors.xlsx',
   'contradictions_by_topic.csv',
 ];
@@ -138,6 +139,14 @@ function Counts({ report }: { report: ProjectReport }) {
         <Statistic title={c.duplicates} value={report.duplicate_pairs} />
         <Typography.Text type="secondary">
           {report.duplicate_pairs_across_websites} {c.across}
+        </Typography.Text>
+      </Col>
+      <Col xs={12} md={6}>
+        <Statistic title={c.semantic} value={report.semantic_duplicates ?? 0} />
+        <Typography.Text type="secondary">
+          {report.semantic_note
+            ? `${c.semanticSkipped}${report.semantic_note}`
+            : c.semanticHubs(report.semantic_topic_hubs ?? 0)}
         </Typography.Text>
       </Col>
     </Row>

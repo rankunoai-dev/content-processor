@@ -38,6 +38,9 @@ const built: ProjectReport = {
   time_bound: 4,
   duplicate_pairs: 5,
   duplicate_pairs_across_websites: 1,
+  semantic_duplicates: 2,
+  semantic_topic_hubs: 1,
+  semantic_note: '',
   websites: [sources[0]!],
   files: [
     { name: 'Insurer_audit_duplication.xlsx', size: 2048, modified_at: '2026-11-03T11:00:00Z' },

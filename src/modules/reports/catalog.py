@@ -290,6 +290,40 @@ def _analyst(ctx: Context) -> Report | None:
     )
 
 
+def _semantic(ctx: Context) -> Report | None:
+    from src.modules.content_processor.analysis.semantic_report import read_tables
+    from src.modules.content_processor.projects.project_reports import (
+        project_report_files,
+        project_reports,
+    )
+
+    for bundle in project_reports(ctx.projects, ctx.project.project_id):
+        files = project_report_files(ctx.projects, ctx.project.project_id, bundle.stamp)
+        sidecar = next(
+            (p for n, p in files.items() if n.endswith("_semantic_similarity.json")), None
+        )
+        if sidecar is None:
+            continue
+        counts = bundle.manifest.get("semantic", {})
+        pairs = counts.get("pairs", {}) if isinstance(counts, dict) else {}
+        built = datetime.fromisoformat(str(bundle.manifest.get("built_at")))
+        return Report(
+            key="semantic_similarity",
+            title=f"{ctx.project.name}: semantic similarity",
+            subtitle=f"From the project report built {_when(built)}",
+            summary=[
+                f"{counts.get('pages', 0)} pages; {pairs.get('Identical', 0)} identical, "
+                f"{pairs.get('Copy', 0)} copy, {pairs.get('High', 0)} high and "
+                f"{pairs.get('Moderate', 0)} moderate pairs by meaning; "
+                f"{counts.get('series', 0)} recurring series set aside.",
+                "Scores are on each page's own content (site furniture removed); see the "
+                "Method sheet.",
+            ],
+            tables=read_tables(sidecar),
+        )
+    return None
+
+
 REPORTS: Final[tuple[ReportDef, ...]] = (
     ReportDef(
         "overview",
@@ -355,6 +389,15 @@ REPORTS: Final[tuple[ReportDef, ...]] = (
         "Every analyst card run of the project: card, status, cost and citation check.",
         "Run an analyst card in the Analyst cards tab first.",
         _analyst,
+    ),
+    ReportDef(
+        "semantic_similarity",
+        "content",
+        "Semantic similarity",
+        "Pages that say the same thing in different words, tiered Identical / Copy / High / "
+        "Moderate on their own content, with recurring series, repeated blocks and topic hubs.",
+        "Build the project report in the Project reports tab first.",
+        _semantic,
     ),
 )
 

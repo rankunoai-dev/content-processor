@@ -334,6 +334,11 @@ class ProjectReportOut(StrictModel):
     time_bound: int
     duplicate_pairs: int
     duplicate_pairs_across_websites: int
+    semantic_duplicates: int = 0
+    """Identical, Copy and High pairs by meaning (0 when the semantic workbook was skipped)."""
+    semantic_topic_hubs: int = 0
+    semantic_note: str = ""
+    """Why the semantic workbook is missing ('' when it was built)."""
     websites: list[ReportSourceOut]
     files: list[ReportFile]
 
@@ -352,7 +357,11 @@ def _report_out(report: ProjectReport, files: dict[str, Path]) -> ProjectReportO
     m = report.manifest
     topics = m.get("contradictions", {})
     dup = m.get("duplication", {})
+    semantic = m.get("semantic", {})
     return ProjectReportOut(
+        semantic_duplicates=int(semantic.get("duplicate_pairs", 0)),
+        semantic_topic_hubs=int(semantic.get("topic_hubs", 0)),
+        semantic_note=str(semantic.get("skipped", "")),
         stamp=report.stamp,
         built_at=datetime.fromisoformat(m["built_at"]),
         include_competitors=bool(m.get("include_competitors")),

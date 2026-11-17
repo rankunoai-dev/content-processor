@@ -1321,6 +1321,9 @@ export const PROJECT_REPORTS = {
     timeBound: 'Time-bound figures',
     duplicates: 'Duplicate page pairs',
     across: 'across websites',
+    semantic: 'Same content, different words',
+    semanticHubs: (n: number) => `${n} topic hub${n === 1 ? '' : 's'}`,
+    semanticSkipped: 'Not built: ',
   },
   files: {
     contradictions_by_topic_xlsx: 'Contradictions by topic (Excel): Topic, Version A and B, where each appears, severity, recommended action, approved answer',
@@ -1329,6 +1332,9 @@ export const PROJECT_REPORTS = {
     project_report_xlsx:
       'Project report (Excel): every page with its whole content, and matching content between pages with the shared text (the same report each scrape writes, for all the client’s websites)',
     duplication_xlsx: 'Duplication (Excel): near-duplicate pages (80%+) and groups, with the website of each page',
+    semantic_similarity_xlsx:
+      'Semantic similarity (Excel): pages that say the same thing in different words, tiered Identical / Copy / High / Moderate on their own content, with recurring series, repeated blocks, topic hubs and flags',
+    semantic_similarity_json: 'Semantic similarity, the same sheets as data (JSON, for tools and other download formats)',
     competitors_xlsx: 'Competitors (Excel): each competitor’s own contradictions and duplicate pages',
     manifest_json: 'What was used and the counts (JSON)',
   } as Record<string, string>,
