@@ -1,6 +1,6 @@
 # Content Processor: A Plain-Language Guide
 
-Last updated: 10 November 2026 · Code version: main after the November audit: false alarms removed from verdicts, a live batch view, confidential projects, a sleep-proof scrape clock, and a deployment recipe
+Last updated: 16 November 2026 · Code version: main plus answers written in Claude Desktop saved into the project
 
 ## 1. What this is, in one paragraph
 
@@ -426,6 +426,8 @@ Two ways to use your own Claude account with the app, without an API key or API 
 
 **Answers laid out by type.** Claude now hands its answer to the app, which checks the sources and lays it out with a template for the kind of answer: a quick answer, an overview (with a table), findings grouped by priority (red, orange, blue), a side-by-side comparison, a page review (what works, what to fix), what changed, or a keyword report. Every answer starts with a title and an "In short" summary, ends with next steps, a "Sources checked" line and numbered, linked sources. Ready-made requests ("Gap report", "Page review", "What changed", "Theme overview" and others) appear in Claude Desktop's prompt menu; a module's connector offers only its own.
 
+**Answers are kept in the project.** Until now an answer written in Claude Desktop lived only in that chat. Now, once its citations pass the check, Claude asks the app to **save** it, with a short title. The app checks it once more the same way and files it in the project's Analyst cards tab, next to the card runs, labelled "Written in Claude Desktop": the readable answer with its numbered sources, whether the check passed, who saved it (Claude Desktop, and which module's connector) and when. Saving the same title again, say after a correction, adds a new version to the same entry instead of a second one; the viewer shows the latest and can open earlier versions. Saved answers download as Word or Markdown, and the project's Downloads tab includes them in the analyst report, with the full text in the Word file. Saving sends nothing anywhere (the text is already in Claude), so it works for confidential projects as well; what Claude may read there is unchanged.
+
 **Staying in one module.** If a chat should use only one module (for example Themes) and nothing from the others, add the module connectors as well (one line in the setup prints them all) and switch on only that module's connector in the chat: Claude then cannot see or call the other modules, and the app refuses them even if it tried. With the full connector, saying "only use Themes" is also respected, as an instruction.
 
 Both send the project's data to Claude through your account, so they are for clients whose data may go to Claude (the data policy question is still open). Search now also works when the local meaning model is off: it falls back to exact words and says so.
@@ -506,6 +508,7 @@ A project's **Downloads** tab lists every report at once (project overview with 
 
 | Date | Significant change |
 |---|---|
+| 2026-11-16 | Answers written in Claude Desktop can be saved into the project: after the citation check passes, Claude files the answer in the Analyst cards tab as "Written in Claude Desktop", with its sources, the check result, who saved it and when; saving the same title again adds a version; saved answers download as Word or Markdown and appear in the Downloads tab's analyst report. Works for confidential projects too, since nothing is sent anywhere. |
 | 2026-11-10 | Images are downloaded once: the browser's own download of each image is kept, with the same checks, evidence and reading step as before, and anything the browser did not load is downloaded as before. About 85% fewer requests to a site per batch and 3 to 4 minutes saved per batch of 25 pages. |
 | 2026-11-10 | Faster without changing results: documents and images are read while pages are still being fetched and rendered; file readers stay running instead of starting a new program per file; the text-recognition program is probed once per run; end-of-batch screenshot reading runs several pages at once; the engine waits exactly the courtesy gap between requests. Records on the test sites are identical before and after. |
 | 2026-11-10 | Access rules corrected: missing pages (404/410) are never content; soft-404 needs whole words and body text; a header login form is not a login wall; scripts are not text; security cookies do not turn errors into bot checks; app shells go to the browser first; a blocked page escalates alone and a site only after three blocked pages. Gates tightened: audience gates need a pop-up with a button; lead-gen walls are judged per section and never over a whole article. |

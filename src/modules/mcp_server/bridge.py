@@ -1,9 +1,11 @@
-"""The web app side of the MCP server: runs the read-only tools and keeps their ledger.
+"""The web app side of the MCP server: runs the tools and keeps their ledger.
 
 The stdio server Claude Desktop starts never touches the app data; it posts each call
 here, so the web app stays the only writer. Every reference a tool hands out is kept in a
 per-project ledger on disk (`<app data>/mcp/ledgers/<project>.json`), so
 `check_deliverable` still knows them after Claude Desktop or the app restarts.
+`save_deliverable` checks an answer the same way and stores it in the analyst run history
+(`src.modules.analyst.desktop`), the one thing a connection may write.
 
 GET  /api/mcp/tools   the tool list (names, descriptions, input schemas)
 POST /api/mcp/call    {"tool": ..., "arguments": {...}} -> {"text": ..., "is_error": ...}
@@ -24,13 +26,17 @@ from pydantic import Field
 
 from src.core.logger import get_logger
 from src.core.schemas import StrictModel
+from src.modules.analyst.desktop import DESKTOP_AUTHOR, save_deliverable
+from src.modules.analyst.library import card as card_of
 from src.modules.analyst.playground import EvidenceLedger, LedgerEntry, Playground, ScopeError
+from src.modules.analyst.runs import RunStore
 from src.modules.analyst.tools import run_tool
 from src.modules.analyst.verify import readable_version, sources_section, verify_deliverable
 from src.modules.content_processor.projects.store import ProjectNotFoundError, ProjectStore
 from src.modules.content_processor.webapi.projects_api import KnowledgeAccess
 from src.modules.mcp_server.catalog import (
     MAX_DELIVERABLE_CHARS,
+    MAX_TITLE_CHARS,
     SCOPES,
     Scope,
     definitions,
@@ -91,10 +97,13 @@ def _scope(keys: list[str] | None) -> Scope:
 class McpBridge:
     """Runs tools for Claude Desktop against the projects, one ledger per project."""
 
-    def __init__(self, projects: ProjectStore, access: KnowledgeAccess) -> None:
-        """Bind to the app's projects and knowledge spaces."""
+    def __init__(
+        self, projects: ProjectStore, access: KnowledgeAccess, runs: RunStore | None = None
+    ) -> None:
+        """Bind to the app's projects, knowledge spaces and (for saving) the analyst runs."""
         self.projects = projects
         self.access = access
+        self.runs = runs
         self.root = Path(str(projects.root)) / "mcp" / "ledgers"
         self._lock = threading.Lock()
         self._names = {d.name for d in definitions()}
@@ -167,6 +176,8 @@ class McpBridge:
             return self.check(project_id, args)
         if tool == "present_answer":
             return self.present(project_id, args)
+        if tool == "save_deliverable":
+            return self.save(project_id, args, allowed)
         try:
             play = Playground(self.projects, self.access, [project_id])
             text, is_error = run_tool(play, tool, args)
@@ -237,6 +248,96 @@ class McpBridge:
         }
         return json.dumps(payload, ensure_ascii=False), False
 
+    def save(self, project_id: str, args: dict[str, Any], scope: Scope) -> tuple[str, bool]:
+        """Check an answer written in Claude Desktop and keep it in the analyst run history.
+
+        The check never blocks the save (a deliverable that needs review is stored with
+        that result); nothing leaves this computer, so confidential projects save too.
+        """
+        if self.runs is None:
+            return _error(
+                "this app runs without the analyst module, so deliverables cannot be saved; "
+                "start it with its projects (python -m src.modules.content_processor.webapi)"
+            )
+        title = args.pop("title", None)
+        markdown = args.pop("markdown", None)
+        card_key = args.pop("card_key", None)
+        module = args.pop("module", None)
+        if args:
+            return _error(f"unexpected arguments: {', '.join(sorted(args))}")
+        if not isinstance(title, str) or not title.strip():
+            return _error("title is required: a short name for the deliverable")
+        if len(title) > MAX_TITLE_CHARS:
+            return _error(f"title is longer than {MAX_TITLE_CHARS} characters")
+        if not isinstance(markdown, str) or not markdown.strip():
+            return _error("markdown is required: the full answer with its citations")
+        if len(markdown) > MAX_DELIVERABLE_CHARS:
+            return _error(f"markdown is longer than {MAX_DELIVERABLE_CHARS} characters")
+        card = None
+        if card_key is not None:
+            try:
+                card = card_of(str(card_key))
+            except KeyError:
+                return _error(
+                    f"there is no action card {card_key!r}; leave card_key out unless the user "
+                    "asked for a card"
+                )
+        if module is not None:
+            if module not in SCOPES:
+                return _error(f"unknown module {module!r}; the modules are {', '.join(SCOPES)}")
+            if scope is not None and module not in scope:
+                return _error(
+                    f"this connection is limited to {scope_label(scope)}; it cannot save under "
+                    f"{scope_label(frozenset({str(module)}))}"
+                )
+        if module is None and scope is not None and len(scope) == 1:
+            module = next(iter(scope))
+        author = DESKTOP_AUTHOR if scope is None else f"{DESKTOP_AUTHOR} ({scope_label(scope)})"
+        ledger = self.ledger(project_id)
+        try:
+            record, check, readable = save_deliverable(
+                self.runs,
+                project_id=project_id,
+                title=title,
+                markdown=markdown,
+                ledger=ledger,
+                author=author,
+                card=card,
+                module=str(module) if module is not None else None,
+            )
+        except ValueError as exc:
+            return _error(str(exc))
+        except OSError as exc:
+            _log.exception("save_deliverable failed")
+            return _error(f"the deliverable could not be saved ({type(exc).__name__})")
+        status = "passed" if check.passed else "needs review"
+        where = f'the Analyst cards tab of the project, as "{record.title}"'
+        if record.version > 1:
+            where += f" (version {record.version})"
+        payload = {
+            "status": status,
+            "saved": True,
+            "run_id": record.run_id,
+            "title": record.title,
+            "version": record.version,
+            "versions": len(record.versions),
+            "author": record.author,
+            "saved_at": record.finished_at.isoformat() if record.finished_at else None,
+            **check.model_dump(),
+            "readable_markdown": readable,
+            "sources_markdown": sources_section(markdown, ledger, check),
+            "how_to_present": (
+                f"Tell the user in one plain line that the answer is saved in {where} and that "
+                f"the check {status}. Show readable_markdown, never the reference codes."
+            ),
+            "how_to_fix": (
+                "It is saved as it is. If the check needs review, fix the unknown citations, "
+                "failed quotes or uncited lines and save again with the same title: that adds a "
+                "new version."
+            ),
+        }
+        return json.dumps(payload, ensure_ascii=False), False
+
     def list_projects(self, scope: Scope = None) -> list[dict[str, Any]]:
         """Projects with their websites and which results exist, with dates (for `scope`)."""
         from src.modules.workspace.status import project_statuses
@@ -250,9 +351,19 @@ class McpBridge:
         return [{k: v for k, v in s.items() if k in keep} for s in statuses]
 
 
-def register_mcp_routes(app: FastAPI, *, projects: ProjectStore, access: KnowledgeAccess) -> None:
-    """Add the MCP bridge routes (before the app's catch-all routes)."""
-    bridge = McpBridge(projects, access)
+def register_mcp_routes(
+    app: FastAPI,
+    *,
+    projects: ProjectStore,
+    access: KnowledgeAccess,
+    runs: RunStore | None = None,
+) -> None:
+    """Add the MCP bridge routes (before the app's catch-all routes).
+
+    `runs` is the analyst run history `save_deliverable` writes to; without it the tool
+    answers that saving is not available here.
+    """
+    bridge = McpBridge(projects, access, runs)
 
     @app.get("/api/mcp/tools")
     def tools(modules: str | None = None) -> list[dict[str, Any]]:

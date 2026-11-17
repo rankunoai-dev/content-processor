@@ -1745,6 +1745,7 @@ export const ANALYST = {
   backends: {
     pack: 'Context pack (free; nothing is sent anywhere)',
     claude: 'Claude writes the deliverable (paid; must be switched on)',
+    claude_desktop: 'Written in Claude Desktop',
   } as Record<string, string>,
   backendHelp: {
     pack: 'Writes the full brief with the data gathered for it, as a file you can give to Claude yourself where your data policy allows.',
@@ -1761,6 +1762,8 @@ export const ANALYST = {
   needsUnlock: 'Unlock the project with its password to run cards.',
   runsTitle: 'Card runs',
   noRuns: 'No card has been run for this project yet.',
+  desktopHow: 'Written in Claude Desktop',
+  versionTag: (n: number) => `${n} versions`,
   columns: {
     card: 'Card',
     how: 'How',
@@ -1782,6 +1785,14 @@ export const ANALYST = {
   view: 'Open',
   viewer: {
     title: (card: string) => `Card run: ${card}`,
+    desktopTitle: (title: string) => `Written in Claude Desktop: ${title}`,
+    author: 'Written by',
+    saved: 'Saved',
+    version: 'Version',
+    versionOption: (n: number, when: string, passed: boolean, latest: boolean) =>
+      `Version ${n} · ${when} · ${passed ? 'checked' : 'needs review'}${latest ? ' (latest)' : ''}`,
+    desktopHelp:
+      'Saved from a Claude Desktop chat through the app’s connector. The app checked every citation and quote against the data it had shown; nothing was sent anywhere to save it. Saving the same title again adds a version.',
     progress: 'Progress',
     result: 'Result',
     pack: 'Context pack',
@@ -1803,6 +1814,7 @@ export const ANALYST = {
     usage: (turns: number, calls: number) => `${turns} Claude turn(s), ${calls} data look-up(s)`,
   },
   events: {
+    saved: (version: number, status: string) => `Saved version ${version} (check: ${status})`,
     prefetch: (tool: string, error: boolean) => `Gathered data: ${tool.replace(/_/g, ' ')}${error ? ' (failed)' : ''}`,
     tool: (name: string, error: boolean) => `Claude looked up: ${name.replace(/_/g, ' ')}${error ? ' (failed)' : ''}`,
     cost: (usd: number) => `Cost so far: $${usd.toFixed(4)}`,

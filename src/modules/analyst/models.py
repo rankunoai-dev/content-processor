@@ -21,6 +21,7 @@ __all__ = [
     "ActionCard",
     "Backend",
     "CardParameter",
+    "DeliverableVersion",
     "ParameterKind",
     "Prefetch",
     "Preflight",
@@ -32,7 +33,9 @@ __all__ = [
 CARD_SCHEMA_VERSION: Final = "card-v1"
 
 ParameterKind = Literal["project", "website", "url", "keyword", "topic", "text", "choice"]
-Backend = Literal["pack", "claude"]
+Backend = Literal["pack", "claude", "claude_desktop"]
+"""`pack` and `claude` run a card here; `claude_desktop` is an answer written in Claude
+Desktop and saved into the run history through the MCP bridge (nothing is sent anywhere)."""
 RunStatus = Literal["queued", "running", "finished", "failed", "refused"]
 
 
@@ -113,8 +116,23 @@ class Verification(StrictModel):
     passed: bool
 
 
+class DeliverableVersion(StrictModel):
+    """One saved version of a deliverable written in Claude Desktop."""
+
+    version: int = Field(ge=1)
+    saved_at: datetime
+    passed: bool = Field(description="Whether the citation check passed for this version")
+    file: str = Field(description="The readable deliverable of this version, in the run folder")
+    draft: str = Field(description="The text as Claude sent it, with its reference codes")
+
+
 class RunRecord(StrictModel):
-    """One run of a card: inputs, backend, model, cost, outcome. The audit trail."""
+    """One run of a card: inputs, backend, model, cost, outcome. The audit trail.
+
+    A deliverable saved from Claude Desktop (`backend` `claude_desktop`) also carries its
+    `title`, `author`, `module` and `versions`: saving the same title again for the same
+    project adds a version to the same record instead of a second run.
+    """
 
     run_id: str
     card_id: str
@@ -134,3 +152,10 @@ class RunRecord(StrictModel):
     message: str = ""
     verification: Verification | None = None
     files: dict[str, str] = Field(default_factory=dict)
+    title: str | None = Field(default=None, description="Claude Desktop deliverables: the title")
+    author: str | None = Field(
+        default=None, description='Who wrote it, e.g. "Claude Desktop (Themes)"'
+    )
+    module: str | None = Field(default=None, description="The module key it was saved under")
+    version: int = Field(default=1, ge=1, description="The latest version saved")
+    versions: list[DeliverableVersion] = Field(default_factory=list)

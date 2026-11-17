@@ -55,6 +55,8 @@ class Report:
     subtitle: str
     summary: list[str] = field(default_factory=list)
     tables: list[Table] = field(default_factory=list)
+    documents: list[tuple[str, str]] = field(default_factory=list)
+    """(heading, Markdown) texts written out in full in the Word file only."""
 
 
 def word_available() -> bool:
@@ -184,6 +186,10 @@ def _write_docx(report: Report, path: Path) -> Path:
             _note(doc, "Nothing to list.")
             continue
         _word_table(doc, table)
+    for heading, markdown in report.documents:
+        doc.add_page_break()
+        doc.add_heading(heading, level=1)
+        _markdown_into(doc, markdown, shift=1)
     doc.save(str(target))
     return target
 
@@ -248,6 +254,15 @@ def _md_table(doc: Any, lines: Sequence[str]) -> None:
 def markdown_to_docx(markdown: str, path: Path, title: str) -> Path:
     """A Word document from Markdown: headings, paragraphs, lists, tables, quotes, bold, links."""
     doc = _document(title)
+    _markdown_into(doc, markdown)
+    target = path.with_suffix(".docx")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    doc.save(str(target))
+    return target
+
+
+def _markdown_into(doc: Any, markdown: str, *, shift: int = 0) -> None:
+    """Append Markdown to an open document; `shift` moves every heading down that many levels."""
     lines = markdown.splitlines()
     i = 0
     paragraph: list[str] = []
@@ -280,7 +295,8 @@ def markdown_to_docx(markdown: str, path: Path, title: str) -> Path:
             continue
         if heading := _HEADING.match(line):
             flush()
-            doc.add_heading(heading.group(2).strip(), level=min(len(heading.group(1)), 4))
+            level = min(len(heading.group(1)) + shift, 4)
+            doc.add_heading(heading.group(2).strip(), level=level)
         elif bullet := _BULLET.match(line):
             flush()
             _inline(doc.add_paragraph(style="List Bullet"), bullet.group(1))
@@ -297,7 +313,3 @@ def markdown_to_docx(markdown: str, path: Path, title: str) -> Path:
             paragraph.append(line)
         i += 1
     flush()
-    target = path.with_suffix(".docx")
-    target.parent.mkdir(parents=True, exist_ok=True)
-    doc.save(str(target))
-    return target
