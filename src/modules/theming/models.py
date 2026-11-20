@@ -50,6 +50,11 @@ class ThemeWebsite(StrictModel):
     pages: int = Field(ge=0)
     note: str = Field(default="", description="What the website is, as the project team wrote it")
     tags: list[str] = Field(default_factory=list)
+    scan: Literal["full", "lite"] = Field(
+        default="full", description="lite: the scrape used is a sample (a competitor lite scan)"
+    )
+    inventory: int = Field(default=0, ge=0, description="Pages its sitemap lists (lite scans)")
+    basis: str = Field(default="", description="What its figures are based on (lite scans)")
 
 
 class Pillar(StrictModel):
@@ -69,6 +74,12 @@ class SiteCoverage(StrictModel):
     words: int = Field(ge=0)
     share: float = Field(ge=0.0, le=1.0, description="Its share of the theme's pages")
     pillar: Pillar | None = None
+    inferred: int = Field(
+        default=0,
+        ge=0,
+        description="Sitemap pages not scraped that look like this theme by their address "
+        "(lite scans; not used for ownership)",
+    )
 
 
 class Topic(StrictModel):

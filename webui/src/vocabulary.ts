@@ -1401,6 +1401,22 @@ export const QUEUE = {
   startReady: 'Start',
 };
 
+export const LITE = {
+  title: 'Lite scan (big competitor websites)',
+  help:
+    'Instead of scraping every page, read the website’s sitemap and scrape a sample: pages that rank in the search data, core pages (pricing, products, the home page) and a few pages from every section. Up to 150 pages, plain downloads only, free. The rest of the sitemap is counted in the theme map as "inferred", and every gap says what it is based on.',
+  start: 'Run a lite scan',
+  needsUnlock: 'Unlock the project to run a lite scan.',
+  queued: (sampled: number, inventory: number) =>
+    `Lite scan queued: ${sampled.toLocaleString()} pages of about ${inventory.toLocaleString()}.`,
+  tag: 'Lite scan',
+  latest: (when: string, basis: string) => `Latest: ${when}, ${basis}.`,
+  sitemapNote: (note: string) => `Sitemap: ${note}.`,
+  section: 'Section',
+  pages: 'Pages in sitemap',
+  sampled: 'Sampled',
+};
+
 export const PROJECTS = {
   nav: 'Projects',
   module: 'Content Scraper',
@@ -2094,6 +2110,7 @@ export const RESEARCH = {
 
 /** Gap Analysis module: the project's "Gaps" tab. */
 export const GAPS = {
+  basis: (basis: string) => `Competitor coverage: ${basis}. Pages not sampled are judged by their address only, so treat this as probable.`,
   tab: 'Gaps',
   intro:
     'What the client is missing compared with its competitors, ranked by priority: themes and pillar pages it lacks, funnel stages, keywords competitors win, page-two keywords, competitor momentum and offerings. It reads the themes, research and monitoring already in the app; nothing is fetched and it costs nothing.',

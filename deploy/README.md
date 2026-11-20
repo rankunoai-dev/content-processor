@@ -67,6 +67,7 @@ Set these on the service (see `.env.example` for every setting):
 | `CP_APP_BASE_URL` | `https://myapp.up.railway.app` | links in queue emails |
 | `CP_BROWSER_CHANNEL` | `chromium` (image default) | no Google Chrome in the image; the bundled Chromium is used |
 | `CP_DOC_PARALLEL_TASKS` | `1` (image default) | see Memory |
+| `CP_LITE_SCAN_MAX_PAGES`, `CP_LITE_SCAN_PER_SECTION` | `150`, `3` (defaults) | competitor lite scans: pages per scan, pages per address section; plain downloads, no browser, so memory stays low |
 | `CP_PDF_FONT`, `CP_PDF_FONT_BOLD` | optional paths to `.ttf` files | the PDF downloads' font; without them the built-in Latin font is used and other scripts show as `?` (a Noto or DejaVu font on the volume covers them) |
 | `CP_DATABASE_URL` | optional Postgres DSN | the task ledger and, with pgvector, the knowledge base; without it the SQLite store under `/data` is used |
 | `CP_SMTP_*`, `CP_SMTP_FROM` | optional | queue emails; otherwise they are written to `/data/app_data/outbox/` |

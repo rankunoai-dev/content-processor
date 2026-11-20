@@ -90,6 +90,11 @@ class Finding(StrictModel):
     evidence: list[EvidenceItem] = Field(default_factory=list)
     status: FindingStatus = "open"
     note: str = ""
+    basis: str = Field(
+        default="",
+        description="What the competitor figures rest on when a competitor was lite-scanned, "
+        "for example 'rival.com: based on 150 of about 5,000 pages (lite scan)'",
+    )
 
 
 class GapReport(StrictModel):

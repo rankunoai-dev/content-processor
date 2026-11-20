@@ -105,6 +105,11 @@ class Settings(BaseSettings):
     # Documents and images read at once during a scrape (local work, no requests to a
     # site). 4 suits a workstation; set 1 or 2 in a container with 1-2 GB of memory.
     cp_doc_parallel_tasks: int = Field(default=4, ge=1, le=16)
+    # Competitor lite scan: the most pages scraped from one website (plain downloads, no
+    # browser), and the most pages taken from one address section (/blog, /products...).
+    # 150 pages is about 3 minutes of polite requests and a few MB; safe in a container.
+    cp_lite_scan_max_pages: int = Field(default=150, ge=10, le=1000)
+    cp_lite_scan_per_section: int = Field(default=3, ge=1, le=50)
     # The browser scrapes render with: "chrome" is the installed Google Chrome (falls back
     # to Playwright's bundled Chromium when Chrome is absent); "chromium" is the bundled
     # Chromium straight away (containers: no Chrome is installed there).

@@ -43,6 +43,11 @@ function FindingItem({ finding, project, token }: { finding: Finding; project: P
           </Typography.Text>
         </Space>
         <Typography.Text type="secondary">{finding.detail}</Typography.Text>
+        {finding.basis ? (
+          <Typography.Text type="secondary" italic>
+            {GAPS.basis(finding.basis)}
+          </Typography.Text>
+        ) : null}
         <Typography.Text>
           <Typography.Text strong>{GAPS.action}: </Typography.Text>
           {finding.action}

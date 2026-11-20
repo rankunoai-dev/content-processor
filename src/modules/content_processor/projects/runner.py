@@ -44,7 +44,7 @@ import sys
 import threading
 import time
 from collections import Counter
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -118,14 +118,22 @@ def _site(url: str) -> str:
 
 
 def build_scope(
-    project: ProjectRecord, urls: Sequence[str], *, tenant_id: str = DEFAULT_TENANT
+    project: ProjectRecord,
+    urls: Sequence[str],
+    *,
+    tenant_id: str = DEFAULT_TENANT,
+    lite: bool = False,
 ) -> dict[str, object]:
-    """The run scope for a batch: public pages of the URLs' sites, free tiers only, $0."""
+    """The run scope for a batch: public pages of the URLs' sites, free tiers only, $0.
+
+    A lite scan (`lite`) downloads the listed pages only: no linked files or images
+    are followed and no browser is used (plain and Chrome-like downloads, T1-T2).
+    """
     hosts = sorted({_site(u) for u in urls if _site(u)})
     return {
         "tenant_id": tenant_id,
         "profile": "development",
-        "mode": "SUPPLIED_URLS_PLUS_EMBEDDED",
+        "mode": "SUPPLIED_URLS" if lite else "SUPPLIED_URLS_PLUS_EMBEDDED",
         "input_urls": list(urls),
         "hosts_in_scope": hosts,
         "authorization": {
@@ -135,7 +143,7 @@ def build_scope(
             "approved_at": datetime.now(UTC).isoformat(),
             "hosts": hosts,
         },
-        "access_tier_ceiling": "T3_FIDELITY_BROWSER",
+        "access_tier_ceiling": "T2_IMPERSONATED_HTTP" if lite else "T3_FIDELITY_BROWSER",
         "locale": "en-US",
         "timezone": "America/New_York",
         "geography": "US",
@@ -144,6 +152,8 @@ def build_scope(
 
 
 SKIP_FILE = "skip_fetch.json"
+LITE_FILE = "lite.json"
+"""Marks a lite scan's run folder: batches skip the browser and the documents."""
 CAPTURES_DIR = "captures"
 """The run's saved responses (see `scheduler.capture_journal`); removed when it finishes."""
 
@@ -152,11 +162,14 @@ def subprocess_command(scope: Path, out: Path, cancel: threading.Event) -> int:
     """Run one batch with the scraper's command line; stop it when `cancel` is set.
 
     A `skip_fetch.json` next to the batch's scope (written by a recrawl plan) lists
-    pages that are not due: they are carried forward without a request.
+    pages that are not due: they are carried forward without a request. A `lite.json`
+    (a lite scan) turns the browser and document stages off.
     """
     log = out.with_suffix(".log")
     skip = scope.parent / SKIP_FILE
     extra = ["--skip-fetch", str(skip)] if skip.is_file() else []
+    if (scope.parent / LITE_FILE).is_file():
+        extra += ["--no-render", "--no-docs"]
     extra += ["--capture-journal", str(scope.parent / CAPTURES_DIR), "--exit-with-parent"]
     with log.open("w", encoding="utf-8") as sink:
         process = subprocess.Popen(  # noqa: S603 - fixed argv, no shell
@@ -342,8 +355,13 @@ class ScrapeRunner:
         email_when_done: bool = False,
         skip_fetch: Sequence[str] = (),
         skip_reason: str = "",
+        urls: Sequence[str] | None = None,
+        lite: Mapping[str, object] | None = None,
     ) -> RunState:
-        """Queue a run over one website's current URLs.
+        """Queue a run over one website's current URLs (or the `urls` given).
+
+        `lite` makes it a lite scan of `urls` (see `src.modules.lite_scan`): plain
+        downloads of the listed pages only; its value is kept beside the run.
 
         `skip_fetch` (from a recrawl plan) lists pages that are not due: they are
         carried forward from their last capture without a request.
@@ -357,7 +375,13 @@ class ScrapeRunner:
         if on_turn == "notify" and self._idle():
             on_turn = "auto"  # nothing to wait for: the person is here, start now
         site = self._store.site(project_id, site_id)
-        urls = [u.url for u in self._store.urls(project_id, site_id)]
+        if lite is not None and not urls:
+            raise ValueError("A lite scan needs the pages to scrape.")
+        urls = (
+            list(urls)
+            if urls is not None
+            else [u.url for u in self._store.urls(project_id, site_id)]
+        )
         if not urls:
             raise ValueError(f"Add at least one URL to {site.name} before starting.")
         # The check and the creation under one lock: two requests at once must not
@@ -386,6 +410,7 @@ class ScrapeRunner:
                 on_turn=on_turn,
                 email_when_done=email_when_done and bool(address),
                 notify_to=hide_email(address) if address else "",
+                scan="lite" if lite is not None else "full",
             )
             folder = self._store.run_dir(project_id, site_id, run_id)
             folder.mkdir(parents=True, exist_ok=False)
@@ -395,6 +420,8 @@ class ScrapeRunner:
                     json.dumps({"urls": list(skip_fetch), "reason": skip_reason}),
                     encoding="utf-8",
                 )
+            if lite is not None:
+                (folder / LITE_FILE).write_text(json.dumps(dict(lite)), encoding="utf-8")
             if address:
                 (folder / "notify.json").write_text(
                     json.dumps({"email": address}), encoding="utf-8"
@@ -787,7 +814,15 @@ class ScrapeRunner:
                 self._store.save_run(state)
                 scope = folder / f"b{number}_a{attempt}_scope.json"
                 scope.write_text(
-                    json.dumps(build_scope(project, left, tenant_id=self._tenant), indent=1),
+                    json.dumps(
+                        build_scope(
+                            project,
+                            left,
+                            tenant_id=self._tenant,
+                            lite=(folder / LITE_FILE).is_file(),
+                        ),
+                        indent=1,
+                    ),
                     encoding="utf-8",
                 )
                 code = self._command(scope, out, cancel)

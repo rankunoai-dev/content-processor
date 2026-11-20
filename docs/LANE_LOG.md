@@ -1010,3 +1010,11 @@ git worktree add ../content-processor-lane4 -b lane/L4-verify
 - **Verification:** ruff, `mypy --strict src fixtures`, report + monitoring tests (new: JSON completeness, the three sheets on the real price/template fixture, two-check history), full Python suite, `tsc -b`, 78 vitest tests.
 - **Open contract requests:** none.
 - **Next:** competitor lite scan (sitemap inventory + capped HTTP-only sample + coverage basis on gap findings).
+
+## [2026-11-20] Competitor lite scan (`feat/competitor-lite-scan`)
+
+- **Branch / worktree:** `feat/competitor-lite-scan` at `../content-processor-lite`, from main `cb387da` (main fast-forwarded to `feat/monitoring-downloads` first, which carries `feat/pdf-downloads`).
+- **What landed:** `src/modules/lite_scan/` (`models`, `sample.choose_sample` / `section_of` / `is_page`, `service.start_lite_scan` / `LiteStore` / `rankings_for`, `infer.add_inferred`, `api` GET/POST `/api/projects/{p}/sites/{s}/lite`). `SitemapIndex.urls` keeps every same-site address. `ScrapeRunner.submit(urls=, lite=)`, `RunState.scan`, `LITE_FILE`, `build_scope(lite=True)` (SUPPLIED_URLS, T2 ceiling), `--no-render --no-docs`. Monitoring: lite compared with lite only, pages in both samples; recrawl baselines skip lite; recrawl repeats lite scans. Theme map: `scan/inventory/basis`, `SiteCoverage.inferred` (ownership unchanged). Gaps: inferred counts in details/evidence, `Finding.basis`, "Based on" column. Settings `CP_LITE_SCAN_MAX_PAGES` (150), `CP_LITE_SCAN_PER_SECTION` (3). Web UI: `LiteScanCard`, "Lite scan" history tag, basis line on gap cards.
+- **Verification:** ruff, `mypy --strict src fixtures`, 11 new tests (`tests/modules/lite_scan`), full Python suite in two halves, `tsc -b`, vitest incl. `lite.test.tsx`.
+- **Not done:** no live run against a real competitor sitemap yet (all tests use mock transports); address-word placement only; on-demand full capture is the existing scrape.
+- **Open contract requests:** none.

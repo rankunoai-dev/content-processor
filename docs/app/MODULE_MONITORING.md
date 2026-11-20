@@ -59,3 +59,7 @@ John Hancock test project, the earlier 107-page scrape against the 318-page one 
 - Ranking drops (needs the Research module).
 - Notifications outside the app (email, chat).
 - Structured-data and image changes per page.
+
+## Lite-scanned competitors
+
+See [MODULE_LITE_SCAN.md](MODULE_LITE_SCAN.md): a lite run is compared only with an earlier lite run (pages in both samples only); recrawl baselines ignore lite runs; a recrawl repeats the lite scan of a website followed by lite scans.

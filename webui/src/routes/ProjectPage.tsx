@@ -70,12 +70,13 @@ import { StartDialog } from './StartDialog';
 import { MonitoringTab } from './MonitoringTab';
 import { ResearchTab } from './ResearchTab';
 import { GapsTab } from './GapsTab';
+import { LiteScanCard } from './LiteScanCard';
 import { ProjectReportsTab } from './ProjectReportsTab';
 import { RunProgressPanel } from './project/RunProgressPanel';
 import { StatusBar, StatusLegend } from '../components/StatusBar';
 import { PageHeading } from '../components/bits';
 import { moduleByTab } from '../modules';
-import { MODULES_TEXT, PROJECTS, PROJECT_REPORTS, QUEUE, formatDate, reportKind, roughDuration, ANALYST, EXPORTS, GAPS, MONITORING, RESEARCH, THEMES } from '../vocabulary';
+import { LITE, MODULES_TEXT, PROJECTS, PROJECT_REPORTS, QUEUE, formatDate, reportKind, roughDuration, ANALYST, EXPORTS, GAPS, MONITORING, RESEARCH, THEMES } from '../vocabulary';
 
 const STATUS_COLOR: Record<string, string> = {
   queued: 'default',
@@ -807,6 +808,9 @@ function ScrapePanel({
           </Space>
         </Card>
       )}
+      {site.role === 'competitor' ? (
+        <LiteScanCard project={project} site={site} token={token} busy={Boolean(active)} />
+      ) : null}
       <RunProgressPanel project={project} site={site} runs={runs} />
       <Card title={PROJECTS.history}>
         <Table
@@ -828,6 +832,7 @@ function ScrapePanel({
                     <Tag color={STATUS_COLOR[s]}>{PROJECTS.status[s]}</Tag>
                   </Tooltip>
                   <KnowledgeTag run={r} />
+                  {r.scan === 'lite' ? <Tag color="purple">{LITE.tag}</Tag> : null}
                 </Space>
               ),
             },

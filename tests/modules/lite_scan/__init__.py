@@ -1,0 +1,1 @@
+"""Competitor lite scan tests."""

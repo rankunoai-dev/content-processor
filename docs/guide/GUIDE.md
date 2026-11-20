@@ -1,6 +1,6 @@
 # Content Processor: A Plain-Language Guide
 
-Last updated: 17 November 2026 · Code version: main plus PDF downloads and monitoring downloads (JSON for every report, competitor moves, price and template changes, the monitoring history)
+Last updated: 20 November 2026 · Code version: main with the competitor lite scan (sitemap inventory, a capped sample, inferred pages and the basis of every gap)
 
 ## 1. What this is, in one paragraph
 
@@ -415,6 +415,17 @@ Each finding says why, gives the evidence with links, how many searches a month 
 
 On the John Hancock test project (with a printing-security competitor, no research yet) the analysis took under a second: 15 findings, one missing theme (the competitor's print-security subject) and 14 offerings the client does not have, as expected for two unrelated companies.
 
+### Step 20b: Lite scan (comparing with a big competitor without scraping all of it)
+
+Finding gaps means knowing what competitors cover, but scraping every page of a 5,000-page competitor takes hours. A **lite scan** gets most of the picture in minutes:
+
+1. **The list of every page, almost for free.** Most websites publish a sitemap: a list of every page they want search engines to find. Reading it takes a few requests and gives the whole inventory (up to 200,000 addresses), grouped by section (/blog, /products, /help...).
+2. **A sample, not everything.** Up to 150 pages are scraped (adjustable): any page a person pins, the pages that rank in the search data (the ones that bring the competitor visitors), the core pages (pricing, products, solutions, the home page) and a few pages from every section, more from the bigger ones. The sample uses plain downloads only: no browser, no documents, no paid access, nothing followed beyond the listed pages, so it costs nothing and is quick.
+3. **The rest is estimated, and says so.** Pages that were not scraped are placed into the theme map's subjects by the words of their address (`/insurance/term-life-quotes` looks like the term life theme). They are shown as "inferred from the sitemap" next to the real counts and never decide who owns a theme.
+4. **Every gap states its basis.** A gap that involves a lite-scanned competitor says, for example, "rival.com: based on 150 of about 5,000 pages (lite scan)", and the Gaps tab marks it as probable. When a gap matters, add those pages to the competitor and run a normal scrape to confirm it.
+
+The **Lite scan** card is on each competitor website's Scrape view (after unlocking the project); it shows the latest scan's basis and its sections. Monitoring never compares a sample with a full scrape (that would look like thousands of pages added or removed); it compares a lite scan only with the previous lite scan, page by page for the pages both samples share. A scheduled recrawl of a website followed by lite scans runs another lite scan. Client websites always get a full scrape.
+
 ### Step 21: Working with Claude Desktop and claude.ai (no API key)
 
 Two ways to use your own Claude account with the app, without an API key or API costs:
@@ -510,6 +521,7 @@ A project's **Downloads** tab lists every report at once (project overview with 
 
 | Date | Significant change |
 |---|---|
+| 2026-11-20 | Competitor lite scan: a big competitor website is read through its sitemap and a sample of up to 150 pages (ranking pages, core pages and a few from every section) is scraped with plain downloads, at no cost. Unscraped pages are counted in the theme map as "inferred" by their address, every gap says what it is based on ("150 of about 5,000 pages") and is marked probable, and monitoring compares a lite scan only with the previous one. |
 | 2026-11-17 | Monitoring insights downloadable in more formats: every report can now also be downloaded as JSON (for other tools). The monitoring download adds Competitor moves, Price changes and Template changes, and a new Monitoring history download covers every check over time with recurring alerts. |
 | 2026-11-16 | PDF downloads: every report (overview, themes, monitoring, search data, suggested competitors, gaps, analyst runs) and every analyst card result can be downloaded as a PDF next to Excel, CSV and Word, in every module's Download button, the Downloads tab and the everything-zip. Same content and limits as Word, wide tables sideways, headings repeated on each page, page numbers. Latin alphabets only unless the server is given a font file; other scripts show as question marks with a note. Made with a pure-Python library, nothing to install on the server. |
 | 2026-11-10 | Images are downloaded once: the browser's own download of each image is kept, with the same checks, evidence and reading step as before, and anything the browser did not load is downloaded as before. About 85% fewer requests to a site per batch and 3 to 4 minutes saved per batch of 25 pages. |

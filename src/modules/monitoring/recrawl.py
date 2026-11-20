@@ -33,7 +33,7 @@ import gzip
 import re
 import xml.etree.ElementTree as ElementTree
 from collections.abc import Callable, Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Final
@@ -85,6 +85,8 @@ class SitemapIndex:
     files: list[str]
     addresses: int
     note: str = ""
+    urls: list[str] = field(default_factory=list)
+    """Every page address the sitemaps list on the website itself (first seen first)."""
 
     def of(self, url: str) -> datetime | None:
         """The sitemap's last modification of a page, or None."""
@@ -172,6 +174,7 @@ def read_sitemaps(domain: str, client: httpx.Client) -> SitemapIndex:
     if not queue:
         queue = [f"{base}/sitemap.xml", f"{base}/sitemap_index.xml"]
     lastmod: dict[str, datetime] = {}
+    listed: dict[str, str] = {}
     read: list[str] = []
     seen: set[str] = set()
     addresses = 0
@@ -200,6 +203,8 @@ def read_sitemaps(domain: str, client: httpx.Client) -> SitemapIndex:
             elif kind == "url":
                 addresses += 1
                 key = url_key(loc)
+                if key and key not in listed and _same_site(loc, domain):
+                    listed[key] = loc
                 moment = _when(mod)
                 if key and moment:
                     lastmod[key] = max(moment, lastmod.get(key, moment))
@@ -215,7 +220,9 @@ def read_sitemaps(domain: str, client: httpx.Client) -> SitemapIndex:
         note = "the sitemap gives no last-modified dates"
     elif queue:
         note = f"stopped after {len(read)} sitemap files"
-    return SitemapIndex(lastmod=lastmod, files=read, addresses=addresses, note=note)
+    return SitemapIndex(
+        lastmod=lastmod, files=read, addresses=addresses, note=note, urls=list(listed.values())
+    )
 
 
 # -- core pages --------------------------------------------------------------------------------
@@ -359,7 +366,8 @@ def plan_site(
 
 
 def _latest_finished(runs: list[RunState], site_id: str) -> RunState | None:
-    done = [r for r in runs if r.site_id == site_id and r.status == "finished"]
+    # a lite scan holds a sample, not the website's address list: not a recrawl baseline
+    done = [r for r in runs if r.site_id == site_id and r.status == "finished" and r.scan == "full"]
     return max(done, key=lambda r: r.created_at) if done else None
 
 
