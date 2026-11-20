@@ -1,7 +1,8 @@
 """The stdio MCP server Claude Desktop starts; it forwards every call to the running web app.
 
 It never reads or writes the app data itself. When the app is not running, every tool
-answers with how to start it instead of failing silently.
+answers with how to start it instead of failing silently. Every tool is announced as
+read-only except `save_deliverable`, which adds to the analyst run history in the app.
 """
 
 from __future__ import annotations
@@ -62,9 +63,9 @@ def _tool(d: ToolDef) -> types.Tool:
         input_schema=d.input_schema,
         annotations=types.ToolAnnotations(
             title=d.title,
-            read_only_hint=True,
+            read_only_hint=not d.writes,
             destructive_hint=False,
-            idempotent_hint=True,
+            idempotent_hint=not d.writes,
             open_world_hint=False,
         ),
     )

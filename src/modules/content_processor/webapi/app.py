@@ -341,7 +341,12 @@ def create_app(
             register_gap_routes(app, projects=project_store, access=knowledge, signer=signer)
             from src.modules.mcp_server.bridge import register_mcp_routes
 
-            register_mcp_routes(app, projects=project_store, access=knowledge)
+            register_mcp_routes(
+                app,
+                projects=project_store,
+                access=knowledge,
+                runs=analyst.runs if analyst is not None else None,
+            )
         from src.modules.reports.api import register_report_routes
 
         register_report_routes(
@@ -352,6 +357,7 @@ def create_app(
                 if analyst is not None
                 else None
             ),
+            analyst_text=_analyst_text(analyst),
         )
         from src.modules.workspace.status import register_workspace_routes
 
@@ -363,6 +369,19 @@ def create_app(
 
     _mount_web_app(app, static_dir)
     return app
+
+
+def _analyst_text(analyst: CardRunner | None) -> Callable[[object], str | None] | None:
+    """The reports' reader of a run's result text (None without the analyst module)."""
+    if analyst is None:
+        return None
+    from src.modules.analyst.desktop import deliverable_text
+    from src.modules.analyst.models import RunRecord
+
+    def read(record: object) -> str | None:
+        return deliverable_text(analyst.runs, record) if isinstance(record, RunRecord) else None
+
+    return read
 
 
 def _mount_web_app(app: FastAPI, static_dir: Path | None) -> None:

@@ -14,6 +14,11 @@ nothing is scraped again:
   client website it is that scrape's own workbook, copied.
 - `<project>_duplication.xlsx`: the R2 near-duplicate pairs and groups (80%+),
   each row with its website(s), so the same text on two brands shows up too.
+- `<project>_semantic_similarity.xlsx` (+ `.json` sidecar for the Downloads module):
+  pages that say the same thing in different words (`analysis.semantic`), tiered
+  Identical / Copy / High / Moderate on their own content, with recurring series,
+  repeated blocks and topic hubs set apart. Skipped, with the reason in the manifest,
+  when `CP_SEMANTIC_ENABLED` is off or no meaning model is available.
 - `<project>_competitors.xlsx` (only when asked): each competitor's own
   contradictions and duplicate pages, on separate sheets. A competitor never
   enters the client's contradictions: a competitor saying something else is not
@@ -43,7 +48,16 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from src.core.config import get_settings
 from src.modules.content_processor.analysis.overlap import find_overlaps, r2a_table, r2b_table
+from src.modules.content_processor.analysis.semantic import (
+    SemanticConfig,
+    SemanticResult,
+    VectorCache,
+    analyse_semantic,
+    load_stamps,
+)
+from src.modules.content_processor.analysis.semantic_report import semantic_tables, write_tables
 from src.modules.content_processor.analysis.topics import (
     TopicResult,
     facts_from_records,
@@ -62,6 +76,12 @@ from src.modules.content_processor.export.tabular import (
     write_jsonl,
     write_xlsx,
 )
+from src.modules.content_processor.knowledge.embedders import (
+    Embedder,
+    model_kind,
+    open_embedder,
+)
+from src.modules.content_processor.knowledge.models import PageStamp
 from src.modules.content_processor.projects.models import ProjectRecord, RunState, SiteRecord
 from src.modules.content_processor.projects.store import ProjectStore
 from src.modules.content_processor.projects.verdicts import excluded_urls
@@ -79,6 +99,7 @@ __all__ = [
     "project_report_files",
     "project_reports",
     "report_sources",
+    "semantic_embedder",
     "zip_project_report",
 ]
 
@@ -263,6 +284,85 @@ def _load(sources: Sequence[ReportSource]) -> tuple[list[UrlRecord], dict[str, s
     return records, websites
 
 
+def _load_stamps(sources: Sequence[ReportSource]) -> dict[str, PageStamp]:
+    stamps: dict[str, PageStamp] = {}
+    for source in sources:
+        if source.records is not None:
+            stamps.update(load_stamps(source.records))
+    return stamps
+
+
+def semantic_embedder() -> tuple[Embedder | None, str]:
+    """The meaning model for the semantic workbook, or None with the reason there is none.
+
+    The best available: bge-m3 on the model server, else the CPU fallback model. The
+    words-only stand-in is never used for meaning scores.
+    """
+    settings = get_settings()
+    try:
+        embedder, note = open_embedder("auto", settings.cp_model_endpoint, settings.cp_embed_model)
+    except Exception as exc:  # noqa: BLE001 - LocalOnlyError, RuntimeError: shown in the manifest
+        return None, f"no embedding model: {str(exc)[:200]}"
+    if model_kind(embedder.model) == "words only":
+        return None, (
+            "no meaning model is available (only the words-only stand-in): install the CPU "
+            "fallback model or a model server"
+        )
+    return embedder, note
+
+
+def _semantic_config() -> SemanticConfig:
+    settings = get_settings()
+    return SemanticConfig(
+        max_paragraphs=settings.cp_semantic_max_paragraphs,
+        embed_batch=settings.cp_semantic_embed_batch,
+        max_pairs=settings.cp_semantic_max_pairs,
+    )
+
+
+def _build_semantic(
+    folder: Path,
+    prefix: str,
+    project_id: str,
+    clients: Sequence[ReportSource],
+    records: Sequence[UrlRecord],
+    websites: dict[str, str],
+    *,
+    enabled: bool | None,
+    embedder: Embedder | None,
+) -> dict[str, Any]:
+    """Write the semantic workbook; on any failure the bundle still builds, with a note."""
+    if enabled is None:
+        enabled = get_settings().cp_semantic_enabled
+    if not enabled:
+        return {"skipped": "switched off (CP_SEMANTIC_ENABLED=false)"}
+    note = ""
+    if embedder is None:
+        embedder, note = semantic_embedder()
+        if embedder is None:
+            return {"skipped": note}
+    cache_path = get_settings().cp_knowledge_root / "semantic" / f"{project_id}.sqlite"
+    try:
+        cache = VectorCache(cache_path)
+        try:
+            result: SemanticResult = analyse_semantic(
+                records, websites, _load_stamps(clients), embedder, cache, _semantic_config()
+            )
+        finally:
+            cache.close()
+        tables = semantic_tables(result)
+        write_xlsx(
+            folder / f"{prefix}_semantic_similarity.xlsx", [*tables, _sources_table(clients)]
+        )
+        write_tables(folder / f"{prefix}_semantic_similarity.json", tables)
+    except Exception as exc:  # noqa: BLE001 - the rest of the bundle is still useful
+        return {"skipped": f"the semantic analysis failed: {type(exc).__name__}: {str(exc)[:300]}"}
+    summary = result.summary()
+    if note:
+        summary["model_note"] = note
+    return summary
+
+
 def _duplication_tables(
     records: Sequence[UrlRecord], websites: dict[str, str]
 ) -> tuple[list[Table], dict[str, object]]:
@@ -302,9 +402,13 @@ def build_project_reports(
     include_competitors: bool = False,
     built_by: str = "",
     now: datetime | None = None,
+    semantic: bool | None = None,
+    embedder: Embedder | None = None,
 ) -> ProjectReport:
     """Build a project bundle from the latest finished scrape of each website.
 
+    `semantic` (default: the `CP_SEMANTIC_ENABLED` setting) adds the semantic similarity
+    workbook, scored with `embedder` (default: the best meaning model available).
     Raises `ValueError` when no client website has a finished scrape.
     """
     project = store.get(project_id)
@@ -331,6 +435,16 @@ def build_project_reports(
         write_xlsx(tmp / f"{prefix}_duplication.xlsx", [*dup_sheets, _sources_table(used)])
         duplication["project_report"] = _write_project_report(
             tmp / f"{prefix}_project_report.xlsx", clients, records
+        )
+        semantic_summary = _build_semantic(
+            tmp,
+            prefix,
+            project_id,
+            clients,
+            records,
+            websites,
+            enabled=semantic,
+            embedder=embedder,
         )
 
         competitor_counts: dict[str, object] = {}
@@ -363,6 +477,7 @@ def build_project_reports(
             "pages": len(records),
             "contradictions": topics.summary(),
             "duplication": duplication,
+            "semantic": semantic_summary,
             "competitors": competitor_counts,
         }
         manifest["files"] = sorted(p.name for p in tmp.iterdir()) + ["manifest.json"]

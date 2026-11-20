@@ -165,6 +165,11 @@ export interface ProjectReport {
   time_bound: number;
   duplicate_pairs: number;
   duplicate_pairs_across_websites: number;
+  /** Identical, Copy and High pairs by meaning (0 when the semantic workbook was skipped). */
+  semantic_duplicates: number;
+  semantic_topic_hubs: number;
+  /** Why the semantic workbook is missing ('' when it was built). */
+  semantic_note: string;
   websites: ReportSource[];
   files: ReportFile[];
 }

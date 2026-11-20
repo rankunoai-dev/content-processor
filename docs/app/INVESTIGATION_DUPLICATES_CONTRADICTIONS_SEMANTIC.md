@@ -1,6 +1,6 @@
 # Investigation: project-level duplication and contradiction reports, and a Semantic module
 
-Status: 2026-11-03. **Step 1 is built** (`feat/project-reports`, see `MODULE_01_CONTENT_SCRAPER.md`) with decisions 1–3 as proposed: client websites only with competitors optional, news and press figures on their own sheet, the proposed severity levels. Steps 2–6 (the Semantic module) wait for decisions 4–6 in section 7.
+Status: 2026-11-17. **Step 1 is built** (`feat/project-reports`, see `MODULE_01_CONTENT_SCRAPER.md`) with decisions 1–3 as proposed. **Step 4 is built** (`feat/semantic-similarity`, `analysis/semantic.py`): the semantic duplication workbook is part of every project report, scored with the CPU fallback model on this machine (bge-m3 on a model server when one is configured; step 2 remains an improvement, not a prerequisite). Steps 3, 5 and 6 wait for decisions 4–6 in section 7.
 
 ## 1. What was asked
 
@@ -153,7 +153,7 @@ Each result carries URL, heading, chunk id and evidence ids, so Claude's reports
 | 1 | **Project reports button.** Bundles the latest scrape of every client website (R2 across the client's websites + topic-grouped contradictions 4.2). Time-bound pages set aside. Reference test: scrape the 3 death-claim URLs and confirm the row in the example comes out. | nothing | $0 |
 | 2 | **Real embeddings.** Ollama + `bge-m3` (and pgvector if Postgres is to hold the vectors); rebuild the existing spaces. | installs on this machine | $0 |
 | 3 | **Semantic module screen:** projects and spaces, status, search, rebuild. | 2 | $0 |
-| 4 | **Semantic duplication report** with passage evidence and the R2 comparison. | 2, 3 | $0 |
+| 4 | **Semantic duplication report** with passage evidence and the R2 comparison. **Built 2026-11-17** as `<project>_semantic_similarity.xlsx` in the project report (own-content meaning score, word overlap, same-text ratio, paragraph coverage; recurring series, repeated blocks, topic hubs, flags; Method sheet). Runs on the CPU fallback model; bge-m3 sharpens it. | none (2 improves it) | $0 |
 | 5 | **Semantic contradiction candidates** + judge. | 2, 4, judge decision | $0 local / metered with Claude |
 | 6 | **Semantic MCP tools** for Claude. | 2, 3 | $0 (the person's own Claude) |
 

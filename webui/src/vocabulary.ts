@@ -1321,6 +1321,9 @@ export const PROJECT_REPORTS = {
     timeBound: 'Time-bound figures',
     duplicates: 'Duplicate page pairs',
     across: 'across websites',
+    semantic: 'Same content, different words',
+    semanticHubs: (n: number) => `${n} topic hub${n === 1 ? '' : 's'}`,
+    semanticSkipped: 'Not built: ',
   },
   files: {
     contradictions_by_topic_xlsx: 'Contradictions by topic (Excel): Topic, Version A and B, where each appears, severity, recommended action, approved answer',
@@ -1329,6 +1332,9 @@ export const PROJECT_REPORTS = {
     project_report_xlsx:
       'Project report (Excel): every page with its whole content, and matching content between pages with the shared text (the same report each scrape writes, for all the client’s websites)',
     duplication_xlsx: 'Duplication (Excel): near-duplicate pages (80%+) and groups, with the website of each page',
+    semantic_similarity_xlsx:
+      'Semantic similarity (Excel): pages that say the same thing in different words, tiered Identical / Copy / High / Moderate on their own content, with recurring series, repeated blocks, topic hubs and flags',
+    semantic_similarity_json: 'Semantic similarity, the same sheets as data (JSON, for tools and other download formats)',
     competitors_xlsx: 'Competitors (Excel): each competitor’s own contradictions and duplicate pages',
     manifest_json: 'What was used and the counts (JSON)',
   } as Record<string, string>,
@@ -1841,6 +1847,7 @@ export const ANALYST = {
   backends: {
     pack: 'Context pack (free; nothing is sent anywhere)',
     claude: 'Claude writes the deliverable (paid; must be switched on)',
+    claude_desktop: 'Written in Claude Desktop',
   } as Record<string, string>,
   backendHelp: {
     pack: 'Writes the full brief with the data gathered for it, as a file you can give to Claude yourself where your data policy allows.',
@@ -1857,6 +1864,8 @@ export const ANALYST = {
   needsUnlock: 'Unlock the project with its password to run cards.',
   runsTitle: 'Card runs',
   noRuns: 'No card has been run for this project yet.',
+  desktopHow: 'Written in Claude Desktop',
+  versionTag: (n: number) => `${n} versions`,
   columns: {
     card: 'Card',
     how: 'How',
@@ -1878,6 +1887,14 @@ export const ANALYST = {
   view: 'Open',
   viewer: {
     title: (card: string) => `Card run: ${card}`,
+    desktopTitle: (title: string) => `Written in Claude Desktop: ${title}`,
+    author: 'Written by',
+    saved: 'Saved',
+    version: 'Version',
+    versionOption: (n: number, when: string, passed: boolean, latest: boolean) =>
+      `Version ${n} · ${when} · ${passed ? 'checked' : 'needs review'}${latest ? ' (latest)' : ''}`,
+    desktopHelp:
+      'Saved from a Claude Desktop chat through the app’s connector. The app checked every citation and quote against the data it had shown; nothing was sent anywhere to save it. Saving the same title again adds a version.',
     progress: 'Progress',
     result: 'Result',
     pack: 'Context pack',
@@ -1899,6 +1916,7 @@ export const ANALYST = {
     usage: (turns: number, calls: number) => `${turns} Claude turn(s), ${calls} data look-up(s)`,
   },
   events: {
+    saved: (version: number, status: string) => `Saved version ${version} (check: ${status})`,
     prefetch: (tool: string, error: boolean) => `Gathered data: ${tool.replace(/_/g, ' ')}${error ? ' (failed)' : ''}`,
     tool: (name: string, error: boolean) => `Claude looked up: ${name.replace(/_/g, ' ')}${error ? ' (failed)' : ''}`,
     cost: (usd: number) => `Cost so far: $${usd.toFixed(4)}`,
