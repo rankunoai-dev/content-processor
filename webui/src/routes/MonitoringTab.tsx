@@ -324,6 +324,13 @@ export function MonitoringTab({ project, token }: { project: Project; token: str
                 <DownloadMenu projectId={project.project_id} reportKey="monitoring" />
               ) : null}
               {c !== null ? (
+                <DownloadMenu
+                  projectId={project.project_id}
+                  reportKey="monitoring_history"
+                  label={MONITORING.downloadHistory}
+                />
+              ) : null}
+              {c !== null ? (
                 <Typography.Text type="secondary">
                   {MONITORING.ranAt(new Date(c.created_at).toLocaleString(), c.trigger === 'auto')} ·{' '}
                   {MONITORING.stats(c.stats)}

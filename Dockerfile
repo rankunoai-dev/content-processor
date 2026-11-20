@@ -51,9 +51,10 @@ WORKDIR /app
 # project's own package is built from pyproject.toml (hatchling, `packages = ["src"]`);
 # a stub `src` satisfies the build until the real sources are copied below.
 # Extras: browser (Playwright), docs (PDF, OCR, images), unblock (curl_cffi for T2),
-# office (Word, Excel, PowerPoint readers and the .xlsx reports). Add `fallback` for the
-# CPU embedding model (about 220 MB downloaded at first use) and `claude`/`mcp` as needed.
-ARG EXTRAS="browser,docs,unblock,office"
+# office (Word, Excel, PowerPoint readers and the .xlsx reports), pdf (reportlab for the
+# PDF downloads). Add `fallback` for the CPU embedding model (about 220 MB downloaded at
+# first use) and `claude`/`mcp` as needed.
+ARG EXTRAS="browser,docs,unblock,office,pdf"
 COPY pyproject.toml README.md ./
 RUN mkdir -p src && touch src/__init__.py \
     && pip install ".[${EXTRAS}]" \

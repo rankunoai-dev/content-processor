@@ -190,6 +190,18 @@ def test_second_check_finds_push_price_rewrite_removal_and_drift(watched: World)
     shift = [a for a in check.alerts if a.kind == "ownership_shift"]
     assert shift and shift[0].severity == "high"
     assert check.stats["price_changes"] == 1 and check.stats["new_pages"] == 3
+    sheets = {t.name: t for t in check_tables(check)}
+    price = sheets["Price changes"].rows
+    assert [(r["Website"], r["Before"], r["After"]) for r in price] == [
+        ("Rival", "$25 per month", "$19 per month")
+    ] or [(r["Before"], r["After"]) for r in price] == [("$25 per month", "$19 per month")]
+    assert price[0]["URL"] == RIVAL + "/term" and price[0]["Role"] == "competitor"
+    moves = {r["URL"]: r for r in sheets["Competitor moves"].rows}
+    assert "rewrote title" in str(moves[RIVAL + "/term"]["What they did"])
+    assert "1 price change(s)" in str(moves[RIVAL + "/term"]["What they did"])
+    assert all(r["Competitor"] != "example.com" for r in moves.values())
+    template = sheets["Template changes"].rows
+    assert template[0]["Line"] == "Read our latest news" and template[0]["Role"] == "client"
 
 
 def test_store_watch_and_workbook(watched: World) -> None:
@@ -211,6 +223,9 @@ def test_store_watch_and_workbook(watched: World) -> None:
         "Changed pages",
         "New and removed pages",
         "Theme drift",
+        "Competitor moves",
+        "Price changes",
+        "Template changes",
         "How to read",
     ]
     with zipfile.ZipFile(files["workbook"]) as book:

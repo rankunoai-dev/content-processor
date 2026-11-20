@@ -1,8 +1,15 @@
 /**
- * The project's "Downloads" tab: every report of every module, each in Excel, CSV or
- * Word, and everything in one zip.
+ * The project's "Downloads" tab: every report of every module, each in Excel, CSV, Word,
+ * PDF or JSON, and everything in one zip.
  */
-import { DownloadOutlined, FileExcelOutlined, FileTextOutlined, FileWordOutlined } from '@ant-design/icons';
+import {
+  CodeOutlined,
+  DownloadOutlined,
+  FileExcelOutlined,
+  FilePdfOutlined,
+  FileTextOutlined,
+  FileWordOutlined,
+} from '@ant-design/icons';
 import { Alert, Button, Card, List, Space, Tag, Typography } from 'antd';
 import type { ReactNode } from 'react';
 import { exportsApi, useExportCatalog, type ExportFormat } from '../api/exports';
@@ -14,6 +21,8 @@ const ICONS: Record<ExportFormat, ReactNode> = {
   xlsx: <FileExcelOutlined />,
   csv: <FileTextOutlined />,
   docx: <FileWordOutlined />,
+  pdf: <FilePdfOutlined />,
+  json: <CodeOutlined />,
 };
 
 export function DownloadsTab({ project }: { project: Project }) {

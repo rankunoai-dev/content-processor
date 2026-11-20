@@ -25,7 +25,7 @@ Status: **built 2026-11-02** on `feat/monitoring` (`src/modules/monitoring/`). S
 
 ## Where it is used
 
-- **App**: the project's **Monitoring** tab (run a check after unlocking, alerts by severity, websites with expandable changes, prices, template changes, theme drift, watch settings, workbook).
+- **App**: the project's **Monitoring** tab (run a check after unlocking, alerts by severity, websites with expandable changes, prices, template changes, theme drift, watch settings, workbook; **Download** the latest check and **Download history** of every check, each in Excel, CSV, Word, PDF or JSON, see MODULE_DOWNLOADS.md).
 - **CLI**: `monitor check | show | watch --project <id> [--auto-check on|off] [--rescrape-every-days N] [--push-threshold N]`.
 - **API**: `GET/POST /api/projects/{id}/monitoring`, `GET .../monitoring/workbook`, `GET/POST .../monitoring/watch` (also `smart_recrawl`, `other_every_days`, `use_sitemaps`, `core_urls`), `GET/POST .../monitoring/recrawl` (latest plan; preview, or `{"queue": true}` to recrawl now; unlock token).
 - **Action cards**: `get_monitoring_alerts` (latest check, or runs one); `get_changes` now uses the same diff engine and also returns template changes, prices and drift. Competitor Strategy Radar (v2) reads the alerts first; the refresh-queue and executive cards may use them.
