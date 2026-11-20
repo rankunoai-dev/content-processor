@@ -1,0 +1,162 @@
+{
+  "status": "DRAFT - written by the engineering session for review; replace or confirm with the content owner before any decision is based on it",
+  "languages": [
+    "en",
+    "hi",
+    "es"
+  ],
+  "passages": [
+    {
+      "id": "p-dividend-en",
+      "lang": "en",
+      "text": "The fund declared a distribution of 0.12 dollars per share, payable to shareholders of record on March 3."
+    },
+    {
+      "id": "p-dividend-hi",
+      "lang": "hi",
+      "text": "फंड ने प्रति शेयर 0.12 डॉलर के वितरण की घोषणा की है, जो 3 मार्च को शेयरधारकों को दिया जाएगा।"
+    },
+    {
+      "id": "p-life-en",
+      "lang": "en",
+      "text": "Term life insurance pays a fixed death benefit to your beneficiaries if you die during the policy term."
+    },
+    {
+      "id": "p-life-es",
+      "lang": "es",
+      "text": "El seguro de vida temporal paga un beneficio fijo a sus beneficiarios si usted fallece durante el plazo de la póliza."
+    },
+    {
+      "id": "p-retire-en",
+      "lang": "en",
+      "text": "A retirement income annuity converts part of your savings into payments you cannot outlive."
+    },
+    {
+      "id": "p-retire-hi",
+      "lang": "hi",
+      "text": "सेवानिवृत्ति वार्षिकी आपकी बचत के एक हिस्से को ऐसे भुगतानों में बदलती है जो आपके जीवन से आगे नहीं चलेंगे।"
+    },
+    {
+      "id": "p-claim-en",
+      "lang": "en",
+      "text": "To file a claim, send the completed form and a certified copy of the death certificate within 60 days."
+    },
+    {
+      "id": "p-claim-es",
+      "lang": "es",
+      "text": "Para presentar una reclamación, envíe el formulario completo y una copia certificada del acta de defunción en 60 días."
+    },
+    {
+      "id": "p-fees-en",
+      "lang": "en",
+      "text": "The annual management fee is 0.85 percent of average net assets and is deducted from fund returns."
+    },
+    {
+      "id": "p-fees-hi",
+      "lang": "hi",
+      "text": "वार्षिक प्रबंधन शुल्क औसत शुद्ध परिसंपत्तियों का 0.85 प्रतिशत है और फंड के रिटर्न से काटा जाता है।"
+    },
+    {
+      "id": "p-tax-en",
+      "lang": "en",
+      "text": "Dividends paid from ordinary income are generally taxed as ordinary income in the year they are received."
+    },
+    {
+      "id": "p-tax-hi",
+      "lang": "hi",
+      "text": "सामान्य आय से दिए गए लाभांश आमतौर पर जिस वर्ष प्राप्त होते हैं, उसी वर्ष सामान्य आय की तरह कर-योग्य होते हैं।"
+    }
+  ],
+  "queries": [
+    {
+      "id": "q1",
+      "lang": "en",
+      "text": "How much is paid per share to shareholders?",
+      "relevant": [
+        "p-dividend-en",
+        "p-dividend-hi"
+      ]
+    },
+    {
+      "id": "q2",
+      "lang": "hi",
+      "text": "शेयरधारकों को प्रति शेयर कितना पैसा मिलेगा?",
+      "relevant": [
+        "p-dividend-en",
+        "p-dividend-hi"
+      ]
+    },
+    {
+      "id": "q3",
+      "lang": "en",
+      "text": "What happens to my family if I die during the term of the policy?",
+      "relevant": [
+        "p-life-en",
+        "p-life-es"
+      ]
+    },
+    {
+      "id": "q4",
+      "lang": "es",
+      "text": "¿Qué pasa con mi familia si fallezco durante la vigencia de la póliza?",
+      "relevant": [
+        "p-life-en",
+        "p-life-es"
+      ]
+    },
+    {
+      "id": "q5",
+      "lang": "en",
+      "text": "Can I receive income that lasts for the rest of my life after I retire?",
+      "relevant": [
+        "p-retire-en",
+        "p-retire-hi"
+      ]
+    },
+    {
+      "id": "q6",
+      "lang": "hi",
+      "text": "क्या सेवानिवृत्ति के बाद जीवन भर चलने वाली आय मिल सकती है?",
+      "relevant": [
+        "p-retire-en",
+        "p-retire-hi"
+      ]
+    },
+    {
+      "id": "q7",
+      "lang": "en",
+      "text": "What paperwork do beneficiaries need to submit after a death?",
+      "relevant": [
+        "p-claim-en",
+        "p-claim-es"
+      ]
+    },
+    {
+      "id": "q8",
+      "lang": "en",
+      "text": "How much does the fund charge each year?",
+      "relevant": [
+        "p-fees-en",
+        "p-fees-hi"
+      ]
+    },
+    {
+      "id": "q9",
+      "lang": "hi",
+      "text": "फंड हर साल कितना शुल्क लेता है?",
+      "relevant": [
+        "p-fees-en",
+        "p-fees-hi"
+      ]
+    },
+    {
+      "id": "q10",
+      "lang": "en",
+      "text": "Are dividends taxed when I receive them?",
+      "relevant": [
+        "p-tax-en",
+        "p-tax-hi"
+      ]
+    }
+  ]
+}

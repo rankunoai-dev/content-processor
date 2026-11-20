@@ -82,3 +82,10 @@ Invariant: a query is embedded with the model the store was built with. Enforced
 - Two stores in one run, one with bge-m3 and one with the CPU model (federated): each searched with its own model.
 - Model server returns an error only for some batches: those chunks are retried, the rest are kept.
 - Restarting halfway through an index with a changed model: the store resets only when the new model finishes its first batch successfully (decision in slice 2).
+
+## 9. Addendum: measurement harness (slice 3 preparation)
+
+- **Dataset:** `fixtures/meaning/cross_language.json`: 12 passages and 10 queries across English, Hindi and Spanish. **Marked DRAFT** in the file: written by the engineering session, to be reviewed or replaced by the content owner before any decision rests on it.
+- **Harness:** `knowledge/meaning_eval.py` scores any embedder on recall@1, recall@3, mean reciprocal rank, cross-language recall@3, and timing. `scripts/measure_meaning.py --embedder hashing|cpu|ollama` runs it. It installs and downloads nothing.
+- **Baseline (words only, `hashing`):** recall@3 0.90, cross-language recall@3 0.00. Ten queries are too few to rank models; the real comparison needs the reviewed set.
+- **Still needed (slice 3):** install Ollama and pull bge-m3 (approval); a CPU MiniLM run (its model files are not cached here, so it would download); the reviewed dataset.

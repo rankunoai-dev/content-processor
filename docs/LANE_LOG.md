@@ -1005,3 +1005,9 @@ git worktree add ../content-processor-lane4 -b lane/L4-verify
 - **Landed:** `_embed_all` splits a batch that fails twice into halves (B4); every vector must match the first one's size or the run stops (B7); before an upgrade clears the store, the new model must answer a probe, so a model server that is down keeps the store's vectors (B5, partly: a failure halfway through still needs resume, which slice 3 covers).
 - **Tests:** `test_index_upgrade_safety.py` (split, size, probe).
 - **Known, not caused by this branch:** `test_cli::test_plan_johnhancock_scope_is_single_host_t3_ceiling` fails on main too. Browser tests (`test_explorer`, `test_single_pass_capture`, `test_site_controls`) fail intermittently under `pytest -n auto` on main and here; each passes alone.
+
+## [2026-11-20] Branch feat/multilingual-bge-m3: measurement harness (slice 3 prep)
+
+- **Landed:** draft cross-language dataset (`fixtures/meaning/cross_language.json`, marked DRAFT); `knowledge/meaning_eval.py`; `scripts/measure_meaning.py`; tests; RFC 0004 addendum with the words-only baseline.
+- **Not done (need approval):** install Ollama and pull bge-m3; CPU MiniLM measurement (model not cached, would download); reviewed dataset.
+- **Flaky under `-n auto`:** browser timing tests (`test_settle_window`, `test_explorer`, `test_single_pass_capture`); each passes alone.
