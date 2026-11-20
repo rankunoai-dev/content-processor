@@ -158,6 +158,15 @@ class Settings(BaseSettings):
     # A project report (all of the client's websites) is built in its own process; it is
     # stopped after this many seconds.
     cp_project_report_timeout_s: float = Field(default=1800.0, gt=0.0)
+    # Semantic similarity in the project report (analysis/semantic.py): pages that say
+    # the same thing in different words, scored on their own content with the knowledge
+    # base's embedding model. Off = the project report has no semantic workbook. The
+    # paragraph cap bounds memory per page; the batch size is texts per embedding call;
+    # the pair cap keeps the strongest pairs of a very repetitive website.
+    cp_semantic_enabled: bool = True
+    cp_semantic_max_paragraphs: int = Field(default=200, ge=10, le=2000)
+    cp_semantic_embed_batch: int = Field(default=64, ge=1, le=1024)
+    cp_semantic_max_pairs: int = Field(default=50_000, ge=100, le=2_000_000)
 
     # -- Content processor: knowledge base (RFC 0002 stages 5-7) -----------
     # Embedded vector store, used when Postgres with pgvector is not configured.
