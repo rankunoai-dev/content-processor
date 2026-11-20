@@ -21,11 +21,12 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from pydantic import Field
 
 from src.core.logger import get_logger
 from src.core.schemas import StrictModel
+from src.modules.accounts.store import role_at_least
 from src.modules.analyst.desktop import DESKTOP_AUTHOR, save_deliverable
 from src.modules.analyst.library import card as card_of
 from src.modules.analyst.playground import EvidenceLedger, LedgerEntry, Playground, ScopeError
@@ -48,6 +49,7 @@ from src.modules.mcp_server.catalog import (
 
 __all__ = ["CallIn", "CallOut", "McpBridge", "register_mcp_routes"]
 
+WRITING_TOOLS = frozenset({"save_deliverable"})
 _log = get_logger(__name__)
 _PROJECT_ID = re.compile(r"^[a-z0-9][a-z0-9-]{0,79}$")
 
@@ -374,6 +376,20 @@ def register_mcp_routes(
         return [asdict(d) for d in definitions(scope)]
 
     @app.post("/api/mcp/call")
-    def call(body: CallIn) -> CallOut:
+    def call(body: CallIn, request: Request) -> CallOut:
+        # every tool reads, except save_deliverable, which writes into a project's run
+        # history: with team accounts that needs an editor (the gate let a viewer in)
+        caller = getattr(request.state, "caller", None)
+        if (
+            body.tool in WRITING_TOOLS
+            and caller is not None
+            and not role_at_least(caller.role, "editor")
+        ):
+            return CallOut(
+                text=json.dumps(
+                    {"error": f"saving needs the editor role; this token acts as {caller.role}"}
+                ),
+                is_error=True,
+            )
         text, is_error = bridge.call(body.tool, body.arguments, body.scope)
         return CallOut(text=text, is_error=is_error)

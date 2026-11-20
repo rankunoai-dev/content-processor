@@ -7,7 +7,7 @@ needs a signed-in account or a personal access token.
 
 | Role | May |
 |---|---|
-| viewer | every `GET` (pages, reports, downloads), `POST /api/mcp/call` (read-only tools) |
+| viewer | every `GET` (pages, reports, downloads), `POST /api/mcp/call` (the read-only tools; `save_deliverable`, which writes an answer into a project's run history, needs an editor token: checked in the route, `bridge.WRITING_TOOLS`) |
 | reviewer | also review decisions: `POST /api/runs/{run}/decisions`, `.../gaps/findings/{id}/status`, `.../sites/{site}/runs/{run}/verdicts` (`access.REVIEW_PATHS`) |
 | editor | also every other change (projects, websites, addresses, scrapes, pulls, builds, analyses) |
 | admin | also `/api/accounts...` and `POST /api/projects/{id}/delete` |

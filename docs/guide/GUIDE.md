@@ -1,6 +1,6 @@
 # Content Processor: A Plain-Language Guide
 
-Last updated: 20 November 2026 · Code version: main after reviewing verdicts in the app, team accounts (sign-in and roles), and plus PDF downloads and monitoring downloads (JSON for every report, competitor moves, price and template changes, the monitoring history); plus adjustable browser waiting times for slow connections; plus answers written in Claude Desktop saved into the project; plus the semantic similarity workbook (same content in different words) in every project report
+Last updated: 20 November 2026 · Code version: main after reviewing verdicts in the app, team accounts (sign-in and roles), PDF downloads and monitoring downloads (JSON for every report, competitor moves, price and template changes, the monitoring history); plus adjustable browser waiting times for slow connections; plus answers written in Claude Desktop saved into the project; plus the semantic similarity workbook (same content in different words) in every project report
 
 ## 1. What this is, in one paragraph
 
