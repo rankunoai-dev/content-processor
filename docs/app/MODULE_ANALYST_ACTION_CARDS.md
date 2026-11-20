@@ -62,6 +62,8 @@ The added cards fill gaps in the proposed eleven: GEO readiness (how quotable th
 
 Each run keeps `app_data/analyst/runs/<run>/`: `run.json` (inputs, card version, backend, model, turns, tool calls, tokens, cost, verification), `prompt.md`, `context_pack.md` or `deliverable.md`, `ledger.json` (every reference shown to Claude, with URL and evidence ids) and `events.jsonl`.
 
+A third kind of run, `backend: claude_desktop`, is an answer written in Claude Desktop and saved through the MCP server's `save_deliverable` (`MODULE_MCP_SERVER.md`, "Saving answers into the app"): the same folder layout with `deliverable.vN.md` and `draft.vN.md` per version, plus `title`, `author`, `module`, `version` and `versions` in `run.json`. The tab lists it as "Written in Claude Desktop"; `GET .../runs/{run}?version=N` opens an earlier version.
+
 ## 5. Breaking points and edge cases, and how each is handled
 
 | # | Breaking point / edge case | Handling |
@@ -102,4 +104,4 @@ Each run keeps `app_data/analyst/runs/<run>/`: `run.json` (inputs, card version,
 | 3 | Research module: Semrush export import and capped API pulls (rankings, SERP, keyword metrics), snapshots, demand per theme, movers (`MODULE_RESEARCH.md`); unlocks cards 8-10 | **built** 2026-11-02 (live pulls wait for a Semrush key and cap) |
 | 4 | Monitoring module: changes between scrapes, prices, template changes, theme drift, alerts, auto-check and opt-in scheduled re-scrapes (`MODULE_MONITORING.md`) | **built** 2026-11-02 (rank tracking waits for step 3) |
 | 5 | Gap Analysis: cross-module joins (themes x keywords x monitoring x catalogs), ranked findings tracked to closure (`MODULE_GAPS.md`) | **built** 2026-11-02 (multi-project playground screen still to do) |
-| 6 | Read-only MCP server over the same tools, so the bot also works inside Claude Desktop (and Claude Code); "Open in Claude.ai" for context packs (`MODULE_MCP_SERVER.md`) | **built** 2026-11-03 (claude.ai connector needs hosting; write tools later) |
+| 6 | Read-only MCP server over the same tools, so the bot also works inside Claude Desktop (and Claude Code); "Open in Claude.ai" for context packs (`MODULE_MCP_SERVER.md`) | **built** 2026-11-03; answers written in Claude Desktop saved into the run history 2026-11-16 (claude.ai connector needs hosting; other write tools later) |

@@ -10,7 +10,8 @@ import { ApiError } from './client';
 
 export type CardModule = 'content' | 'theming' | 'research' | 'monitoring' | 'gap' | 'playground';
 export type ParameterKind = 'project' | 'website' | 'url' | 'keyword' | 'topic' | 'text' | 'choice';
-export type Backend = 'pack' | 'claude';
+/** `claude_desktop`: an answer written in Claude Desktop and saved into the run history. */
+export type Backend = 'pack' | 'claude' | 'claude_desktop';
 export type CardRunStatus = 'queued' | 'running' | 'finished' | 'failed' | 'refused';
 
 export interface CardSummary {
@@ -72,6 +73,15 @@ export interface Verification {
   passed: boolean;
 }
 
+/** One saved version of a deliverable written in Claude Desktop. */
+export interface DeliverableVersion {
+  version: number;
+  saved_at: string;
+  passed: boolean;
+  file: string;
+  draft: string;
+}
+
 export interface CardRun {
   run_id: string;
   card_id: string;
@@ -91,6 +101,12 @@ export interface CardRun {
   message: string;
   verification: Verification | null;
   files: Record<string, string>;
+  /** Claude Desktop deliverables: title, who saved it, its module and every saved version. */
+  title: string | null;
+  author: string | null;
+  module: string | null;
+  version: number;
+  versions: DeliverableVersion[];
 }
 
 export interface RunEvent {
@@ -167,8 +183,11 @@ export const analystApi = {
   start: (projectId: string, card: string, inputs: CardInputs, backend: Backend, token: string | null) =>
     post<CardRun>(`${base(projectId)}/runs`, { card, inputs, backend }, token),
   runs: (projectId: string, signal?: AbortSignal) => get<CardRun[]>(`${base(projectId)}/runs`, signal),
-  run: (projectId: string, runId: string, signal?: AbortSignal) =>
-    get<CardRunDetail>(`${base(projectId)}/runs/${enc(runId)}`, signal),
+  run: (projectId: string, runId: string, signal?: AbortSignal, version: number | null = null) =>
+    get<CardRunDetail>(
+      `${base(projectId)}/runs/${enc(runId)}${version === null ? '' : `?version=${version}`}`,
+      signal,
+    ),
 };
 
 // -- hooks -------------------------------------------------------------------------------
@@ -177,7 +196,8 @@ export const analystKeys = {
   cards: () => ['analyst', 'cards'] as const,
   card: (id: string) => ['analyst', 'cards', id] as const,
   runs: (projectId: string) => ['analyst', 'runs', projectId] as const,
-  run: (projectId: string, runId: string) => ['analyst', 'runs', projectId, runId] as const,
+  run: (projectId: string, runId: string, version: number | null = null) =>
+    ['analyst', 'runs', projectId, runId, version] as const,
 };
 
 const POLL_MS = 2000;
@@ -203,11 +223,11 @@ export function useCardRuns(projectId: string) {
   });
 }
 
-/** One run with its deliverable and events; polled until it ends. */
-export function useCardRun(projectId: string, runId: string | null) {
+/** One run with its deliverable and events; polled until it ends. `version` picks a saved version. */
+export function useCardRun(projectId: string, runId: string | null, version: number | null = null) {
   return useQuery({
-    queryKey: analystKeys.run(projectId, runId ?? ''),
-    queryFn: ({ signal }) => analystApi.run(projectId, runId ?? '', signal),
+    queryKey: analystKeys.run(projectId, runId ?? '', version),
+    queryFn: ({ signal }) => analystApi.run(projectId, runId ?? '', signal, version),
     enabled: runId !== null,
     refetchInterval: (q) => (q.state.data && CARD_ACTIVE.has(q.state.data.record.status) ? POLL_MS : false),
   });

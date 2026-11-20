@@ -20,6 +20,7 @@ from src.modules.reports.writers import Report
 __all__ = ["REPORTS", "ReportDef", "build_report", "report_def"]
 
 _DATE: Final = "%d %b %Y %H:%M UTC"
+DESKTOP_LABEL: Final = "Written in Claude Desktop"
 
 
 def _when(moment: datetime) -> str:
@@ -33,6 +34,8 @@ class Context:
     projects: ProjectStore
     project: ProjectRecord
     analyst_runs: Callable[[str], list[object]] | None = None
+    analyst_text: Callable[[object], str | None] | None = None
+    """Reads a run's result text (the saved deliverables go into the Word file in full)."""
 
 
 @dataclass(frozen=True)
@@ -364,14 +367,20 @@ def _analyst(ctx: Context) -> Report | None:
     if not runs:
         return None
     titles = {c.id: c.title for c in CARDS}
+    how = {"pack": "context pack", "claude": "Claude", "claude_desktop": DESKTOP_LABEL}
     rows: list[dict[str, Cell]] = []
+    saved: list[dict[str, Cell]] = []
+    documents: list[tuple[str, str]] = []
     for r in sorted(runs, key=lambda r: r.created_at, reverse=True):
         check = r.verification
+        desktop = r.backend == "claude_desktop"
         rows.append(
             {
-                "Card": titles.get(r.card_id, r.card_id),
+                "Card": (r.title or r.card_id) if desktop else titles.get(r.card_id, r.card_id),
                 "Run": r.run_id,
-                "How": r.backend,
+                "How": how.get(r.backend, r.backend),
+                "Written by": r.author or "",
+                "Version": r.version if desktop else None,
                 "Status": r.status,
                 "Started": _when(r.created_at),
                 "Finished": _when(r.finished_at) if r.finished_at else "",
@@ -383,16 +392,44 @@ def _analyst(ctx: Context) -> Report | None:
                 "Message": r.message,
             }
         )
+        if not desktop:
+            continue
+        for v in sorted(r.versions, key=lambda v: v.version, reverse=True):
+            saved.append(
+                {
+                    "Title": r.title or "",
+                    "Version": v.version,
+                    "Latest": "yes" if v.version == r.version else "",
+                    "Written by": r.author or "",
+                    "Module": r.module or "",
+                    "Saved": _when(v.saved_at),
+                    "Check": "passed" if v.passed else "needs review",
+                    "Run": r.run_id,
+                }
+            )
+        text = ctx.analyst_text(r) if ctx.analyst_text is not None else None
+        if text:
+            heading = f"{r.title or r.card_id} (version {r.version}, {_when(r.created_at)})"
+            documents.append((heading, text))
+    tables = [Table("Analyst runs", list(rows[0]), rows, wrap_columns=frozenset({"Message"}))]
+    summary = [
+        f"{sum(1 for r in runs if r.status == 'finished')} finished; total cost "
+        f"${sum(r.cost_usd for r in runs):.2f}.",
+        "Each run's own result downloads from the Analyst cards tab (Markdown, Word or PDF).",
+    ]
+    if saved:
+        tables.append(Table(DESKTOP_LABEL, list(saved[0]), saved))
+        summary.append(
+            f"{len(documents)} deliverable(s) written in Claude Desktop, {len(saved)} version(s) "
+            "in all; the Word file has the latest version of each in full."
+        )
     return Report(
         key="analyst",
         title=f"{ctx.project.name}: analyst card runs",
         subtitle=f"{len(rows)} run(s)",
-        summary=[
-            f"{sum(1 for r in runs if r.status == 'finished')} finished; total cost "
-            f"${sum(r.cost_usd for r in runs):.2f}.",
-            "Each run's own result downloads from the Analyst cards tab (Markdown, Word or PDF).",
-        ],
-        tables=[Table("Analyst runs", list(rows[0]), rows, wrap_columns=frozenset({"Message"}))],
+        summary=summary,
+        tables=tables,
+        documents=documents,
     )
 
 
@@ -487,7 +524,8 @@ def build_report(
     projects: ProjectStore,
     project_id: str,
     analyst_runs: Callable[[str], list[object]] | None = None,
+    analyst_text: Callable[[object], str | None] | None = None,
 ) -> Report | None:
     """Build one report, or None when its module has nothing yet; raises `KeyError`."""
-    ctx = Context(projects, projects.get(project_id), analyst_runs)
+    ctx = Context(projects, projects.get(project_id), analyst_runs, analyst_text)
     return report_def(key).build(ctx)

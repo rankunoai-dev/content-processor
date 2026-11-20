@@ -1,9 +1,12 @@
-"""The tools Claude Desktop sees: the analyst tools plus `list_projects` and `check_deliverable`.
+"""The tools Claude Desktop sees: the analyst tools plus the project list and answer tools.
 
-Every analyst tool gets a required `project_id`; none of them spends money or contacts a
-website (scrapes, Semrush pulls and decisions stay in the app, behind its unlock). Some
-build missing local results on first use (theme map, gap report, monitoring check, SEO
-inventory): that runs on this computer at no cost, inside the web app.
+Besides the analyst tools: `list_projects`, `check_deliverable`, `present_answer` and
+`save_deliverable`. Every analyst tool gets a required `project_id`; none of them spends
+money or contacts a website (scrapes, Semrush pulls and decisions stay in the app, behind
+its unlock). Some build missing local results on first use (theme map, gap report,
+monitoring check, SEO inventory): that runs on this computer at no cost, inside the web
+app. The one tool that writes, `save_deliverable`, only adds the checked answer to the
+project's analyst run history on this computer (`ToolDef.writes`).
 
 **Module scope.** A connection can be limited to some modules (`--modules themes`): it then
 lists only those modules' tools (other modules' tools never reach Claude's context), its
@@ -35,6 +38,7 @@ __all__ = [
     "EXTRA_TOOLS",
     "INSTRUCTIONS",
     "MAX_DELIVERABLE_CHARS",
+    "MAX_TITLE_CHARS",
     "SCOPES",
     "Scope",
     "TEXT_TOOLS",
@@ -48,15 +52,16 @@ __all__ = [
 ]
 
 MAX_DELIVERABLE_CHARS: Final = 200_000
-EXTRA_TOOLS: Final = ("list_projects", "check_deliverable", "present_answer")
+EXTRA_TOOLS: Final = ("list_projects", "check_deliverable", "present_answer", "save_deliverable")
+MAX_TITLE_CHARS: Final = 200
 
 # The tools whose answers can carry verbatim page text. Decided per tool from what each
 # returns: search_knowledge (passages), get_page (every section), get_page_facts (meta
 # description, FAQ questions, CTA wording), get_changes (added and removed text, rewrites)
 # and get_monitoring_alerts (its alerts quote rewrites and changed text). The others
 # return counts, names, URLs, titles, page types, theme labels, keywords, search data or
-# findings written by the engine; check_deliverable and present_answer only check text
-# Claude wrote and hand back page titles and links as sources.
+# findings written by the engine; check_deliverable, present_answer and save_deliverable only
+# check text Claude wrote and hand back page titles and links as sources.
 TEXT_TOOLS: Final[frozenset[str]] = frozenset(
     {"search_knowledge", "get_page", "get_page_facts", "get_changes", "get_monitoring_alerts"}
 )
@@ -108,7 +113,7 @@ def scope_label(scope: Scope) -> str:
 
 
 def scope_of(tool: str) -> str | None:
-    """The module key of an analyst tool; None for list_projects, check_deliverable, unknown."""
+    """The module key of an analyst tool; None for list_projects, the deliverable tools, unknown."""
     spec = TOOLS.get(tool)
     return _KEY_OF_MODULE.get(spec.module) if spec is not None else None
 
@@ -119,8 +124,9 @@ def instructions(scope: Scope = None) -> str:
         scope_rule = (
             "6. Module focus: each tool's description starts with its module in brackets, for "
             'example [Themes]. When the user asks to work with one module only ("only use '
-            'Themes", "stay in Gaps"), call only that module\'s tools plus list_projects and '
-            "check_deliverable, do not look anything up in another module, and if a question "
+            'Themes", "stay in Gaps"), call only that module\'s tools plus list_projects, '
+            "check_deliverable and save_deliverable, do not look anything up in another module, "
+            "and if a question "
             "needs another module, say so instead of calling it. A connection limited to one "
             "module can also be added in Claude Desktop (see the app's MCP guide)."
         )
@@ -140,7 +146,10 @@ How to work:
    [chunk:...] or [fact:...].
 4. Before you answer with facts from the tools (an analysis, a summary, a list), call
    check_deliverable with your full draft and fix anything it reports (unknown citations,
-   quotes that do not match, uncited claims).
+   quotes that do not match, uncited claims). Once it passes, call save_deliverable with a
+   short title and the same text, so the answer is kept in the app's run history (Analyst
+   cards tab, "Written in Claude Desktop"); then tell the user it is saved. Saving sends
+   nothing anywhere, so it works for confidential projects too.
 5. You cannot scrape websites, pull from Semrush, change statuses or rebuild on request; say
    which button in the app does it when the user needs that.
 {scope_rule}
@@ -184,6 +193,8 @@ class ToolDef:
     module: str | None = None
     exposes_text: bool = False
     """Whether its answer can carry page text (refused for confidential projects)."""
+    writes: bool = False
+    """Whether it writes app data (only the analyst run history, on this computer)."""
 
 
 def _with_project(schema: dict[str, object]) -> dict[str, object]:
@@ -237,7 +248,11 @@ def _theme_pages_schema() -> dict[str, object]:
 
 
 def definitions(scope: Scope = None) -> list[ToolDef]:
-    """The tools of this scope, `list_projects` first and `check_deliverable` last."""
+    """The tools of this scope, in a fixed order.
+
+    `list_projects` first, then the modules' tools, then the answer tools
+    (`present_answer`, `check_deliverable`, `save_deliverable`).
+    """
     out = [
         ToolDef(
             "list_projects",
@@ -340,6 +355,53 @@ def definitions(scope: Scope = None) -> list[ToolDef]:
                 "required": ["project_id", "text"],
                 "additionalProperties": False,
             },
+        )
+    )
+    out.append(
+        ToolDef(
+            "save_deliverable",
+            "Save deliverable",
+            "Keep a finished answer in the app: it is checked exactly like check_deliverable "
+            "(citations, quotes, uncited facts) and stored in the project's analyst run history "
+            'as "Written in Claude Desktop", with its title, the check result, its sources, '
+            "who saved it and when. Saving the same title again for the same project adds a new "
+            "version instead of a second entry. Nothing is sent anywhere (the text is already "
+            "here), so confidential projects can save too. Call it after check_deliverable "
+            "passes, with the same Markdown.",
+            {
+                "type": "object",
+                "properties": {
+                    "project_id": _PROJECT_ID,
+                    "title": {
+                        "type": "string",
+                        "description": "A short name for the deliverable, as the app will list "
+                        'it (for example "Gap report: term life, November")',
+                        "minLength": 1,
+                        "maxLength": MAX_TITLE_CHARS,
+                    },
+                    "markdown": {
+                        "type": "string",
+                        "description": "The full answer in Markdown, with its [chunk:...] and "
+                        "[fact:...] citations (the text you sent to check_deliverable)",
+                        "minLength": 1,
+                        "maxLength": MAX_DELIVERABLE_CHARS,
+                    },
+                    "card_key": {
+                        "type": "string",
+                        "description": "Optional: the id of the action card this answers, when "
+                        "the user asked for one",
+                        "maxLength": 80,
+                    },
+                    "module": {
+                        "type": "string",
+                        "description": "Optional: the module the answer belongs to",
+                        "enum": list(SCOPES),
+                    },
+                },
+                "required": ["project_id", "title", "markdown"],
+                "additionalProperties": False,
+            },
+            writes=True,
         )
     )
     return out

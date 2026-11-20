@@ -60,6 +60,7 @@ def test_catalog_lists_every_built_tool_read_only_with_a_project() -> None:
         "get_scrape_queue",
         "present_answer",
         "check_deliverable",
+        "save_deliverable",
     ]
     assert len(built) == 17
     for d in defs[1:]:
@@ -145,7 +146,7 @@ def test_mcp_protocol_end_to_end(themed: World, tmp_path: Path) -> None:
         return [t.name for t in tools.tools], json.loads(text), wrong_text, bool(wrong.is_error)
 
     names, theme, wrong_text, wrong_error = anyio.run(scenario)
-    assert names[0] == "list_projects" and "check_deliverable" in names and len(names) == 23
+    assert names[0] == "list_projects" and "check_deliverable" in names and len(names) == 24
     assert {"get_theme_pages", "export_theme_pages_csv", "get_scrape_queue"} <= set(names)
     assert theme["tool"] == "get_theme_map" and theme["data"]
     assert wrong_error and "unknown tool" in wrong_text
@@ -162,7 +163,9 @@ def test_app_not_running_says_how_to_start_it() -> None:
         first = result.content[0]
         hint = first.text if hasattr(first, "text") else ""
         read_only = all(
-            t.annotations is not None and t.annotations.read_only_hint for t in tools.tools
+            t.annotations is not None and t.annotations.read_only_hint
+            for t in tools.tools
+            if t.name != "save_deliverable"  # the one tool that writes (the run history)
         )
         return hint, bool(result.is_error), read_only
 
@@ -218,10 +221,11 @@ def test_a_scoped_catalog_lists_only_that_module() -> None:
         "get_scrape_queue",
         "present_answer",
         "check_deliverable",
+        "save_deliverable",
     ]
     assert all(
         d.description.startswith("[Themes]")
-        for d in definitions(themes)[1:-2]
+        for d in definitions(themes)[1:-3]
         if d.module == "themes"
     )
     assert "limited to: Themes" in instructions(themes) and "Module focus" not in instructions(
@@ -273,6 +277,7 @@ def test_the_app_refuses_other_modules_on_a_scoped_connection(
         "get_scrape_queue",
         "present_answer",
         "check_deliverable",
+        "save_deliverable",
     ]
     assert client.get("/api/mcp/tools", params={"modules": "nope"}).status_code == 422
 
@@ -306,6 +311,7 @@ def test_a_scoped_server_over_the_protocol(themed: World, tmp_path: Path) -> Non
         "get_scrape_queue",
         "present_answer",
         "check_deliverable",
+        "save_deliverable",
     ]
     assert other_error and "in this connection (Monitoring)" in other_text
     assert "limited to" not in own_text
