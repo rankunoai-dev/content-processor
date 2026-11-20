@@ -105,6 +105,7 @@ from src.modules.content_processor.scheduler.budget import (
     MeteredEvidenceStore,
     MeteredFetcher,
     MeteredRenderer,
+    sleep_gap_for,
 )
 from src.modules.content_processor.scheduler.capture_journal import CaptureJournal
 from src.modules.content_processor.scheduler.grouping import RunGroups
@@ -264,8 +265,24 @@ def browser_channel() -> str | None:
     return None if channel == "chromium" else channel
 
 
+def render_limits() -> RenderLimits:
+    """The browser's time caps from the `CP_RENDER_*` settings; everything else default.
+
+    Read when the batch starts (each batch is its own process), so raising
+    `CP_RENDER_NAVIGATION_TIMEOUT_S` in `.env` during a slow spell reaches the next batch
+    of a running scrape. The settings keep the whole-page cap above the navigation
+    timeout (src/core/config.py).
+    """
+    settings = get_settings()
+    return RenderLimits(
+        navigation_timeout_s=settings.cp_render_navigation_timeout_s,
+        max_page_time_s=settings.cp_render_max_page_time_s,
+        settle_window_s=settings.cp_render_settle_window_s,
+    )
+
+
 def build_renderer(scope: RunScope) -> Any:
-    """T3 browser configured from the scope (not started)."""
+    """T3 browser configured from the scope and the `CP_RENDER_*` settings (not started)."""
     return BrowserRenderer(
         user_agent=user_agent_for(scope),
         host_checker=host_checker_for(scope),
@@ -273,7 +290,7 @@ def build_renderer(scope: RunScope) -> Any:
         timezone=scope.timezone,
         viewport=scope.viewport,
         analytics_suppression=scope.analytics_suppression,
-        limits=RenderLimits(),
+        limits=render_limits(),
         channel=browser_channel(),
     )
 
@@ -320,7 +337,13 @@ async def _drive(
     # loop: one lock in front of the ledger keeps every call serial (ledger/serial.py).
     ledger = serial_ledger(ledger)
     seed = sum(r.payload_bytes or 0 for r in ledger.list_resources(run_id))
-    meter = BudgetMeter(scope.budgets, seed_bytes=seed)
+    # A longer render cap (CP_RENDER_MAX_PAGE_TIME_S) must not look like the computer
+    # slept: the meter's sleep gap grows with it.
+    meter = BudgetMeter(
+        scope.budgets,
+        seed_bytes=seed,
+        sleep_gap_s=sleep_gap_for(render_limits().max_page_time_s, options.max_wait_s),
+    )
     # Grouping reads page bodies for analysis; it uses the raw store so it does not draw on the
     # run's evidence budget.
     grouping = RunGroups(ledger, evidence, run_id=run_id) if group_assets else None
