@@ -23,8 +23,10 @@ from typing import Literal
 
 import httpx
 
+from src.core.config import get_settings
 from src.core.logger import get_logger
 from src.modules.analyst.playground import Playground
+from src.modules.content_processor.analysis.semantic import VectorCache
 from src.modules.content_processor.projects.models import RunState
 from src.modules.content_processor.projects.runner import ScrapeRunner
 from src.modules.content_processor.projects.store import ProjectStore
@@ -56,13 +58,26 @@ def run_project_check(
     store = monitor_store(projects)
     play = Playground(projects, access, [project_id])
     settings = store.watch(project_id)
-    check = run_check(
-        play,
-        project_id,
-        store.latest(project_id),
-        push_threshold=settings.push_threshold,
-        trigger=trigger,
+    app = get_settings()
+    # line vectors for meaning scores, shared by every project's checks (keyed by model)
+    cache = (
+        VectorCache(Path(str(projects.root)) / "monitoring" / "meaning.sqlite")
+        if app.cp_monitor_meaning
+        else None
     )
+    try:
+        check = run_check(
+            play,
+            project_id,
+            store.latest(project_id),
+            push_threshold=settings.push_threshold,
+            trigger=trigger,
+            meaning_cache=cache,
+            topic_drift=app.cp_monitor_topic_drift,
+        )
+    finally:
+        if cache is not None:
+            cache.close()
     path = store.save(check)
     workbook = write_check_workbook(check, store.workbook(check))
     prefix = "\\\\?\\"  # Windows extended-length path prefix, not shown to people

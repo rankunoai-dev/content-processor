@@ -50,6 +50,7 @@ AlertKind = Literal[
     "competitor_content_growth",
     "competitor_messaging_shift",
     "competitor_new_tables",
+    "competitor_topic_drift",
 ]
 
 
@@ -100,6 +101,13 @@ class PageChange(StrictModel):
         default_factory=dict, description="Tables, pricing blocks, FAQs, forms: how many more"
     )
     blocks_removed: dict[str, int] = Field(default_factory=dict, description="How many fewer")
+    meaning: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description="How close the new version's meaning is to the old (1 = same topic); "
+        "None when no meaning model scored it or the page is too thin",
+    )
 
     @property
     def words_delta(self) -> int:
@@ -132,6 +140,10 @@ class SiteDiff(StrictModel):
     unchanged_pages: int = Field(default=0, ge=0)
     template_changes: list[TemplateChange] = Field(default_factory=list)
     drift: float = Field(default=0.0, ge=0.0, le=1.0, description="Share of pages that changed")
+    meaning_model: str | None = Field(
+        default=None, description="The model that scored the changed pages' meaning"
+    )
+    meaning_note: str = Field(default="", description="Why meaning was not scored, when not")
 
 
 class ThemeDrift(StrictModel):

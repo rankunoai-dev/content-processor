@@ -19,8 +19,11 @@ from collections import Counter
 from datetime import UTC, datetime
 from typing import Literal
 
-from src.modules.analyst.playground import Playground
+from src.modules.analyst.playground import Playground, SiteData
+from src.modules.content_processor.analysis.semantic import VectorCache
+from src.modules.content_processor.knowledge.embedders import is_semantic
 from src.modules.monitoring.diff import diff_runs, load_run_files
+from src.modules.monitoring.meaning import TOPIC_DRIFT, page_meaning
 from src.modules.monitoring.models import (
     Alert,
     AlertKind,
@@ -35,7 +38,7 @@ from src.modules.theming.models import ThemeMap
 from src.modules.theming.service import build_project_themes, theme_store
 from src.modules.theming.store import match_themes
 
-__all__ = ["PILLAR_DRIFT", "run_check"]
+__all__ = ["PILLAR_DRIFT", "TOPIC_DRIFT", "run_check"]
 
 PILLAR_DRIFT = 0.3
 _REWRITE_ALERT = 1
@@ -81,12 +84,42 @@ def _themes_of(theme_map: ThemeMap | None) -> dict[str, tuple[str, str]]:
     }
 
 
+def _score_meaning(
+    play: Playground,
+    data: SiteData,
+    texts: dict[str, tuple[list[str], list[str]]],
+    changed: list[PageChange],
+    cache: VectorCache,
+) -> tuple[str | None, str]:
+    """Fill each changed page's meaning score; returns (model, note when not scored)."""
+    if not changed:
+        return None, ""
+    store = play.open_store(data)
+    try:
+        model = store.meta().get("model", "")
+    finally:
+        store.close()
+    if not model or not is_semantic(model):
+        return None, "meaning not scored: the website was indexed with the words-only stand-in"
+    try:
+        embedder = play.access.embedder_for(model)
+        scores = page_meaning(
+            {c.url: texts[c.url] for c in changed if c.url in texts}, embedder, cache
+        )
+    except Exception as exc:  # noqa: BLE001 - model down or failing: the check still finishes
+        return None, f"meaning not scored: {str(exc)[:200]}"
+    for change in changed:
+        change.meaning = scores.get(change.url)
+    return embedder.model, ""
+
+
 def _site_diffs(
     play: Playground,
     previous: MonitorCheck | None,
     themes_now: dict[str, tuple[str, str]],
     themes_before: dict[str, tuple[str, str]],
     pillars: set[str],
+    cache: VectorCache | None = None,
 ) -> list[SiteDiff]:
     earlier = {s.website: s.latest_run for s in previous.websites} if previous else {}
     diffs: list[SiteDiff] = []
@@ -161,6 +194,11 @@ def _site_diffs(
             if theme:
                 change.theme_id, change.theme = theme
             change.is_pillar = change.url in pillars
+        meaning_model, meaning_note = (
+            _score_meaning(play, data, result.texts, changed, cache)
+            if cache is not None
+            else (None, "")
+        )
         total = len(added) + len(removed) + len(changed) + unchanged
         diffs.append(
             SiteDiff(
@@ -177,6 +215,8 @@ def _site_diffs(
                 unchanged_pages=unchanged,
                 template_changes=result.template,
                 drift=round((len(added) + len(removed) + len(changed)) / max(total, 1), 3),
+                meaning_model=meaning_model,
+                meaning_note=meaning_note,
             )
         )
     return diffs
@@ -232,9 +272,28 @@ def _page_name(change: PageChange) -> str:
     return change.title or change.url
 
 
-def _competitor_moves(d: SiteDiff) -> list[Alert]:
-    """Pages a competitor grew, re-headed toward new terms, or gave new tables or prices."""
+def _competitor_moves(d: SiteDiff, topic_drift: float = TOPIC_DRIFT) -> list[Alert]:
+    """Pages a competitor grew, re-headed, moved to another topic, or gave new tables."""
     out: list[Alert] = []
+    moved = sorted(
+        (c for c in d.changed_pages if c.meaning is not None and c.meaning < topic_drift),
+        key=lambda c: c.meaning or 0.0,
+    )
+    if moved:
+        out.append(
+            _alert(
+                "competitor_topic_drift",
+                "high" if any(c.is_pillar for c in moved) else "medium",
+                d.website,
+                f"{d.name} moved {len(moved)} page(s) onto a different topic",
+                "; ".join(
+                    f"{_page_name(c)}: meaning {c.meaning:.2f} old vs new"
+                    + (f" (now about {', '.join(c.new_terms[:5])})" if c.new_terms else "")
+                    for c in moved
+                )[:700],
+                urls=[c.url for c in moved],
+            )
+        )
     grown = [c for c in d.changed_pages if c.words_delta >= GROWTH_WORDS]
     if grown:
         out.append(
@@ -302,7 +361,11 @@ def _competitor_moves(d: SiteDiff) -> list[Alert]:
 
 
 def _alerts(
-    diffs: list[SiteDiff], drift: list[ThemeDrift], current: ThemeMap, push_threshold: int
+    diffs: list[SiteDiff],
+    drift: list[ThemeDrift],
+    current: ThemeMap,
+    push_threshold: int,
+    topic_drift: float = TOPIC_DRIFT,
 ) -> list[Alert]:
     roles = {d.website: d.role for d in diffs}
     owners = {t.theme_id: t.ownership for t in current.themes}
@@ -403,7 +466,7 @@ def _alerts(
                 )
             )
         if d.role == "competitor":
-            alerts += _competitor_moves(d)
+            alerts += _competitor_moves(d, topic_drift)
         drifted = [c for c in d.changed_pages if c.is_pillar and c.drift >= PILLAR_DRIFT]
         if drifted:
             alerts.append(
@@ -439,8 +502,14 @@ def run_check(
     *,
     push_threshold: int = 3,
     trigger: Literal["manual", "auto"] = "manual",
+    meaning_cache: VectorCache | None = None,
+    topic_drift: float = TOPIC_DRIFT,
 ) -> MonitorCheck:
-    """One check of the project (it also saves a fresh theme map)."""
+    """One check of the project (it also saves a fresh theme map).
+
+    With `meaning_cache`, changed pages are scored by meaning (old vs new) with each
+    website's index model, and competitor pages below `topic_drift` raise an alert.
+    """
     store = theme_store(play.store)
     before = (
         store.get(project_id, previous.theme_map_id)
@@ -449,9 +518,11 @@ def run_check(
     )
     current, _files = build_project_themes(play.store, play.access, project_id)
     pillars = {c.pillar.url for t in current.themes for c in t.coverage if c.pillar is not None}
-    diffs = _site_diffs(play, previous, _themes_of(current), _themes_of(before or current), pillars)
+    diffs = _site_diffs(
+        play, previous, _themes_of(current), _themes_of(before or current), pillars, meaning_cache
+    )
     drift = _drift(current, before, diffs)
-    alerts = _alerts(diffs, drift, current, push_threshold)
+    alerts = _alerts(diffs, drift, current, push_threshold, topic_drift)
     created = datetime.now(UTC)
     return MonitorCheck(
         check_id="check-"
@@ -471,6 +542,12 @@ def run_check(
             "removed_pages": sum(len(d.removed_pages) for d in diffs),
             "changed_pages": sum(len(d.changed_pages) for d in diffs),
             "price_changes": sum(len(c.prices) for d in diffs for c in d.changed_pages),
+            "topic_drift_pages": sum(
+                1
+                for d in diffs
+                for c in d.changed_pages
+                if c.meaning is not None and c.meaning < topic_drift
+            ),
             "alerts_high": sum(1 for a in alerts if a.severity == "high"),
             "alerts": len(alerts),
         },

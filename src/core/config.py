@@ -169,6 +169,12 @@ class Settings(BaseSettings):
     cp_semantic_max_paragraphs: int = Field(default=200, ge=10, le=2000)
     cp_semantic_embed_batch: int = Field(default=64, ge=1, le=1024)
     cp_semantic_max_pairs: int = Field(default=50_000, ge=100, le=2_000_000)
+    # Topic drift in monitoring checks (monitoring/meaning.py): each changed page's old
+    # and new versions are compared by meaning with the website's knowledge-base model
+    # (never the words-only stand-in). A competitor page scoring below the threshold
+    # was moved onto another topic and raises an alert. Off = no meaning scores.
+    cp_monitor_meaning: bool = True
+    cp_monitor_topic_drift: float = Field(default=0.85, gt=0.0, lt=1.0)
 
     # -- Content processor: knowledge base (RFC 0002 stages 5-7) -----------
     # Embedded vector store, used when Postgres with pgvector is not configured.

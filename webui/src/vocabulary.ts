@@ -2060,6 +2060,11 @@ export const MONITORING = {
   templateTitle: 'Lines added or removed on many pages at once (template, navigation, related links)',
   priceChange: (before: string, after: string) => `${before} → ${after}`,
   pillar: 'pillar',
+  topicDrift: 0.85,
+  topicKept: 'Same topic',
+  topicMoved: 'Topic changed',
+  meaningHelp:
+    'How close the new version is in meaning to the old one (1 = the same topic, reworded or extended). Below 0.85 the page now covers a different topic.',
   drift: 'Theme drift',
   noDrift: 'No theme moved.',
   driftColumns: { theme: 'Theme', status: 'Status', ownership: 'Ownership', newPages: 'New pages', removed: 'Removed pages' },

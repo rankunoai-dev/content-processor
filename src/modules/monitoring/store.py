@@ -125,6 +125,14 @@ _HOW_TO_READ: list[tuple[str, str]] = [
         "or changed.",
     ),
     (
+        "Meaning (old vs new)",
+        "How close a changed page's new version is in meaning to its old one, from 0 to 1, "
+        "scored with the website's embedding model. Near 1: the same topic, reworded or "
+        "extended. Below 0.85: the page now covers a different topic (on a competitor "
+        "website this raises a topic drift alert). Empty when no meaning model is available "
+        "or the page has too little text.",
+    ),
+    (
         "Price change",
         "An amount (currency or percentage) in the same wording in both scrapes with a different "
         "value, for example '$25 per month' becoming '$19 per month'.",
@@ -196,7 +204,8 @@ def check_tables(check: MonitorCheck) -> list[Table]:
             "Unchanged pages": d.unchanged_pages,
             "Template changes": len(d.template_changes),
             "Drift": d.drift,
-            "Note": d.note,
+            "Meaning model": d.meaning_model or "",
+            "Note": "; ".join(n for n in (d.note, d.meaning_note) if n),
         }
         for d in check.websites
     ]
@@ -208,6 +217,7 @@ def check_tables(check: MonitorCheck) -> list[Table]:
             "Theme": c.theme or "",
             "Pillar": "yes" if c.is_pillar else "",
             "Drift": c.drift,
+            "Meaning (old vs new)": c.meaning if c.meaning is not None else "",
             "Sections added": c.sections_added,
             "Sections removed": c.sections_removed,
             "Words before": c.words_before,

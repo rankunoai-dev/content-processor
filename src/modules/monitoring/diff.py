@@ -12,6 +12,7 @@ at $25 per month" becoming "$19 per month".
 
 from __future__ import annotations
 
+import math
 import re
 from collections import Counter
 from collections.abc import Iterable
@@ -22,10 +23,12 @@ from src.modules.content_processor.knowledge.models import Chunk, PageStamp
 from src.modules.monitoring.models import PageChange, PriceChange, TemplateChange
 
 __all__ = [
+    "FURNITURE_PAGES",
     "TEMPLATE_PAGES",
     "RunDiff",
     "RunFiles",
     "diff_runs",
+    "furniture",
     "load_run_files",
     "price_changes",
 ]
@@ -41,6 +44,10 @@ _MAX_TEXT = 800
 _MAX_SAMPLES = 5
 _HEAD_FIELDS = ("title", "meta_description", "h1", "canonical")
 TEMPLATE_PAGES = 3
+# site furniture (menus, footers, disclaimers) left out of the meaning comparison: a line
+# on this many pages, or this share of them (the rule of `analysis.semantic`)
+FURNITURE_PAGES = 5
+FURNITURE_SHARE = 0.02
 _MAX_TEMPLATE = 40
 
 
@@ -200,6 +207,15 @@ def _norm(line: str) -> str:
     return " ".join(_WORD_OR_NUMBER.findall(line.casefold()))
 
 
+def furniture(files: RunFiles) -> set[str]:
+    """Lines (as compared) on many pages of one scrape: menus, footers, disclaimers."""
+    counts: Counter[str] = Counter()
+    for url in files.stamps:
+        counts.update({_norm(t) for t in _lines(files.chunks.get(url, []))} - {""})
+    limit = max(FURNITURE_PAGES, math.ceil(len(files.stamps) * FURNITURE_SHARE))
+    return {t for t, n in counts.items() if n >= limit}
+
+
 @dataclass
 class RunDiff:
     """Two scrapes of a website compared."""
@@ -209,6 +225,9 @@ class RunDiff:
     changed: list[PageChange] = field(default_factory=list)
     unchanged: int = 0
     template: list[TemplateChange] = field(default_factory=list)
+    # changed pages: their own lines before and after (template and furniture lines
+    # removed), for the meaning comparison
+    texts: dict[str, tuple[list[str], list[str]]] = field(default_factory=dict)
 
 
 def _page_lines(
@@ -248,6 +267,7 @@ def diff_runs(old: RunFiles, new: RunFiles, *, template_pages: int = TEMPLATE_PA
             examples.setdefault(_norm(t), t)
     template = {t for t, n in gained_on.items() if n >= template_pages}
     template |= {t for t, n in lost_on.items() if n >= template_pages}
+    shared_text = template | furniture(old) | furniture(new)
     ordered = sorted(template, key=lambda t: (-(gained_on.get(t, 0) + lost_on.get(t, 0)), t))
     result.template = [
         TemplateChange(
@@ -273,6 +293,10 @@ def diff_runs(old: RunFiles, new: RunFiles, *, template_pages: int = TEMPLATE_PA
         if not (head or gained or lost or h_added or h_removed):
             result.unchanged += 1
             continue
+        result.texts[url] = (
+            [t for t in _lines(old.chunks.get(url, [])) if _norm(t) not in shared_text],
+            [t for t in _lines(new.chunks.get(url, [])) if _norm(t) not in shared_text],
+        )
         blocks_before = _blocks(old.chunks.get(url, []))
         blocks_after = _blocks(new.chunks.get(url, []))
         before_set, after_set = before_set - template, after_set - template
