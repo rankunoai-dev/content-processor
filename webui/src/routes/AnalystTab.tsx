@@ -1,7 +1,9 @@
 /**
  * The project's "Analyst cards" tab: the card library, a form to check and run a
  * card, the project's card runs, and a viewer with live progress, the citation
- * check and the deliverable (or context pack).
+ * check and the deliverable (or context pack). Answers written in Claude Desktop and
+ * saved through the connector are listed with the runs ("Written in Claude Desktop"),
+ * with their versions.
  */
 import {
   CopyOutlined,
@@ -270,6 +272,8 @@ function CardDrawer({
 function eventText(e: RunEvent): string | null {
   const flag = Boolean(e.error);
   switch (e.type) {
+    case 'saved':
+      return ANALYST.events.saved(Number(e.version ?? 1), String(e.status ?? ''));
     case 'prefetch':
       return ANALYST.events.prefetch(String(e.tool ?? ''), flag);
     case 'tool':
@@ -292,6 +296,26 @@ function eventText(e: RunEvent): string | null {
 /** A new chat on claude.ai, in the browser's signed-in Claude account. */
 const CLAUDE_NEW_CHAT = 'https://claude.ai/new';
 
+function fileStem(record: CardRun): string {
+  if (record.backend === 'claude_desktop' && record.title) {
+    const slug = record.title.replace(/[^A-Za-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 60) || 'deliverable';
+    return `${slug}-${record.run_id}-v${record.version}`;
+  }
+  return `${record.card_id}-${record.run_id}`;
+}
+
+/** What the runs list calls a run: the card's title, or the deliverable's own title. */
+function runName(record: CardRun, titles: Record<string, string>): string {
+  if (record.backend === 'claude_desktop') return record.title ?? record.author ?? record.card_id;
+  return titles[record.card_id] ?? record.card_id;
+}
+
+function howLabel(record: CardRun): string {
+  if (record.backend === 'pack') return ANALYST.viewer.pack;
+  if (record.backend === 'claude_desktop') return ANALYST.desktopHow;
+  return 'Claude';
+}
+
 function download(name: string, text: string) {
   const url = URL.createObjectURL(new Blob([text], { type: 'text/markdown;charset=utf-8' }));
   const a = document.createElement('a');
@@ -312,29 +336,72 @@ function RunDrawer({
   titles: Record<string, string>;
   onClose: () => void;
 }) {
-  const run = useCardRun(project.project_id, runId);
+  const [version, setVersion] = useState<number | null>(null);
+  const run = useCardRun(project.project_id, runId, version);
   const { message } = AntApp.useApp();
+  const heading = (record: CardRun) =>
+    record.backend === 'claude_desktop'
+      ? ANALYST.viewer.desktopTitle(runName(record, titles))
+      : ANALYST.viewer.title(runName(record, titles));
   return (
     <Drawer
       open={runId !== null}
-      onClose={onClose}
+      onClose={() => {
+        setVersion(null);
+        onClose();
+      }}
       width={820}
-      title={run.data ? ANALYST.viewer.title(titles[run.data.record.card_id] ?? run.data.record.card_id) : ''}
+      title={run.data ? heading(run.data.record) : ''}
     >
       <QueryState query={run} rows={8}>
         {({ record, text, events }) => {
           const isPack = record.backend === 'pack';
+          const isDesktop = record.backend === 'claude_desktop';
           const lines = events.map((e) => eventText(e)).filter((t): t is string => t !== null);
           const active = CARD_ACTIVE.has(record.status);
+          const shown = version ?? record.version;
           return (
             <Space direction="vertical" size={16} style={{ width: '100%' }}>
+              {isDesktop ? <Alert type="info" showIcon message={ANALYST.viewer.desktopHelp} /> : null}
               <Descriptions size="small" column={1} bordered>
                 <Descriptions.Item label={ANALYST.columns.status}>
                   <Tag color={STATUS_COLOR[record.status]}>{ANALYST.status[record.status]}</Tag>
                   {record.message ? <Typography.Text type="secondary">{record.message}</Typography.Text> : null}
                 </Descriptions.Item>
                 <Descriptions.Item label={ANALYST.columns.how}>{ANALYST.backends[record.backend]}</Descriptions.Item>
-                {!isPack ? (
+                {isDesktop ? (
+                  <>
+                    <Descriptions.Item label={ANALYST.viewer.author}>{record.author ?? '-'}</Descriptions.Item>
+                    <Descriptions.Item label={ANALYST.viewer.saved}>
+                      {record.finished_at ? new Date(record.finished_at).toLocaleString() : '-'}
+                    </Descriptions.Item>
+                    <Descriptions.Item label={ANALYST.viewer.version}>
+                      {record.versions.length > 1 ? (
+                        <Select
+                          aria-label={ANALYST.viewer.version}
+                          size="small"
+                          style={{ minWidth: 320 }}
+                          value={shown}
+                          onChange={(v: number) => setVersion(v === record.version ? null : v)}
+                          options={[...record.versions]
+                            .sort((a, b) => b.version - a.version)
+                            .map((v) => ({
+                              value: v.version,
+                              label: ANALYST.viewer.versionOption(
+                                v.version,
+                                new Date(v.saved_at).toLocaleString(),
+                                v.passed,
+                                v.version === record.version,
+                              ),
+                            }))}
+                        />
+                      ) : (
+                        `${record.version}`
+                      )}
+                    </Descriptions.Item>
+                  </>
+                ) : null}
+                {!isPack && !isDesktop ? (
                   <>
                     <Descriptions.Item label={ANALYST.columns.cost}>
                       {ANALYST.viewer.cost(record.cost_usd, record.cap_usd)}
@@ -403,7 +470,7 @@ function RunDrawer({
                       <Button
                         size="small"
                         icon={<DownloadOutlined />}
-                        onClick={() => download(`${record.card_id}-${record.run_id}.md`, text)}
+                        onClick={() => download(`${fileStem(record)}.md`, text)}
                       >
                         {ANALYST.viewer.download}
                       </Button>
@@ -510,12 +577,19 @@ export function AnalystTab({ project, token }: { project: Project; token: string
                 dataSource={list}
                 pagination={{ pageSize: 10, hideOnSinglePage: true }}
                 columns={[
-                  { title: ANALYST.columns.card, dataIndex: 'card_id', render: (id: string) => titles[id] ?? id },
                   {
-                    title: ANALYST.columns.how,
-                    dataIndex: 'backend',
-                    render: (b: Backend) => (b === 'pack' ? ANALYST.viewer.pack : 'Claude'),
+                    title: ANALYST.columns.card,
+                    dataIndex: 'card_id',
+                    render: (_id: string, r) => (
+                      <Space size={6}>
+                        <span>{runName(r, titles)}</span>
+                        {r.backend === 'claude_desktop' && r.versions.length > 1 ? (
+                          <Tag bordered={false}>{ANALYST.versionTag(r.versions.length)}</Tag>
+                        ) : null}
+                      </Space>
+                    ),
                   },
+                  { title: ANALYST.columns.how, dataIndex: 'backend', render: (_b: Backend, r) => howLabel(r) },
                   {
                     title: ANALYST.columns.status,
                     dataIndex: 'status',
@@ -529,7 +603,7 @@ export function AnalystTab({ project, token }: { project: Project; token: string
                   {
                     title: ANALYST.columns.cost,
                     dataIndex: 'cost_usd',
-                    render: (usd: number, r) => (r.backend === 'pack' ? '$0' : `$${usd.toFixed(4)}`),
+                    render: (usd: number, r) => (r.backend === 'claude' ? `$${usd.toFixed(4)}` : '$0'),
                   },
                   {
                     title: ANALYST.columns.check,

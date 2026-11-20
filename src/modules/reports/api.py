@@ -79,6 +79,7 @@ def register_report_routes(
     *,
     projects: ProjectStore,
     analyst_runs: Callable[[str], list[object]] | None = None,
+    analyst_text: Callable[[object], str | None] | None = None,
 ) -> None:
     """Add the download routes (before the app's catch-all routes)."""
 
@@ -89,7 +90,7 @@ def register_report_routes(
             raise HTTPException(status_code=404, detail="There is no such project.") from None
 
     def build(key: str, project_id: str) -> Report | None:
-        return build_report(key, projects, project_id, analyst_runs)
+        return build_report(key, projects, project_id, analyst_runs, analyst_text)
 
     @app.get("/api/projects/{project_id}/exports")
     def catalog(project_id: str) -> dict[str, Any]:

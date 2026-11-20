@@ -344,7 +344,8 @@ class FetchWorker:
         prior = (
             self._baseline.lookup(resource.schedule_key, requested_url)
             if self._baseline is not None
-            else None
+            and not self._baseline.forced(resource.schedule_key, requested_url)
+            else None  # a page a reviewer sent back is fetched as if it were new
         )
         if prior is not None:
             self._priors[resource.resource_id] = prior

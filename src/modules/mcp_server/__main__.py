@@ -34,6 +34,7 @@ def _entry(app_url: str, scope: Scope) -> dict[str, Any]:
     return {
         "command": sys.executable,
         "args": args,
+        # with team accounts, add "CP_APP_TOKEN": "<personal access token>" (see server.py)
         "env": {"PYTHONPATH": str(REPO_ROOT), "PYTHONUTF8": "1"},
     }
 

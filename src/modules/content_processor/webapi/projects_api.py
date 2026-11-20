@@ -19,6 +19,7 @@ from __future__ import annotations
 import base64
 import binascii
 import os
+import secrets
 import tempfile
 import threading
 import zipfile
@@ -26,11 +27,11 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
-from fastapi import FastAPI, Header, HTTPException, Query
+from fastapi import FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import FileResponse
-from pydantic import Field
+from pydantic import Field, ValidationError
 
 from src.core.logger import get_logger
 from src.core.schemas import StrictModel
@@ -59,6 +60,7 @@ from src.modules.content_processor.projects.project_reports import (
 )
 from src.modules.content_processor.projects.runner import QueueEntry, ScrapeRunner
 from src.modules.content_processor.projects.security import (
+    ACTING,
     MIN_PASSWORD_LENGTH,
     AttemptLimiter,
     TokenSigner,
@@ -74,6 +76,12 @@ from src.modules.content_processor.projects.urls import (
     UnreadableFileError,
     candidates_from_file,
     candidates_from_text,
+)
+from src.modules.content_processor.projects.verdicts import (
+    VerdictDecisionOut,
+    VerdictList,
+    page_verdicts,
+    save_verdict,
 )
 from src.modules.content_processor.projects.websites import WebsiteGraph
 from src.modules.content_processor.webapi.memo import TimedMemo
@@ -166,7 +174,12 @@ class ProjectCreate(StrictModel):
     name: str = Field(min_length=1, max_length=120)
     owner_name: str = Field(min_length=1, max_length=120)
     client_name: str = Field(min_length=1, max_length=120)
-    password: str = Field(min_length=MIN_PASSWORD_LENGTH, max_length=200)
+    password: str | None = Field(
+        default=None,
+        min_length=MIN_PASSWORD_LENGTH,
+        max_length=200,
+        description="Needed without team accounts; with them, roles decide and it is not used",
+    )
     client_website: str | None = Field(default=None, max_length=500)
     client_note: str = Field(default="", max_length=MAX_NOTE_LENGTH)
     client_tags: list[str] = Field(default_factory=list, max_length=MAX_SITE_TAGS)
@@ -219,6 +232,24 @@ class Unlock(StrictModel):
     """The project password."""
 
     password: str = Field(min_length=1, max_length=200)
+
+
+class VerdictIn(StrictModel):
+    """A reviewer's decision about one page's verdict ("" clears it)."""
+
+    url: str = Field(min_length=1, max_length=4096)
+    decision: Literal["approved", "rejected", ""]
+    next_step: Literal["scrape_again", "obtain_manually", "exclude", ""] = ""
+    note: str = Field(default="", max_length=2000, description="The reason, for a rejection")
+    reviewer: str | None = Field(
+        default=None, max_length=80, description="Without team accounts: who decides"
+    )
+
+
+class DeleteIn(StrictModel):
+    """Deleting a project: its password without team accounts (with them, an admin)."""
+
+    password: str | None = Field(default=None, max_length=200)
 
 
 class Unlocked(StrictModel):
@@ -334,6 +365,11 @@ class ProjectReportOut(StrictModel):
     time_bound: int
     duplicate_pairs: int
     duplicate_pairs_across_websites: int
+    semantic_duplicates: int = 0
+    """Identical, Copy and High pairs by meaning (0 when the semantic workbook was skipped)."""
+    semantic_topic_hubs: int = 0
+    semantic_note: str = ""
+    """Why the semantic workbook is missing ('' when it was built)."""
     websites: list[ReportSourceOut]
     files: list[ReportFile]
 
@@ -352,7 +388,11 @@ def _report_out(report: ProjectReport, files: dict[str, Path]) -> ProjectReportO
     m = report.manifest
     topics = m.get("contradictions", {})
     dup = m.get("duplication", {})
+    semantic = m.get("semantic", {})
     return ProjectReportOut(
+        semantic_duplicates=int(semantic.get("duplicate_pairs", 0)),
+        semantic_topic_hubs=int(semantic.get("topic_hubs", 0)),
+        semantic_note=str(semantic.get("skipped", "")),
         stamp=report.stamp,
         built_at=datetime.fromisoformat(m["built_at"]),
         include_competitors=bool(m.get("include_competitors")),
@@ -501,6 +541,18 @@ def register_project_routes(
             confidential=record.confidential,
         )
 
+    def project_password(given: str | None) -> str:
+        """The password a new project is stored with.
+
+        Without team accounts it is required (it guards every change). With them, roles
+        decide and the project gets an unguessable password nobody needs.
+        """
+        if given:
+            return given
+        if ACTING.get() is not None:
+            return secrets.token_urlsafe(24)
+        raise HTTPException(status_code=422, detail="Give the project a password.")
+
     def require_token(project_id: str, token: str | None) -> ProjectRecord:
         record = project(project_id)
         if not signer.check(token, project_id):
@@ -585,7 +637,7 @@ def register_project_routes(
                 name=body.name,
                 owner_name=body.owner_name,
                 client_name=body.client_name,
-                password=body.password,
+                password=project_password(body.password),
                 client_site=SiteSpec(
                     name=body.client_name,
                     website=body.client_website,
@@ -636,9 +688,10 @@ def register_project_routes(
         return out(record)
 
     @app.post("/api/projects/{project_id}/delete")
-    def delete(project_id: str, body: Unlock, token: TokenHeader = None) -> dict[str, str]:
+    def delete(project_id: str, body: DeleteIn, token: TokenHeader = None) -> dict[str, str]:
         record = require_token(project_id, token)
-        if not store.check_password(project_id, body.password):
+        # with team accounts, only an admin reaches this route (the gate checked it)
+        if ACTING.get() is None and not store.check_password(project_id, body.password or ""):
             raise HTTPException(status_code=401, detail="That password is not right.")
         if any(r.status in RUN_ACTIVE for r in store.runs(project_id)):
             raise HTTPException(status_code=409, detail="Cancel the running scrapes first.")
@@ -859,6 +912,46 @@ def register_project_routes(
             return runner.resume(project_id, site_id, run_id)
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from None
+
+    @app.get("/api/projects/{project_id}/sites/{site_id}/runs/{run_id}/verdicts")
+    def verdicts(project_id: str, site_id: str, run_id: str) -> VerdictList:
+        run_state(project_id, site_id, run_id)
+        return page_verdicts(store, project_id, site_id, run_id)
+
+    @app.post("/api/projects/{project_id}/sites/{site_id}/runs/{run_id}/verdicts")
+    def save_page_verdict(
+        project_id: str,
+        site_id: str,
+        run_id: str,
+        body: VerdictIn,
+        request: Request,
+        token: TokenHeader = None,
+    ) -> VerdictDecisionOut:
+        require_token(project_id, token)  # with accounts: a reviewer or above (the gate)
+        run_state(project_id, site_id, run_id)
+        caller = getattr(request.state, "caller", None)
+        reviewer = caller.account.display_name if caller is not None else (body.reviewer or "")
+        if not reviewer.strip():
+            raise HTTPException(status_code=422, detail="Say who is deciding (your name).")
+        try:
+            return save_verdict(
+                store,
+                project_id,
+                site_id,
+                run_id,
+                url=body.url,
+                decision=body.decision,
+                next_step=body.next_step,
+                note=body.note,
+                reviewer=reviewer,
+            )
+        except KeyError:
+            raise HTTPException(
+                status_code=404, detail="That page is not part of this scrape."
+            ) from None
+        except ValidationError as exc:
+            reason = exc.errors()[0].get("msg", "invalid decision").removeprefix("Value error, ")
+            raise HTTPException(status_code=422, detail=f"Not saved: {reason}.") from None
 
     @app.get("/api/projects/{project_id}/sites/{site_id}/runs/{run_id}/downloads")
     def downloads(project_id: str, site_id: str, run_id: str) -> list[ReportFile]:

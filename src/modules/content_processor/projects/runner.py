@@ -62,6 +62,7 @@ from src.modules.content_processor.projects.models import (
 )
 from src.modules.content_processor.projects.notify import Notifier, check_email, hide_email
 from src.modules.content_processor.projects.store import ProjectNotFoundError, ProjectStore
+from src.modules.content_processor.projects.verdicts import rescrape_urls
 from src.modules.content_processor.scheduler.capture_journal import saved_capture_count
 
 __all__ = [
@@ -154,6 +155,7 @@ def build_scope(
 SKIP_FILE = "skip_fetch.json"
 LITE_FILE = "lite.json"
 """Marks a lite scan's run folder: batches skip the browser and the documents."""
+FORCE_FILE = "force_fetch.json"
 CAPTURES_DIR = "captures"
 """The run's saved responses (see `scheduler.capture_journal`); removed when it finishes."""
 
@@ -170,6 +172,8 @@ def subprocess_command(scope: Path, out: Path, cancel: threading.Event) -> int:
     extra = ["--skip-fetch", str(skip)] if skip.is_file() else []
     if (scope.parent / LITE_FILE).is_file():
         extra += ["--no-render", "--no-docs"]
+    force = scope.parent / FORCE_FILE  # pages a reviewer sent back: fetched in full
+    extra += ["--force-fetch", str(force)] if force.is_file() else []
     extra += ["--capture-journal", str(scope.parent / CAPTURES_DIR), "--exit-with-parent"]
     with log.open("w", encoding="utf-8") as sink:
         process = subprocess.Popen(  # noqa: S603 - fixed argv, no shell
@@ -415,6 +419,10 @@ class ScrapeRunner:
             folder = self._store.run_dir(project_id, site_id, run_id)
             folder.mkdir(parents=True, exist_ok=False)
             (folder / "urls.json").write_text(json.dumps(urls), encoding="utf-8")
+            forced = rescrape_urls(self._store, project_id, site_id)
+            if forced:
+                (folder / FORCE_FILE).write_text(json.dumps({"urls": forced}), encoding="utf-8")
+                skip_fetch = [u for u in skip_fetch if u not in set(forced)]
             if skip_fetch:
                 (folder / SKIP_FILE).write_text(
                     json.dumps({"urls": list(skip_fetch), "reason": skip_reason}),

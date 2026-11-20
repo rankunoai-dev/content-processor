@@ -13,6 +13,12 @@ Two kinds of item:
   context_differs).
 * `review`: keyed by the requested URL of a review-queue page; the decision is
   one of `REVIEW_ACTIONS`, with an optional free-text note.
+* `verdict`: keyed by the requested URL of any page of the scrape: the reviewer
+  approves the engine's verdict (`approved`), or rejects it (`rejected`) with a
+  reason (the note) and a next step (`VERDICT_NEXT_STEPS`): scrape it again in
+  full, obtain it by hand, or exclude it from the reports. For the review queue a
+  verdict reads as the matching action (approved = accept_as_is, scrape_again =
+  retry_later, obtain_manually, exclude); a later `review` line still wins.
 
 The `report` command and dry runs read the log and pre-fill R4's
 `reviewer_decision` and the review queue's `operator_action` /
@@ -38,6 +44,9 @@ __all__ = [
     "REVIEW_ACTIONS",
     "Decision",
     "DecisionKind",
+    "VERDICT_DECISIONS",
+    "VERDICT_NEXT_STEPS",
+    "verdict_decisions",
     "append_decision",
     "contradiction_decisions",
     "current_decisions",
@@ -48,7 +57,15 @@ __all__ = [
 ]
 
 DECISIONS_SUFFIX = ".decisions.jsonl"
-DecisionKind = Literal["contradiction", "review"]
+DecisionKind = Literal["contradiction", "review", "verdict"]
+VERDICT_DECISIONS: frozenset[str] = frozenset({"approved", "rejected"})
+VERDICT_NEXT_STEPS: frozenset[str] = frozenset({"scrape_again", "obtain_manually", "exclude"})
+_VERDICT_AS_ACTION = {
+    "approved": "accept_as_is",
+    "scrape_again": "retry_later",
+    "obtain_manually": "obtain_manually",
+    "exclude": "exclude",
+}
 
 REVIEW_ACTIONS: frozenset[str] = frozenset(
     {
@@ -74,16 +91,31 @@ class Decision(StrictModel):
     key: str = Field(min_length=1, max_length=4096)
     decision: str = Field(default="", max_length=40)
     note: str = Field(default="", max_length=2000)
+    next_step: str = Field(default="", max_length=40, description="verdict: after a rejection")
 
     @model_validator(mode="after")
     def _known_decision(self) -> Decision:
         """Only the decisions the reports understand are accepted (empty clears)."""
-        allowed = REVIEWER_DECISIONS if self.kind == "contradiction" else REVIEW_ACTIONS
+        allowed = {
+            "contradiction": REVIEWER_DECISIONS,
+            "review": REVIEW_ACTIONS,
+            "verdict": VERDICT_DECISIONS,
+        }[self.kind]
         if self.decision and self.decision not in allowed:
             msg = f"unknown {self.kind} decision {self.decision!r}"
             raise ValueError(msg)
         if self.kind == "contradiction" and self.note:
             msg = "contradiction decisions have no note"
+            raise ValueError(msg)
+        if self.kind != "verdict" or self.decision != "rejected":
+            if self.next_step:
+                msg = "only a rejected verdict has a next step"
+                raise ValueError(msg)
+        elif self.next_step not in VERDICT_NEXT_STEPS:
+            msg = "a rejected verdict needs a next step (scrape again, obtain by hand, exclude)"
+            raise ValueError(msg)
+        elif not self.note.strip():
+            msg = "a rejected verdict needs a reason"
             raise ValueError(msg)
         return self
 
@@ -142,13 +174,23 @@ def contradiction_decisions(log: Iterable[Decision]) -> dict[str, str]:
     }
 
 
+def verdict_decisions(log: Iterable[Decision]) -> dict[str, Decision]:
+    """`url -> the current verdict decision` (approved, or rejected with a next step)."""
+    return {key: d for (kind, key), d in current_decisions(log).items() if kind == "verdict"}
+
+
 def review_decisions(log: Iterable[Decision]) -> dict[str, tuple[str, str]]:
-    """`url -> (action, note)` for the review queue."""
-    return {
-        key: (d.decision, d.note)
-        for (kind, key), d in current_decisions(log).items()
-        if kind == "review"
+    """`url -> (action, note)` for the review queue: review lines, else verdicts as actions."""
+    current = current_decisions(log)
+    out = {
+        key: (_VERDICT_AS_ACTION[d.next_step or d.decision], d.note)
+        for (kind, key), d in current.items()
+        if kind == "verdict"
     }
+    out.update(
+        {key: (d.decision, d.note) for (kind, key), d in current.items() if kind == "review"}
+    )
+    return out
 
 
 def merge_carried(

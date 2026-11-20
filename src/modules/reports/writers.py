@@ -76,6 +76,8 @@ class Report:
     tables: list[Table] = field(default_factory=list)
     data: Any = None
     """The module's own record (JSON-ready), added to the JSON download as `data`."""
+    documents: list[tuple[str, str]] = field(default_factory=list)
+    """(heading, Markdown) texts written out in full in the Word file only."""
 
 
 def word_available() -> bool:
@@ -223,6 +225,10 @@ def _write_docx(report: Report, path: Path) -> Path:
             _note(doc, "Nothing to list.")
             continue
         _word_table(doc, table)
+    for heading, markdown in report.documents:
+        doc.add_page_break()
+        doc.add_heading(heading, level=1)
+        _markdown_into(doc, markdown, shift=1)
     doc.save(str(target))
     return target
 
@@ -651,13 +657,22 @@ def _md_table(doc: Any, rows: Sequence[Sequence[str]]) -> None:
 def markdown_to_docx(markdown: str, path: Path, title: str) -> Path:
     """A Word document from Markdown: headings, paragraphs, lists, tables, quotes, bold, links."""
     doc = _document(title)
+    _markdown_into(doc, markdown)
+    target = path.with_suffix(".docx")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    doc.save(str(target))
+    return target
+
+
+def _markdown_into(doc: Any, markdown: str, *, shift: int = 0) -> None:
+    """Append Markdown to an open document; `shift` moves every heading down that many levels."""
     for block in _markdown_blocks(markdown):
         if block.kind == "table":
             _md_table(doc, block.rows)
         elif block.kind == "code":
             doc.add_paragraph().add_run(block.text).font.name = "Consolas"
         elif block.kind == "heading":
-            doc.add_heading(block.text, level=block.level)
+            doc.add_heading(block.text, level=min(block.level + shift, 4))
         elif block.kind == "bullet":
             _inline(doc.add_paragraph(style="List Bullet"), block.text)
         elif block.kind == "numbered":
@@ -666,10 +681,6 @@ def markdown_to_docx(markdown: str, path: Path, title: str) -> Path:
             _inline(doc.add_paragraph(style="Intense Quote"), block.text)
         else:
             _inline(doc.add_paragraph(), block.text)
-    target = path.with_suffix(".docx")
-    target.parent.mkdir(parents=True, exist_ok=True)
-    doc.save(str(target))
-    return target
 
 
 def _pdf_inline(text: str, font: _PdfFont) -> tuple[str, int]:

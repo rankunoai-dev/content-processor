@@ -4,6 +4,8 @@ import { lazy, useEffect, useState, type ReactNode } from 'react';
 import { BrowserRouter, Route, Routes } from 'react-router-dom';
 import { createQueryClient } from './api/queries';
 import { AppLayout } from './components/AppLayout';
+import { AuthGate } from './components/AuthGate';
+import { AccountsPage } from './routes/AccountsPage';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { usePreferences } from './state/preferences';
 
@@ -51,6 +53,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
 export function AppRoutes() {
   return (
+    <AuthGate>
     <Routes>
       <Route element={<AppLayout />}>
         <Route index element={<HomePage />} />
@@ -59,6 +62,7 @@ export function AppRoutes() {
         <Route path="projects" element={<ProjectsPage />} />
         <Route path="projects/:projectId" element={<ProjectPage />} />
         <Route path="queue" element={<QueuePage />} />
+        <Route path="accounts" element={<AccountsPage />} />
         <Route path="runs/:runId" element={<OverviewPage />} />
         <Route path="runs/:runId/pages" element={<PagesPage />} />
         <Route path="runs/:runId/pages/:pageKey" element={<PageDetailPage />} />
@@ -69,6 +73,7 @@ export function AppRoutes() {
         <Route path="*" element={<NotFoundPage />} />
       </Route>
     </Routes>
+    </AuthGate>
   );
 }
 

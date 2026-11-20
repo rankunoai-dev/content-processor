@@ -6,6 +6,7 @@
  * Every change carries the project's unlock token (from creating the project or
  * from unlocking it with the password); tokens live in memory only.
  */
+import { roleAtLeast, useMe } from './auth';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
@@ -166,6 +167,11 @@ export interface ProjectReport {
   time_bound: number;
   duplicate_pairs: number;
   duplicate_pairs_across_websites: number;
+  /** Identical, Copy and High pairs by meaning (0 when the semantic workbook was skipped). */
+  semantic_duplicates: number;
+  semantic_topic_hubs: number;
+  /** Why the semantic workbook is missing ('' when it was built). */
+  semantic_note: string;
   websites: ReportSource[];
   files: ReportFile[];
 }
@@ -216,7 +222,8 @@ export interface NewProject {
   name: string;
   owner_name: string;
   client_name: string;
-  password: string;
+  /** Needed without team accounts; with them, roles decide. */
+  password?: string;
   client_website: string | null;
   client_note?: string;
   /** The client's other websites or brands: never its competitors. */
@@ -312,8 +319,12 @@ export const useProjectTokens = create<TokenState>()(
 );
 
 /** The project's token while it is valid, else null. */
+/** The project's unlock token; with team accounts, a placeholder for editors and admins
+ * (their role is checked by the server) and null for viewers and reviewers. */
 export function useProjectToken(projectId: string): string | null {
   const entry = useProjectTokens((s) => s.tokens[projectId]);
+  const me = useMe();
+  if (me.data?.accounts) return roleAtLeast(me.data.account?.role, 'editor') ? 'account' : null;
   if (!entry || entry.expiresAt <= Date.now()) return null;
   return entry.token;
 }
@@ -385,8 +396,8 @@ export const projectsApi = {
   unlock: (id: string, password: string) => post<Unlocked>(`${projectPath(id)}/unlock`, { password }),
   update: (id: string, change: ProjectChange, token: string | null) =>
     post<Project>(`${projectPath(id)}/update`, change, token),
-  remove: (id: string, password: string, token: string | null) =>
-    post<{ deleted: string }>(`${projectPath(id)}/delete`, { password }, token),
+  remove: (id: string, password: string | null, token: string | null) =>
+    post<{ deleted: string }>(`${projectPath(id)}/delete`, password ? { password } : {}, token),
 
   addSite: (id: string, site: SiteInput, token: string | null) =>
     post<Site>(`${projectPath(id)}/sites`, site, token),
