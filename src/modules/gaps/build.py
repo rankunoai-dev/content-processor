@@ -123,6 +123,12 @@ def _theme_findings(
         rivals = [c for c in theme.coverage if roles.get(c.website) == "competitor" and c.pages]
         client_pages = sum(c.pages for c in client)
         rival_pages = max((c.pages for c in rivals), default=0)
+        rival_inferred = max((c.inferred for c in rivals), default=0)
+        more = (
+            f" (and about {rival_inferred:,} more in a sitemap, judged by their addresses)"
+            if rival_inferred
+            else ""
+        )
         volume = demand.get(theme.theme_id, 0)
         pillars = [
             EvidenceItem(
@@ -137,7 +143,8 @@ def _theme_findings(
         counts = [
             EvidenceItem(
                 kind="count",
-                label=f"{c.website}: {c.pages} pages",
+                label=f"{c.website}: {c.pages} pages"
+                + (f" + about {c.inferred} in its sitemap" if c.inferred else ""),
                 website=c.website,
                 value=c.pages,
             )
@@ -150,8 +157,8 @@ def _theme_findings(
                     theme.theme_id,
                     theme=theme,
                     title=f"No client content on {theme.label}",
-                    detail=f"Competitors cover it with up to {rival_pages} pages; the client has none."
-                    + (f" About {volume:,} searches a month." if volume else ""),
+                    detail=f"Competitors cover it with up to {rival_pages} pages{more}; the client "
+                    "has none." + (f" About {volume:,} searches a month." if volume else ""),
                     action="Create a pillar page for this theme, then supporting pages for its topics; "
                     "use the competitors' pillar pages as the benchmark.",
                     competitors=[c.website for c in rivals],
@@ -167,8 +174,8 @@ def _theme_findings(
                     theme.theme_id,
                     theme=theme,
                     title=f"Behind on {theme.label}",
-                    detail=f"A competitor has {rival_pages} pages against the client's {client_pages}."
-                    + (f" About {volume:,} searches a month." if volume else ""),
+                    detail=f"A competitor has {rival_pages} pages{more} against the client's "
+                    f"{client_pages}." + (f" About {volume:,} searches a month." if volume else ""),
                     action="Expand the client's coverage: add the subtopics competitors cover and "
                     "strengthen the pillar page.",
                     competitors=[c.website for c in rivals if c.pages > client_pages],
@@ -633,4 +640,14 @@ def build_findings(
     if catalogs:
         findings += _offering_findings(catalogs, roles)
     findings += _unwatched_findings(suggested, client_domains)
+    findings = [_with_basis(f, theme_map) for f in findings]
     return sorted(findings, key=lambda f: (-f.priority, f.kind, f.title))
+
+
+def _with_basis(finding: Finding, theme_map: ThemeMap) -> Finding:
+    """A finding naming a lite-scanned competitor says what its figures rest on."""
+    lite = {w.website: w.basis for w in theme_map.websites if w.scan == "lite" and w.basis}
+    named = [w for w in finding.competitors if w in lite]
+    if not named:
+        return finding
+    return finding.model_copy(update={"basis": "; ".join(f"{w}: {lite[w]}" for w in named)})

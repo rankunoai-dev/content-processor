@@ -41,3 +41,7 @@ John Hancock + Flynn's offline test project (no research yet): 15 findings in un
 
 - A multi-project playground screen (one project at a time for now).
 - Ranking drops as findings (monitoring of research movers).
+
+## Lite-scanned competitors
+
+See [MODULE_LITE_SCAN.md](MODULE_LITE_SCAN.md): `Finding.basis` names what a lite-scanned competitor's figures rest on; theme gap details add the inferred sitemap pages; workbook column "Based on".

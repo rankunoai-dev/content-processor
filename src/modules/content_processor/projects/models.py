@@ -138,3 +138,8 @@ class RunState(StrictModel):
         default=False, description="started after its turn came: runs before the waiting line"
     )
     turn_at: datetime | None = Field(default=None, description="when its turn came (ready)")
+    scan: Literal["full", "lite"] = Field(
+        default="full",
+        description="lite: a capped sample of a big website, plain downloads only "
+        "(never compared page by page with a full scrape)",
+    )

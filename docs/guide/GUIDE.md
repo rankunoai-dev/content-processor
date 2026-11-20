@@ -1,6 +1,6 @@
 # Content Processor: A Plain-Language Guide
 
-Last updated: 20 November 2026 · Code version: main after reviewing verdicts in the app, team accounts (sign-in and roles), PDF downloads and monitoring downloads (JSON for every report, competitor moves, price and template changes, the monitoring history); plus adjustable browser waiting times for slow connections; plus answers written in Claude Desktop saved into the project; plus the semantic similarity workbook (same content in different words) in every project report; plus topic drift in Monitoring (a changed page compared with its old version by meaning)
+Last updated: 20 November 2026 · Code version: main with the competitor lite scan, reviewing verdicts in the app, team accounts (sign-in and roles), PDF and JSON downloads and the monitoring downloads; plus topic drift in Monitoring (a changed page compared with its old version by meaning)
 
 ## 1. What this is, in one paragraph
 
@@ -419,6 +419,17 @@ Each finding says why, gives the evidence with links, how many searches a month 
 
 On the John Hancock test project (with a printing-security competitor, no research yet) the analysis took under a second: 15 findings, one missing theme (the competitor's print-security subject) and 14 offerings the client does not have, as expected for two unrelated companies.
 
+### Step 20b: Lite scan (comparing with a big competitor without scraping all of it)
+
+Finding gaps means knowing what competitors cover, but scraping every page of a 5,000-page competitor takes hours. A **lite scan** gets most of the picture in minutes:
+
+1. **The list of every page, almost for free.** Most websites publish a sitemap: a list of every page they want search engines to find. Reading it takes a few requests and gives the whole inventory (up to 200,000 addresses), grouped by section (/blog, /products, /help...).
+2. **A sample, not everything.** Up to 150 pages are scraped (adjustable): any page a person pins, the pages that rank in the search data (the ones that bring the competitor visitors), the core pages (pricing, products, solutions, the home page) and a few pages from every section, more from the bigger ones. The sample uses plain downloads only: no browser, no documents, no paid access, nothing followed beyond the listed pages, so it costs nothing and is quick.
+3. **The rest is estimated, and says so.** Pages that were not scraped are placed into the theme map's subjects by the words of their address (`/insurance/term-life-quotes` looks like the term life theme). They are shown as "inferred from the sitemap" next to the real counts and never decide who owns a theme.
+4. **Every gap states its basis.** A gap that involves a lite-scanned competitor says, for example, "rival.com: based on 150 of about 5,000 pages (lite scan)", and the Gaps tab marks it as probable. When a gap matters, add those pages to the competitor and run a normal scrape to confirm it.
+
+The **Lite scan** card is on each competitor website's Scrape view (after unlocking the project); it shows the latest scan's basis and its sections. Monitoring never compares a sample with a full scrape (that would look like thousands of pages added or removed); it compares a lite scan only with the previous lite scan, page by page for the pages both samples share. A scheduled recrawl of a website followed by lite scans runs another lite scan. Client websites always get a full scrape.
+
 ### Step 21: Working with Claude Desktop and claude.ai (no API key)
 
 Two ways to use your own Claude account with the app, without an API key or API costs:
@@ -552,6 +563,7 @@ On the John Hancock scrape the Review tab opens on four pages out of 306: a PDF 
 | Date | Significant change |
 |---|---|
 | 2026-11-20 | Topic drift in Monitoring: each changed page's old and new versions are compared by meaning with the knowledge base's model (0 to 1). Below 0.85 the page changed topic, shown on the page in the Monitoring tab and in the workbook; a competitor page that changed topic raises an alert, high on a pillar page. Also: the safety check now reads the newer kind of internet address some networks give (NAT64) correctly, so those websites are no longer refused while private addresses stay blocked. |
+| 2026-11-20 | Competitor lite scan: a big competitor website is read through its sitemap and a sample of up to 150 pages (ranking pages, core pages and a few from every section) is scraped with plain downloads, at no cost. Unscraped pages are counted in the theme map as "inferred" by their address, every gap says what it is based on ("150 of about 5,000 pages") and is marked probable, and monitoring compares a lite scan only with the previous one. |
 | 2026-11-17 | Reviewing verdicts in the app: a Review tab lists each scrape's pages with the engine's verdict; reviewers approve it, or reject it with a reason and a next step (scrape again in full on the next scrape, get it by hand, or exclude from the project reports), saved with who, when and the history. |
 | 2026-11-17 | Semantic similarity in every project report: pages that say the same thing in different words, scored by meaning on their own content after site furniture is removed, in tiers Identical / Copy / High / Moderate, with recurring series (the same notice issued again and again) set aside, repeated blocks, topic hubs and flags; a Method sheet in plain words; offered in Downloads too. On John Hancock: the podcast pair at 0.82 with 14% shared words, the correction as a Copy, 32 identical form pages, 243 notices in 6 series. |
 | 2026-11-17 | The browser's waiting times are settings (`CP_RENDER_NAVIGATION_TIMEOUT_S`, `CP_RENDER_MAX_PAGE_TIME_S`, `CP_RENDER_SETTLE_WINDOW_S`), read by each batch as it starts, so a slow connection no longer fails every page at a fixed 30 seconds and pauses the website. A page that only ran out of time is reported as "render_timeout", apart from a website that is really broken. |

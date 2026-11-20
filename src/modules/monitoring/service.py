@@ -96,6 +96,7 @@ def recrawl_project(
     now: datetime | None = None,
 ) -> RecrawlPlan:
     """Plan a recrawl and (unless a preview) queue a scrape per website with its skips."""
+    from src.modules.lite_scan.service import latest_lite_run, start_lite_scan
     from src.modules.monitoring.recrawl import plan_project
     from src.modules.theming.service import theme_store
 
@@ -113,6 +114,29 @@ def recrawl_project(
     if trigger != "preview" and runner is not None:
         sites = []
         for site in plan.sites:
+            if latest_lite_run(projects.runs(project_id, site.site_id)) is not None:
+                # a website followed by lite scans is refreshed with another lite scan
+                try:
+                    found, state = start_lite_scan(
+                        projects,
+                        runner,
+                        project_id,
+                        site.site_id,
+                        started_by=f"{trigger} recrawl",
+                        http=http,
+                    )
+                except ValueError as exc:
+                    sites.append(site.model_copy(update={"note": str(exc)}))
+                    continue
+                sites.append(
+                    site.model_copy(
+                        update={
+                            "run_id": state.run_id,
+                            "note": f"lite scan repeated: {found.basis()}",
+                        }
+                    )
+                )
+                continue
             if site.check == 0:
                 sites.append(site.model_copy(update={"note": "nothing due: no scrape queued"}))
                 continue

@@ -320,6 +320,9 @@ def create_app(
         register_project_routes(
             app, store=project_store, runner=runner, signer=signer, knowledge=knowledge
         )
+        from src.modules.lite_scan.api import register_lite_routes
+
+        register_lite_routes(app, projects=project_store, runner=runner, signer=signer)
         if analyst is not None:
             from src.modules.analyst.api import register_analyst_routes
 

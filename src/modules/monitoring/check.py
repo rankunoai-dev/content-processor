@@ -154,10 +154,18 @@ def _site_diffs(
                 )
             )
             continue
-        baseline = next((r for r in runs if r.run_id == base_id), None) if base_id else None
-        if baseline is None and len(runs) >= 2:
-            baseline = runs[-2]
+        # A lite scan is a sample: compared page by page only with an earlier lite scan.
+        same = [r for r in runs[:-1] if r.scan == latest.scan]
+        baseline = next((r for r in same if r.run_id == base_id), None) if base_id else None
+        if baseline is None and same:
+            baseline = same[-1]
         if baseline is None:
+            first = (
+                "first lite scan: kept as the baseline for the next lite scan (a sample is "
+                "never compared page by page with a full scrape)"
+                if latest.scan == "lite"
+                else "first scrape: kept as the baseline for the next check"
+            )
             diffs.append(
                 SiteDiff(
                     website=website.key,
@@ -165,7 +173,7 @@ def _site_diffs(
                     role=role,
                     latest_run=latest.run_id,
                     latest_at=latest.finished_at,
-                    note="first scrape: kept as the baseline for the next check",
+                    note=first,
                 )
             )
             continue
@@ -179,6 +187,11 @@ def _site_diffs(
         result = diff_runs(old, new)
         added, removed, changed = result.added, result.removed, result.changed
         unchanged = result.unchanged
+        sample_note = ""
+        if latest.scan == "lite":
+            # two samples hold different pages: a page in only one is not new or removed
+            added, removed = [], []
+            sample_note = "lite scans: only pages in both samples are compared"
 
         def ref(url: str, title: str | None, themes: dict[str, tuple[str, str]]) -> PageRef:
             theme = themes.get(url)
@@ -217,6 +230,7 @@ def _site_diffs(
                 drift=round((len(added) + len(removed) + len(changed)) / max(total, 1), 3),
                 meaning_model=meaning_model,
                 meaning_note=meaning_note,
+                note=sample_note,
             )
         )
     return diffs

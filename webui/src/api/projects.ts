@@ -45,6 +45,8 @@ export interface RunState {
   /** Started after its turn came: runs before the waiting line. */
   jump: boolean;
   turn_at: string | null;
+  /** lite: a capped sample of a big competitor website (plain downloads only). */
+  scan?: 'full' | 'lite';
 }
 
 /** How a scrape waits for its turn: one scrape runs at a time on the whole app. */
