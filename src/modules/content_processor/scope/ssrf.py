@@ -24,6 +24,10 @@ _METADATA_NETS = (
     ipaddress.ip_network("100.100.100.200/32"),  # Alibaba Cloud metadata
 )
 _CGNAT = ipaddress.ip_network("100.64.0.0/10")
+# RFC 6052 well-known NAT64 prefix: a DNS64 resolver answers it for IPv4-only sites, with
+# the site's IPv4 address in the last 32 bits. The local-use prefix 64:ff9b:1::/48 is not
+# included (it stays non-public).
+_NAT64 = ipaddress.ip_network("64:ff9b::/96")
 
 
 class IpClass(StrEnum):
@@ -58,6 +62,8 @@ def classify_ip(address: str) -> IpClass:
         return IpClass.INVALID
     if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
         ip = ip.ipv4_mapped
+    elif isinstance(ip, ipaddress.IPv6Address) and ip in _NAT64:
+        ip = ipaddress.IPv4Address(int(ip) & 0xFFFFFFFF)  # judged by the IPv4 it carries
     if any(ip in net for net in _METADATA_NETS):
         return IpClass.METADATA
     if ip.is_unspecified:

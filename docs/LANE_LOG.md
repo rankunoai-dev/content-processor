@@ -1065,3 +1065,11 @@ git worktree add ../content-processor-lane4 -b lane/L4-verify
 - **Also:** while trying the first live check I recreated `C:\cpdl\data\accounts\accounts.json` (two throwaway test accounts) after the user had deleted `C:\cpdl`; removing it was refused by the safety check, so the user was asked to delete it.
 - **Tests:** `test_verdicts.py` 5 (decision rules and review-queue mapping; listing, history, follow-ups and the next submit's force and skip files; excluded pages left out of the project reports; API without accounts; API with accounts: viewer refused, reviewer named from the account), `test_recrawl_e2e.py` +1 (a page sent back is fetched with a plain GET and re-extracted even when planned to skip). Web `review.test.tsx` 1.
 - **Gate:** `scripts/verify.ps1 -Fix` ALL GATES PASSED (a first run stopped with pytest exit code 4 during tests; the suite alone then passed 1,477, and the rerun passed). Web: `tsc -b`, `eslint`, `vitest`, `vite build`.
+
+## [2026-11-20] Safety check reads NAT64 addresses; faster CPU-model check
+
+- **Branch / worktree:** `fix/nat64-and-fastembed-check` at `../content-processor-fixes` (on main `2083e34`).
+- **Why:** this machine's network sometimes answers DNS with NAT64 addresses (`64:ff9b::/96`, RFC 6052) next to the public IPv4 ones. The egress check treated them as reserved and refused whole public sites (`egress_denied:rebinding_suspected`). Separately, checking whether the CPU embedding model is installed imported `fastembed`, which loads onnxruntime.
+- **What landed:** `scope/ssrf.py` judges a NAT64 address by the IPv4 address it carries, so a NAT64 address of a private or loopback IPv4 address is still refused. `knowledge/cpu_embedder.py` `cpu_available()` uses `importlib.util.find_spec` and no longer imports the package.
+- **Tests:** `test_ssrf.py` +1 (public NAT64 allowed; NAT64 of 127.0.0.1, 10.x and 169.254.169.254 refused); `test_cpu_fallback.py` updated for the spec check.
+- **Guide:** no entry; the safety promise is unchanged (private addresses stay blocked).
