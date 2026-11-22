@@ -47,7 +47,11 @@ from src.modules.content_processor.adapters.office import (
     extract_office,
     is_legacy_ole,
 )
-from src.modules.content_processor.adapters.pdf import PdfExtraction, extract_pdf
+from src.modules.content_processor.adapters.pdf import (
+    PASSWORD_PROTECTED,
+    PdfExtraction,
+    extract_pdf,
+)
 from src.modules.content_processor.contracts import (
     ContentBlock,
     Gap,
@@ -507,6 +511,13 @@ class DocWorker:
             run_id=self._run_id,
             evidence_id=evidence_id,
         )
+        if extraction.password_protected:
+            # Nothing can be read without the password: an access barrier for a person to
+            # resolve (obtain the file), not a format we fail to read; no OCR is attempted.
+            reason = f"{PASSWORD_PROTECTED};pages={extraction.page_count}"
+            self._gap(resource, GapType.ACCESS_BLOCKED, EntityStatus.BLOCKED, reason, evidence_id)
+            self._finish(task, resource, EntityStatus.BLOCKED, reason)
+            return
         if extraction.page_count == 0 and not extraction.blocks:
             reason = ";".join(extraction.warnings) or "pdf_unreadable"
             self._gap(

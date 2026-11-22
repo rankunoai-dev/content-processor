@@ -306,6 +306,8 @@ def completeness(record: UrlRecord, text: str, confirmed_pct: float | None) -> s
     if badge is UrlBadge.RUNNING:
         return "Not processed yet"
     if badge is UrlBadge.BLOCKED:
+        if any(g.reason.startswith("password_protected_pdf") for g in record.gaps):
+            return "Not captured: the file is password-protected"
         return "Not captured: the website blocked access"
     if badge is UrlBadge.FAILED:
         return "Not captured: the page did not load"
