@@ -151,11 +151,17 @@ def _embed_all(
     report: IndexReport,
     progress: Callable[[int, int], None] | None,
 ) -> dict[str, list[float]]:
-    """Vectors for {hash: text}, in batches; one retry per batch, then a clear error."""
+    """Vectors for {hash: text}, in batches.
+
+    A batch that fails twice is split in half and each half retried, so one oversized or
+    unlucky group cannot sink the run (RFC 0004, B4). Every vector must have the same size
+    as the first one (B7); a model that answers with another size is an error, not data.
+    """
     keys = list(texts)
     out: dict[str, list[float]] = {}
-    for start in range(0, len(keys), EMBED_BATCH):
-        part = keys[start : start + EMBED_BATCH]
+    dims: list[int] = []
+
+    def embed_part(part: list[str]) -> None:
         vectors = None
         for _attempt in range(2):
             report.embed_calls += 1
@@ -163,9 +169,29 @@ def _embed_all(
             if vectors is not None:
                 break
         if vectors is None:
-            msg = f"embedding failed twice for a batch of {len(part)} texts ({embedder.model})"
+            if len(part) > 1:
+                middle = len(part) // 2
+                embed_part(part[:middle])
+                embed_part(part[middle:])
+                return
+            msg = f"embedding failed twice for a text ({embedder.model})"
             raise RuntimeError(msg)
+        for vector in vectors:
+            if not dims:
+                if not vector:
+                    msg = f"{embedder.model} returned an empty vector"
+                    raise RuntimeError(msg)
+                dims.append(len(vector))
+            if len(vector) != dims[0]:
+                msg = (
+                    f"{embedder.model} returned {len(vector)}-number vectors after "
+                    f"{dims[0]}-number ones; the store cannot hold both"
+                )
+                raise RuntimeError(msg)
         out.update(zip(part, vectors, strict=True))
+
+    for start in range(0, len(keys), EMBED_BATCH):
+        embed_part(keys[start : start + EMBED_BATCH])
         if progress is not None:
             progress(min(start + EMBED_BATCH, len(keys)), len(keys))
     return out
@@ -190,7 +216,16 @@ def index_run(
     if stored_model and stored_model != embedder.model:
         if model_rank(embedder.model) > model_rank(stored_model):
             # a better model is here (bge-m3 over the CPU model, either over hashing):
-            # start the store again with it rather than refuse
+            # start the store again with it rather than refuse. First a test request: a
+            # model server that is down right now must not cost the store its vectors (B5).
+            probe = embedder.embed(["probe"])
+            if not probe or not probe[0]:
+                msg = (
+                    f"{embedder.model} did not answer, so the store still holds "
+                    f"{stored_model} vectors; nothing was changed. Try again when the "
+                    "model server is running"
+                )
+                raise ModelMismatchError(msg)
             store.reset()
             upgraded_from = stored_model
         else:

@@ -1089,3 +1089,32 @@ git worktree add ../content-processor-lane4 -b lane/L4-verify
 - **What landed:** `monitoring/meaning.py` (`page_meaning`: own lines embedded with the website's index model through `access.embedder_for`, normalised mean per version, cosine; thin versions under 20 words not scored; line vectors cached in `<app data>/monitoring/meaning.sqlite` via `analysis.semantic.VectorCache`). `diff.py` keeps each changed page's lines without template lines and site furniture (`furniture()`: 5+ pages or 2%). `PageChange.meaning`, `SiteDiff.meaning_model` / `meaning_note`, stats `topic_drift_pages`, alert `competitor_topic_drift` (below `CP_MONITOR_TOPIC_DRIFT` 0.85; high on a pillar). Words-only index or failing model: a note, the check still finishes. `CP_MONITOR_MEANING` turns it off. Workbook column "Meaning (old vs new)" and "Meaning model"; web tag "Same topic 0.97" / "Topic changed 0.62". Docs: MODULE_MONITORING topic drift section, GUIDE step 18 and change-log row.
 - **Measured (johnhancock.com, CPU model, read-only, cache in scratch):** without furniture removal, pages of different sections scored median 0.96 (no alert possible); with it, 68 cross-section pairs all below 0.85 (median 0.38), 40 pages plus three paragraphs all above (median 0.99), 38 pages against their own first half median 0.96 with 2 below. No project has two scrapes of one website yet (the John Hancock backup's older scrape has no stamps), so a real before/after check is still to come.
 - **Tests:** `test_topic_drift.py` 4 (rewording high, new topic low, thin not scored, cache reuse, model failure; alert rule and pillar severity; end to end words-only note then meaning model scoring and alert, workbook column; furniture left out). Web `monitoring.test.tsx` asserts the tag.
+
+## [2026-11-16] Branch feat/multilingual-bge-m3: plan (RFC 0004) and slice 1
+
+- **Plan:** `docs/rfc/0004-multilingual-embeddings-bge-m3.md`: current state, 12 breaking points, architecture, four slices, acceptance, decisions needed, edge cases.
+- **Slice 1 landed:** `retrieval.hybrid_search` refuses a query prepared with a different model than the store's vectors (`EmbedderMismatchError`, a `RuntimeError`). Before, a size mismatch crashed with a raw `ValueError` and a same-size mismatch would rank silently. Federated search already falls back to exact words on this error.
+- **Not done:** Ollama is not installed here; bge-m3 has not been run. Slices 2–4 need the decisions in RFC section 7.
+
+## [2026-11-17] Branch feat/multilingual-bge-m3: RFC 0004 slice 2
+
+- **Landed:** `_embed_all` splits a batch that fails twice into halves (B4); every vector must match the first one's size or the run stops (B7); before an upgrade clears the store, the new model must answer a probe, so a model server that is down keeps the store's vectors (B5, partly: a failure halfway through still needs resume, which slice 3 covers).
+- **Tests:** `test_index_upgrade_safety.py` (split, size, probe).
+- **Known, not caused by this branch:** `test_cli::test_plan_johnhancock_scope_is_single_host_t3_ceiling` fails on main too. Browser tests (`test_explorer`, `test_single_pass_capture`, `test_site_controls`) fail intermittently under `pytest -n auto` on main and here; each passes alone.
+
+## [2026-11-20] Branch feat/multilingual-bge-m3: measurement harness (slice 3 prep)
+
+- **Landed:** draft cross-language dataset (`fixtures/meaning/cross_language.json`, marked DRAFT); `knowledge/meaning_eval.py`; `scripts/measure_meaning.py`; tests; RFC 0004 addendum with the words-only baseline.
+- **Not done (need approval):** install Ollama and pull bge-m3; CPU MiniLM measurement (model not cached, would download); reviewed dataset.
+- **Flaky under `-n auto`:** browser timing tests (`test_settle_window`, `test_explorer`, `test_single_pass_capture`); each passes alone.
+
+## [2026-11-22] Branch feat/multilingual-bge-m3: slice 3 measured and verified
+
+- **What landed:** Ollama `v0.40.16` installed on local host (`C:\Users\RankUno\AppData\Local\Programs\Ollama\ollama.exe`) listening on `127.0.0.1:11434`; model `bge-m3:latest` pulled (1.2 GB, 1024-d, 8,192 token context window).
+- **Measurement (`scripts/measure_meaning.py` on `fixtures/meaning/cross_language.json`):**
+  - Baseline words-only (hashing): recall@3 0.90, cross-language recall@3 0.00.
+  - CPU MiniLM fallback: recall@3 1.00, cross-language recall@3 0.90 (passages capped at 128 tokens).
+  - Ollama `bge-m3`: recall@1 1.00, recall@3 1.00, MRR 1.00, cross-language recall@3 1.00.
+  - Passage embedding: 12 passages in 2.80 s; mean query latency 47 ms (warmed, GPU accelerated).
+- **RFC:** `docs/rfc/0004-multilingual-embeddings-bge-m3.md` updated with Section 10 measured results.
+

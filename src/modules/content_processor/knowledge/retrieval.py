@@ -180,6 +180,15 @@ def offering_scope(store: VectorStore, offering: str | None) -> set[str] | None:
     return scope
 
 
+class EmbedderMismatchError(RuntimeError):
+    """The query was prepared with a different model than the store's vectors were made with.
+
+    Vectors from two models are not comparable (and differ in size), so the search refuses
+    instead of returning meaningless ranking. Federated search catches it and falls back
+    to exact words; a single-store search reports it.
+    """
+
+
 def hybrid_search(
     store: VectorStore,
     embedder: Embedder,
@@ -190,6 +199,14 @@ def hybrid_search(
     pool: int = _POOL,
 ) -> list[SearchHit]:
     """The `top_k` best passages for `query`, vector and keyword results fused by RRF."""
+    stored = store.meta().get("model")
+    if stored and stored != embedder.model:
+        msg = (
+            f"this site was indexed with {stored}, but the query was prepared with "
+            f"{embedder.model}. Bring {stored} back (run: ollama pull {stored}) or re-index "
+            "the site with the model you want."
+        )
+        raise EmbedderMismatchError(msg)
     scope = offering_scope(store, offering)
     vectors = embedder.embed([query])
     if vectors is None:
