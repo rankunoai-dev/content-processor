@@ -52,6 +52,66 @@ _DISCLAIMER_KEYWORDS = re.compile(
 )
 
 
+PASSWORD_PROTECTED = "password_protected_pdf"  # noqa: S105 - a gap reason, not a password
+
+# Running headers and footers: short lines in the top or bottom band of the page that
+# repeat on most pages ("Annual Report 2025", "Page 3 of 40", "© Acme. Confidential").
+_TOP_BAND = 0.12  # block ends within the top 12% of the page height
+_BOTTOM_BAND = 0.88  # block starts below 88% of the page height
+_RUNNING_MAX_CHARS = 200
+_RUNNING_MIN_PAGES = 3  # documents shorter than this have no running text to find
+_DIGITS = re.compile(r"\d+")
+_ROMAN = re.compile(r"\b[ivxlcdm]{1,7}\b")
+
+
+def _running_key(text: str) -> str:
+    """A line with its page numbers made alike, so "Page 3 of 40" matches "Page 4 of 40"."""
+    flat = " ".join(text.lower().split())
+    return _ROMAN.sub("#", _DIGITS.sub("#", flat))
+
+
+def _band(y0: float, y1: float, height: float) -> str | None:
+    if height <= 0:
+        return None
+    if y1 <= _TOP_BAND * height:
+        return "top"
+    if y0 >= _BOTTOM_BAND * height:
+        return "bottom"
+    return None
+
+
+def running_text_keys(doc: Any) -> set[tuple[str, str]]:
+    """(band, key) of lines repeated in the top or bottom band of most pages.
+
+    A line counts when its band and key appear on at least half of the pages that have
+    text, and on at least two pages. Bodies are never touched: only short blocks lying
+    wholly inside a band are considered.
+    """
+    pages_by_key: dict[tuple[str, str], set[int]] = {}
+    text_pages = 0
+    for page_index in range(len(doc)):
+        page = doc[page_index]
+        height = float(page.rect.height)
+        seen_text = False
+        for block in page.get_text("blocks"):
+            y0, y1, text = block[1], block[3], block[4]
+            if len(block) > 6 and block[6] != 0:  # image block
+                continue
+            text = str(text).strip()
+            if not text:
+                continue
+            seen_text = True
+            band = _band(float(y0), float(y1), height)
+            if band is None or len(text) > _RUNNING_MAX_CHARS:
+                continue
+            pages_by_key.setdefault((band, _running_key(text)), set()).add(page_index)
+        text_pages += seen_text
+    if text_pages < _RUNNING_MIN_PAGES:
+        return set()
+    need = max(2, -(-text_pages // 2))
+    return {key for key, pages in pages_by_key.items() if len(pages) >= need}
+
+
 class PdfImageRegion(StrictModel):
     """An image region or scanned page discovered in the PDF that may require OCR."""
 
@@ -76,6 +136,8 @@ class PdfExtraction(StrictModel):
     is_scanned: bool = False
     has_tables: bool = False
     garbled_ratio: float = Field(default=0.0, ge=0.0, le=1.0)
+    password_protected: bool = False
+    running_text_blocks: int = Field(default=0, ge=0)
     attachments: list[PdfAttachment] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
 
@@ -210,6 +272,21 @@ def extract_pdf(
             warnings=[f"pdf_open_error:{exc}"],
         )
 
+    warnings: list[str] = []
+    if doc.needs_pass and not doc.authenticate(""):
+        # A user password is needed to read anything: say so, and skip OCR of nothing.
+        page_count_locked = int(doc.page_count or 0)
+        doc.close()
+        _logger.info("pdf_password_protected", extra={"resource_id": resource_id})
+        return PdfExtraction(
+            page_count=page_count_locked,
+            password_protected=True,
+            warnings=[PASSWORD_PROTECTED],
+        )
+    if doc.is_encrypted or doc.metadata and doc.metadata.get("encryption"):
+        # Readable without a password (an owner password only restricts printing or copying).
+        warnings.append("pdf_encrypted_readable")
+
     metadata: dict[str, str] = {}
     if doc.metadata:
         for k, v in doc.metadata.items():
@@ -218,7 +295,12 @@ def extract_pdf(
 
     blocks: list[ContentBlock] = []
     image_regions: list[PdfImageRegion] = []
-    warnings: list[str] = []
+    try:
+        running_keys = running_text_keys(doc)
+    except Exception as exc:  # a damaged page must not stop the extraction
+        _logger.debug("running_text_error", extra={"error": str(exc)})
+        running_keys = set()
+    running_blocks = 0
 
     # Metadata content block if present
     if "title" in metadata or "author" in metadata:
@@ -334,9 +416,20 @@ def extract_pdf(
             is_heading = max_size >= 1.25 * median_font_size or (is_bold and len(raw_text) < 120)
             is_near_bottom = bbox_tuple[3] >= 0.9 * page_rect.height
 
+            band = _band(bbox_tuple[1], bbox_tuple[3], float(page_rect.height))
+            is_running = (
+                band is not None
+                and len(raw_text) <= _RUNNING_MAX_CHARS
+                and (band, _running_key(raw_text)) in running_keys
+            )
+
             role: Role = "main"
             if is_ghost:
                 role = "unknown"
+            elif is_running:
+                # Repeated on most pages: page furniture, kept but never a heading or content.
+                role = "chrome" if band == "top" else "footer"
+                running_blocks += 1
             elif is_near_bottom and _DISCLAIMER_KEYWORDS.search(raw_text):
                 role = "legal"
             elif is_heading:
@@ -557,6 +650,8 @@ def extract_pdf(
         warnings.append("hidden_layers:" + ",".join(hidden_layers))
     if invisible_chars:
         warnings.append(f"invisible_text_layer:chars={invisible_chars}")
+    if running_blocks:
+        warnings.append(f"running_headers_footers:blocks={running_blocks}")
     doc.close()
 
     # Second-opinion trigger: garbled text > 2% (ADR-0003)
@@ -578,6 +673,7 @@ def extract_pdf(
         is_scanned=is_scanned,
         has_tables=has_tables,
         garbled_ratio=garbled_ratio,
+        running_text_blocks=running_blocks,
         attachments=attachments,
         warnings=warnings,
     )

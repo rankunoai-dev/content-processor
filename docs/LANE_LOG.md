@@ -1118,6 +1118,16 @@ git worktree add ../content-processor-lane4 -b lane/L4-verify
   - Passage embedding: 12 passages in 2.80 s; mean query latency 47 ms (warmed, GPU accelerated).
 - **RFC:** `docs/rfc/0004-multilingual-embeddings-bge-m3.md` updated with Section 10 measured results.
 
+
+## [2026-11-22] PDFs: password-protected files and running headers/footers (`feat/pdf-locked-and-running-text`)
+
+- **Branch / worktree:** `feat/pdf-locked-and-running-text` at `../content-processor-pdffix`, from main `79d69af`.
+- **What landed:** `adapters/pdf.py`: `doc.needs_pass` and a failed `authenticate("")` return `PdfExtraction(password_protected=True, warnings=["password_protected_pdf"])` with no blocks and no image regions (no OCR); owner-password-only files open and carry `pdf_encrypted_readable`. `running_text_keys()` pre-pass (`get_text("blocks")`): short blocks (<= 200 chars) wholly in the top 12% or bottom 12% of the page, keyed with digits and roman numerals made alike, repeated on >= max(2, half of the text pages), documents of 3+ text pages; such blocks get role `chrome` (top) or `footer` (bottom), never set a heading path, and are counted in `running_text_blocks` and the warning `running_headers_footers:blocks=N`. Chunking (`_is_main`), overlap and semantic already leave those roles out. `workers/doc_worker.py`: a locked PDF ends `BLOCKED` with an `ACCESS_BLOCKED` gap `password_protected_pdf;pages=N` (review queue: obtain the asset). `export/project_report.py`: "Not captured: the file is password-protected".
+- **Real data:** 150 of the 215 PDFs captured in the GEP and John Hancock runs (338 pages), old vs new reader: identical blocks and text; 132 blocks main -> chrome ("NEWS RELEASE" banner) and 129 legal -> footer (GEP copyright lines) in 41 PDFs; 637 body blocks lost the false heading path "NEWS RELEASE"; no locked PDF among them.
+- **Tests:** `test_pdf_locked_and_running.py` 10 (user-password PDF, owner-only PDF readable, doc worker gap and status, report wording, key normalisation, header/footer roles with changing page numbers, a bold running header never a heading, 2-page documents untouched, a line on a minority of pages kept, furniture out of chunks).
+- **Gate:** `ruff format --check .` 431 files formatted; `ruff check .` passed; `mypy --strict src` 232 files no issues; `pytest tests/modules/content_processor -m "not browser"` 1,280 passed / 12 skipped / 1 failed: `test_project_reports.py::test_project_bundle_reads_the_client_websites_only` fails the same way on main `79d69af` (the bundle now also holds the semantic workbook once a meaning model is available; the test's file list predates it).
+- **Open contract requests:** none.
+
 ## [2026-11-22] Retrieval quality: in-memory vector cache, reranker, diversity and date intent (`feat/retrieval-quality`)
 
 - **Branch / worktree:** `feat/retrieval-quality` at `../content-processor-retrieval` (from main `79d69af`).
