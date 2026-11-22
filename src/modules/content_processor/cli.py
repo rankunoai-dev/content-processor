@@ -54,6 +54,7 @@ from src.integrations.browser_client import BrowserRenderer, RenderLimits
 from src.integrations.evidence_store import EvidenceStore, LocalEvidenceStore
 from src.integrations.http_client import FetchLimits, HttpFetcher
 from src.integrations.impersonated_client import ImpersonatedFetcher, impersonation_available
+from src.modules.accounts.commands import register as register_account_commands
 from src.modules.analyst.commands import register as register_analyst_commands
 from src.modules.content_processor.contracts import InteractionPolicy, RunScope
 from src.modules.content_processor.enums import AccessTier, tier_rank
@@ -105,6 +106,7 @@ from src.modules.content_processor.scheduler.budget import (
     MeteredEvidenceStore,
     MeteredFetcher,
     MeteredRenderer,
+    sleep_gap_for,
 )
 from src.modules.content_processor.scheduler.capture_journal import CaptureJournal
 from src.modules.content_processor.scheduler.grouping import RunGroups
@@ -264,8 +266,24 @@ def browser_channel() -> str | None:
     return None if channel == "chromium" else channel
 
 
+def render_limits() -> RenderLimits:
+    """The browser's time caps from the `CP_RENDER_*` settings; everything else default.
+
+    Read when the batch starts (each batch is its own process), so raising
+    `CP_RENDER_NAVIGATION_TIMEOUT_S` in `.env` during a slow spell reaches the next batch
+    of a running scrape. The settings keep the whole-page cap above the navigation
+    timeout (src/core/config.py).
+    """
+    settings = get_settings()
+    return RenderLimits(
+        navigation_timeout_s=settings.cp_render_navigation_timeout_s,
+        max_page_time_s=settings.cp_render_max_page_time_s,
+        settle_window_s=settings.cp_render_settle_window_s,
+    )
+
+
 def build_renderer(scope: RunScope) -> Any:
-    """T3 browser configured from the scope (not started)."""
+    """T3 browser configured from the scope and the `CP_RENDER_*` settings (not started)."""
     return BrowserRenderer(
         user_agent=user_agent_for(scope),
         host_checker=host_checker_for(scope),
@@ -273,7 +291,7 @@ def build_renderer(scope: RunScope) -> Any:
         timezone=scope.timezone,
         viewport=scope.viewport,
         analytics_suppression=scope.analytics_suppression,
-        limits=RenderLimits(),
+        limits=render_limits(),
         channel=browser_channel(),
     )
 
@@ -320,7 +338,13 @@ async def _drive(
     # loop: one lock in front of the ledger keeps every call serial (ledger/serial.py).
     ledger = serial_ledger(ledger)
     seed = sum(r.payload_bytes or 0 for r in ledger.list_resources(run_id))
-    meter = BudgetMeter(scope.budgets, seed_bytes=seed)
+    # A longer render cap (CP_RENDER_MAX_PAGE_TIME_S) must not look like the computer
+    # slept: the meter's sleep gap grows with it.
+    meter = BudgetMeter(
+        scope.budgets,
+        seed_bytes=seed,
+        sleep_gap_s=sleep_gap_for(render_limits().max_page_time_s, options.max_wait_s),
+    )
     # Grouping reads page bodies for analysis; it uses the raw store so it does not draw on the
     # run's evidence budget.
     grouping = RunGroups(ledger, evidence, run_id=run_id) if group_assets else None
@@ -467,6 +491,14 @@ def _apply_skip_plan(args: argparse.Namespace, baseline: Baseline | None) -> Non
         return
     plan = json.loads(Path(path).read_text(encoding="utf-8"))
     baseline.plan_skips(plan.get("urls", []), plan.get("reason"))
+
+
+def _apply_force_fetch(args: argparse.Namespace, baseline: Baseline | None) -> None:
+    """Pages a reviewer sent back are fetched in full, never reused."""
+    path = getattr(args, "force_fetch", None)
+    if not path or baseline is None:
+        return
+    baseline.force_fresh(json.loads(Path(path).read_text(encoding="utf-8")).get("urls", []))
 
 
 def _baseline_info(baseline: Baseline | None, source: str | None) -> dict[str, Any] | None:
@@ -617,6 +649,7 @@ async def _dryrun_with(
     if baseline is None:
         baseline, baseline_source = _history_baseline(args, history, evidence)
     _apply_skip_plan(args, baseline)
+    _apply_force_fetch(args, baseline)
     journal_root = getattr(args, "capture_journal", None)
     journal = CaptureJournal(Path(journal_root), evidence) if journal_root else None
     execution = await _drive(
@@ -888,6 +921,11 @@ def _add_drive_options(p: argparse.ArgumentParser) -> None:
     p.add_argument("--no-render", action="store_true", help="skip the T3 render stage")
     p.add_argument("--no-docs", action="store_true", help="skip the document/OCR stage")
     p.add_argument(
+        "--force-fetch",
+        default=None,
+        help="JSON file: {'urls': [...]} of pages a reviewer sent back; fetched in full",
+    )
+    p.add_argument(
         "--skip-fetch",
         default=None,
         help="JSON file: {'urls': [...], 'reason': '...'} of pages a recrawl plan says are not "
@@ -1024,6 +1062,7 @@ def main(argv: list[str] | None = None) -> int:
     register_monitoring_commands(sub)
     register_research_commands(sub)
     register_gap_commands(sub)
+    register_account_commands(sub)
 
     p_status = sub.add_parser("status", help="durable: task and resource counts")
     p_status.add_argument("--run", required=True)

@@ -67,6 +67,9 @@ Set these on the service (see `.env.example` for every setting):
 | `CP_APP_BASE_URL` | `https://myapp.up.railway.app` | links in queue emails |
 | `CP_BROWSER_CHANNEL` | `chromium` (image default) | no Google Chrome in the image; the bundled Chromium is used |
 | `CP_DOC_PARALLEL_TASKS` | `1` (image default) | see Memory |
+| `CP_LITE_SCAN_MAX_PAGES`, `CP_LITE_SCAN_PER_SECTION` | `150`, `3` (defaults) | competitor lite scans: pages per scan, pages per address section; plain downloads, no browser, so memory stays low |
+| `CP_PDF_FONT`, `CP_PDF_FONT_BOLD` | optional paths to `.ttf` files | the PDF downloads' font; without them the built-in Latin font is used and other scripts show as `?` (a Noto or DejaVu font on the volume covers them) |
+| `CP_RENDER_NAVIGATION_TIMEOUT_S`, `CP_RENDER_MAX_PAGE_TIME_S`, `CP_RENDER_SETTLE_WINDOW_S` | `30`, `150`, `12` | how long the browser waits for a page to arrive, for one whole page, and for it to stop changing; raise the first two on a slow link, where every render would otherwise fail as `render_timeout` and open the website's circuit |
 | `CP_DATABASE_URL` | optional Postgres DSN | the task ledger and, with pgvector, the knowledge base; without it the SQLite store under `/data` is used |
 | `CP_SMTP_*`, `CP_SMTP_FROM` | optional | queue emails; otherwise they are written to `/data/app_data/outbox/` |
 | `ENVIRONMENT` | `production` | refuses to boot with guardrails off |
@@ -97,7 +100,7 @@ Then open http://localhost:8780/. A smaller image leaves out the fonts for CJK s
 ## What the image does not include
 
 - Ollama or any model server: point `CP_MODEL_ENDPOINT` at one on the private network, or
-  build with `--build-arg EXTRAS=browser,docs,unblock,office,fallback` for the CPU
+  build with `--build-arg EXTRAS=browser,docs,unblock,office,pdf,fallback` for the CPU
   embedding model (about 220 MB downloaded into `/data/model_cache` at first use).
 - Tesseract language packs beyond `eng` and `osd`: add `tesseract-ocr-<lang>` packages to
   the `apt-get install` line for the client's languages.

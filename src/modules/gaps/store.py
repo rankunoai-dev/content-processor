@@ -156,6 +156,7 @@ def gap_tables(report: GapReport) -> list[Table]:
             "Searches/month": f.demand or None,
             "Detail": f.detail,
             "Recommended action": f.action,
+            "Based on": f.basis,
             "Status": f.status,
             "Note": f.note,
         }
@@ -166,7 +167,7 @@ def gap_tables(report: GapReport) -> list[Table]:
         for f in report.findings
         for e in f.evidence
     ]
-    wrap = frozenset({"Detail", "Recommended action"})
+    wrap = frozenset({"Detail", "Recommended action", "Based on"})
     return [
         Table(
             "Findings",

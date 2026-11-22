@@ -1,3 +1,4 @@
+import { useMe } from '../api/auth';
 import {
   FolderOpenOutlined,
   GlobalOutlined,
@@ -128,6 +129,8 @@ function CreateProject({ open, onClose, module }: { open: boolean; onClose: () =
   const [askCompetitors, setAskCompetitors] = useState(false);
   const [withoutCompetitors, setWithoutCompetitors] = useState(false);
   const remember = useProjectTokens((s) => s.remember);
+  const me = useMe();
+  const accountsOn = me.data?.accounts === true;
   const client = useQueryClient();
   const navigate = useNavigate();
 
@@ -144,7 +147,7 @@ function CreateProject({ open, onClose, module }: { open: boolean; onClose: () =
         name: values.name.trim(),
         owner_name: values.owner_name.trim(),
         client_name: values.client_name.trim(),
-        password: values.password,
+        ...(accountsOn ? {} : { password: values.password }),
         client_website: values.client_website?.trim() || null,
         ...(values.client_note?.trim() ? { client_note: values.client_note.trim() } : {}),
         ...(rows(values.client_brands).length > 0 ? { client_brands: rows(values.client_brands) } : {}),
@@ -175,7 +178,13 @@ function CreateProject({ open, onClose, module }: { open: boolean; onClose: () =
       destroyOnClose
       width={640}
     >
-      <Form form={form} layout="vertical" onFinish={submit} requiredMark={false}>
+      <Form
+        form={form}
+        layout="vertical"
+        onFinish={submit}
+        requiredMark={false}
+        initialValues={me.data?.account ? { owner_name: me.data.account.display_name } : undefined}
+      >
         <Form.Item
           name="name"
           label={PROJECTS.form.name}
@@ -253,6 +262,8 @@ function CreateProject({ open, onClose, module }: { open: boolean; onClose: () =
           />
         ) : null}
         <Divider />
+        {accountsOn ? null : (
+        <>
         <Form.Item
           name="password"
           label={PROJECTS.form.password}
@@ -280,6 +291,8 @@ function CreateProject({ open, onClose, module }: { open: boolean; onClose: () =
         >
           <Input.Password maxLength={200} autoComplete="new-password" />
         </Form.Item>
+        </>
+        )}
         <Form.Item name="confidential" valuePropName="checked" extra={PROJECTS.form.confidentialHelp}>
           <Checkbox>{PROJECTS.form.confidential}</Checkbox>
         </Form.Item>

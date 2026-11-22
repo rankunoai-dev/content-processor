@@ -49,6 +49,7 @@ function SiteDetail({ site }: { site: SiteDiff }) {
   return (
     <Space direction="vertical" style={{ width: '100%', minWidth: 0, overflowWrap: 'anywhere' }}>
       {site.note ? <Typography.Text type="secondary">{site.note}</Typography.Text> : null}
+      {site.meaning_note ? <Typography.Text type="secondary">{site.meaning_note}</Typography.Text> : null}
       {site.changed_pages.length > 0 ? (
         <List
           size="small"
@@ -66,6 +67,14 @@ function SiteDetail({ site }: { site: SiteDiff }) {
                   <Typography.Text type="secondary">
                     {MONITORING.columns.drift} {Math.round(c.drift * 100)}% · +{c.sections_added} −{c.sections_removed}
                   </Typography.Text>
+                  {c.meaning != null ? (
+                    <Tooltip title={MONITORING.meaningHelp}>
+                      <Tag color={c.meaning < MONITORING.topicDrift ? 'orange' : undefined}>
+                        {c.meaning < MONITORING.topicDrift ? MONITORING.topicMoved : MONITORING.topicKept}{' '}
+                        {c.meaning.toFixed(2)}
+                      </Tag>
+                    </Tooltip>
+                  ) : null}
                 </Space>
                 {c.words_before || c.words_after ? (
                   <Typography.Text type={c.words_after - c.words_before >= 500 ? 'warning' : 'secondary'}>
@@ -322,6 +331,13 @@ export function MonitoringTab({ project, token }: { project: Project; token: str
               </Tooltip>
               {c !== null ? (
                 <DownloadMenu projectId={project.project_id} reportKey="monitoring" />
+              ) : null}
+              {c !== null ? (
+                <DownloadMenu
+                  projectId={project.project_id}
+                  reportKey="monitoring_history"
+                  label={MONITORING.downloadHistory}
+                />
               ) : null}
               {c !== null ? (
                 <Typography.Text type="secondary">

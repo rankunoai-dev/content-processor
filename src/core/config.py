@@ -12,19 +12,30 @@ Rules enforced here:
 
 from __future__ import annotations
 
+import logging
 from enum import StrEnum
 from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Any
 
-from pydantic import Field, SecretStr, ValidationInfo, field_validator
+from pydantic import Field, SecretStr, ValidationInfo, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 from src.core.errors import ConfigurationError
 
-__all__ = ["Environment", "Settings", "get_settings", "reset_settings_cache"]
+__all__ = [
+    "RENDER_PAGE_TIME_MARGIN_S",
+    "Environment",
+    "Settings",
+    "get_settings",
+    "reset_settings_cache",
+]
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+RENDER_PAGE_TIME_MARGIN_S = 30.0
+"""Least gap between the browser's navigation timeout and its whole-page cap (seconds)."""
 
 
 class Environment(StrEnum):
@@ -105,10 +116,30 @@ class Settings(BaseSettings):
     # Documents and images read at once during a scrape (local work, no requests to a
     # site). 4 suits a workstation; set 1 or 2 in a container with 1-2 GB of memory.
     cp_doc_parallel_tasks: int = Field(default=4, ge=1, le=16)
+    # Competitor lite scan: the most pages scraped from one website (plain downloads, no
+    # browser), and the most pages taken from one address section (/blog, /products...).
+    # 150 pages is about 3 minutes of polite requests and a few MB; safe in a container.
+    cp_lite_scan_max_pages: int = Field(default=150, ge=10, le=1000)
+    cp_lite_scan_per_section: int = Field(default=3, ge=1, le=50)
     # The browser scrapes render with: "chrome" is the installed Google Chrome (falls back
     # to Playwright's bundled Chromium when Chrome is absent); "chromium" is the bundled
     # Chromium straight away (containers: no Chrome is installed there).
     cp_browser_channel: str = Field(default="chrome", pattern="^(chrome|chromium|msedge)$")
+    # How long the browser waits for a page to arrive (DOMContentLoaded) before the
+    # render fails as `render_timeout`. 30 s suits a normal link; a slow one (a 1 MB
+    # page at ~30 KB/s takes 50-80 s) needs 120 or more, else every render fails and
+    # the website's circuit opens. Read at the start of each batch, so a change in
+    # `.env` reaches the next batch of a running scrape.
+    cp_render_navigation_timeout_s: float = Field(default=30.0, ge=5.0, le=600.0)
+    # Cap on one whole page in the browser: arrival, settling, screenshot and the
+    # exploration of its controls. Kept at least 30 s above the navigation timeout
+    # (clamped up with a logged note otherwise) so a page that arrives late still gets
+    # its capture. A batch's time budget is not drawn on by a sleeping computer; the
+    # gap that counts as sleep grows with this cap (scheduler/budget.py).
+    cp_render_max_page_time_s: float = Field(default=150.0, ge=30.0, le=1200.0)
+    # How long the browser waits for a page to stop changing (late scripts, hydration)
+    # before it is read; the wait ends as soon as the page is quiet for a few seconds.
+    cp_render_settle_window_s: float = Field(default=12.0, ge=1.0, le=120.0)
 
     # -- Content processor: the web app server (webapi) --------------------
     # Where the server listens. 127.0.0.1 is this machine only (the default, for a
@@ -129,9 +160,26 @@ class Settings(BaseSettings):
     # Fully parsed runs the analyst API keeps in memory (each holds every page's records
     # and text). Small on purpose: run summaries for the list are cached separately.
     cp_run_cache_entries: int = Field(default=4, ge=1, le=64)
+    # How long a sign-in lasts (hours) once team accounts exist (`accounts create-admin`).
+    cp_session_hours: float = Field(default=12.0, gt=0, le=24 * 30)
     # A project report (all of the client's websites) is built in its own process; it is
     # stopped after this many seconds.
     cp_project_report_timeout_s: float = Field(default=1800.0, gt=0.0)
+    # Semantic similarity in the project report (analysis/semantic.py): pages that say
+    # the same thing in different words, scored on their own content with the knowledge
+    # base's embedding model. Off = the project report has no semantic workbook. The
+    # paragraph cap bounds memory per page; the batch size is texts per embedding call;
+    # the pair cap keeps the strongest pairs of a very repetitive website.
+    cp_semantic_enabled: bool = True
+    cp_semantic_max_paragraphs: int = Field(default=200, ge=10, le=2000)
+    cp_semantic_embed_batch: int = Field(default=64, ge=1, le=1024)
+    cp_semantic_max_pairs: int = Field(default=50_000, ge=100, le=2_000_000)
+    # Topic drift in monitoring checks (monitoring/meaning.py): each changed page's old
+    # and new versions are compared by meaning with the website's knowledge-base model
+    # (never the words-only stand-in). A competitor page scoring below the threshold
+    # was moved onto another topic and raises an alert. Off = no meaning scores.
+    cp_monitor_meaning: bool = True
+    cp_monitor_topic_drift: float = Field(default=0.85, gt=0.0, lt=1.0)
 
     # -- Content processor: knowledge base (RFC 0002 stages 5-7) -----------
     # Embedded vector store, used when Postgres with pgvector is not configured.
@@ -255,6 +303,27 @@ class Settings(BaseSettings):
             msg = f"LOG_LEVEL must be one of {sorted(allowed)}, got '{value}'"
             raise ValueError(msg)
         return normalised
+
+    @model_validator(mode="after")
+    def _render_page_time_covers_navigation(self) -> Settings:
+        """Keep the whole-page cap at least `RENDER_PAGE_TIME_MARGIN_S` above navigation.
+
+        A page that arrives just inside the navigation timeout still needs time to
+        settle and be captured; a cap set lower than that would fail every late page
+        after it arrived. The cap is raised, not refused, and the change is logged.
+        """
+        floor = self.cp_render_navigation_timeout_s + RENDER_PAGE_TIME_MARGIN_S
+        if self.cp_render_max_page_time_s < floor:
+            logging.getLogger(__name__).warning(
+                "CP_RENDER_MAX_PAGE_TIME_S=%.0f is under CP_RENDER_NAVIGATION_TIMEOUT_S "
+                "(%.0f) + %.0f s; raised to %.0f",
+                self.cp_render_max_page_time_s,
+                self.cp_render_navigation_timeout_s,
+                RENDER_PAGE_TIME_MARGIN_S,
+                floor,
+            )
+            self.cp_render_max_page_time_s = floor
+        return self
 
     def model_post_init(self, _context: Any, /) -> None:
         """Refuse unsafe production configurations at boot rather than at call time."""

@@ -29,6 +29,9 @@ from playwright.async_api import (
 from playwright.async_api import (
     Error as PlaywrightError,
 )
+from playwright.async_api import (
+    TimeoutError as PlaywrightTimeoutError,
+)
 from pydantic import Field
 
 from src.core.logger import get_logger
@@ -39,8 +42,10 @@ __all__ = [
     "BrowserRenderer",
     "CapturedResponse",
     "PageHook",
+    "RENDER_TIMEOUT_PREFIX",
     "RenderLimits",
     "RenderResult",
+    "is_render_timeout",
 ]
 
 _STATIC_RESOURCE_TYPES = frozenset({"stylesheet", "script", "font", "image"})
@@ -279,8 +284,26 @@ async def serve_through_asset_store(route: Any, request: Any, asset_store: Any) 
             await route.continue_()
 
 
+RENDER_TIMEOUT_PREFIX = "render_timeout"
+"""`RenderResult.transport_error` of a render that only ran out of time starts with this.
+
+Reports and the render worker tell "too slow for us" (this prefix, followed by the step
+that timed out) from "site broken" (any other transport error) by it; the host circuit
+counts both.
+"""
+
+
+def is_render_timeout(transport_error: str | None) -> bool:
+    """True when a failed render only ran out of time (navigation or whole-page cap)."""
+    return transport_error is not None and transport_error.startswith(RENDER_TIMEOUT_PREFIX)
+
+
 class RenderLimits(StrictModel):
-    """Caps applied to every render."""
+    """Caps applied to every render.
+
+    The CLI builds these from the `CP_RENDER_*` settings (`cli.render_limits`); a caller
+    that passes its own `RenderLimits(...)` is left alone.
+    """
 
     navigation_timeout_s: float = Field(default=30.0, gt=0)
     settle_window_s: float = Field(default=12.0, gt=0)
@@ -455,7 +478,19 @@ class BrowserRenderer:
                 result = await self._render_inner(url, on_page, asset_store)
         except TimeoutError:
             result = RenderResult(
-                requested_url=url, final_url=url, transport_error="render_timeout"
+                requested_url=url,
+                final_url=url,
+                transport_error=(
+                    f"{RENDER_TIMEOUT_PREFIX}:page_time_{self._limits.max_page_time_s:.0f}s"
+                ),
+            )
+        except PlaywrightTimeoutError as exc:
+            # The page did not arrive within `navigation_timeout_s` (or a later step
+            # waited that long): too slow for us, not necessarily a broken site.
+            result = RenderResult(
+                requested_url=url,
+                final_url=url,
+                transport_error=f"{RENDER_TIMEOUT_PREFIX}:{str(exc).splitlines()[0][:200]}",
             )
         except PlaywrightError as exc:
             result = RenderResult(

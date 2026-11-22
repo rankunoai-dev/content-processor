@@ -1321,6 +1321,9 @@ export const PROJECT_REPORTS = {
     timeBound: 'Time-bound figures',
     duplicates: 'Duplicate page pairs',
     across: 'across websites',
+    semantic: 'Same content, different words',
+    semanticHubs: (n: number) => `${n} topic hub${n === 1 ? '' : 's'}`,
+    semanticSkipped: 'Not built: ',
   },
   files: {
     contradictions_by_topic_xlsx: 'Contradictions by topic (Excel): Topic, Version A and B, where each appears, severity, recommended action, approved answer',
@@ -1329,6 +1332,9 @@ export const PROJECT_REPORTS = {
     project_report_xlsx:
       'Project report (Excel): every page with its whole content, and matching content between pages with the shared text (the same report each scrape writes, for all the client’s websites)',
     duplication_xlsx: 'Duplication (Excel): near-duplicate pages (80%+) and groups, with the website of each page',
+    semantic_similarity_xlsx:
+      'Semantic similarity (Excel): pages that say the same thing in different words, tiered Identical / Copy / High / Moderate on their own content, with recurring series, repeated blocks, topic hubs and flags',
+    semantic_similarity_json: 'Semantic similarity, the same sheets as data (JSON, for tools and other download formats)',
     competitors_xlsx: 'Competitors (Excel): each competitor’s own contradictions and duplicate pages',
     manifest_json: 'What was used and the counts (JSON)',
   } as Record<string, string>,
@@ -1399,6 +1405,118 @@ export const QUEUE = {
   yourTurn: 'Its turn has come.',
   yourTurnText: 'Press Start to scrape it now: it runs before the scrapes waiting in line.',
   startReady: 'Start',
+};
+
+export const LITE = {
+  title: 'Lite scan (big competitor websites)',
+  help:
+    'Instead of scraping every page, read the website’s sitemap and scrape a sample: pages that rank in the search data, core pages (pricing, products, the home page) and a few pages from every section. Up to 150 pages, plain downloads only, free. The rest of the sitemap is counted in the theme map as "inferred", and every gap says what it is based on.',
+  start: 'Run a lite scan',
+  needsUnlock: 'Unlock the project to run a lite scan.',
+  queued: (sampled: number, inventory: number) =>
+    `Lite scan queued: ${sampled.toLocaleString()} pages of about ${inventory.toLocaleString()}.`,
+  tag: 'Lite scan',
+  latest: (when: string, basis: string) => `Latest: ${when}, ${basis}.`,
+  sitemapNote: (note: string) => `Sitemap: ${note}.`,
+  section: 'Section',
+  pages: 'Pages in sitemap',
+  sampled: 'Sampled',
+};
+
+export const REVIEW_TAB = {
+  tab: 'Review',
+  intro:
+    "Check the engine's verdict on each page of a scrape. Approve it when it is right; reject it with a reason and what should happen next. Every decision is kept with who made it and when, and the next scrape and the reports follow it.",
+  noScrape: 'No finished scrape to review yet.',
+  website: 'Website',
+  scrape: 'Scrape',
+  yourName: 'Your name',
+  nameFirst: 'Type your name first: it is saved with each decision.',
+  roleNeeded: 'Reviewing needs the reviewer, editor or admin role.',
+  unlockNeeded: 'Unlock the project to record decisions.',
+  show: { attention: 'Needs attention', undecided: 'Not decided', decided: 'Decided', all: 'All pages' } as Record<string, string>,
+  files: 'Include files and images',
+  summary: (open: number, approved: number) => `${open} not decided · ${approved} approved`,
+  nothing: 'Nothing to show with these filters.',
+  page: 'Page',
+  verdict: "Engine's verdict",
+  issues: 'Issues',
+  decision: 'Decision',
+  undecided: 'Not decided',
+  approved: 'Approved',
+  rejected: 'Rejected',
+  cleared: 'decision removed',
+  approve: 'Approve',
+  reject: 'Reject',
+  clear: 'Undo',
+  saved: 'Decision saved.',
+  history: 'History',
+  byWhen: (who: string, when: string) => `${who}, ${when}`,
+  rejectTitle: 'Reject the verdict',
+  reason: 'Why',
+  reasonNeeded: 'Say why the verdict is wrong.',
+  reasonPlaceholder: 'For example: the rate table at the bottom is missing',
+  nextStep: 'What should happen next',
+  nextStepNeeded: 'Choose what happens next.',
+  nextSteps: {
+    scrape_again: 'Scrape again',
+    obtain_manually: 'Get it by hand',
+    exclude: 'Exclude from reports',
+  } as Record<string, string>,
+  nextStepHelp: {
+    scrape_again: 'the next scrape of this website captures the page again in full',
+    obtain_manually: 'someone collects the content by hand',
+    exclude: 'the page is left out of the project reports',
+  } as Record<string, string>,
+};
+
+export const AUTH = {
+  signInTitle: 'Sign in',
+  signInHelp: 'Use the user name and password an admin gave you.',
+  username: 'User name',
+  password: 'Password',
+  signIn: 'Sign in',
+  required: 'Required',
+  current: 'Current password',
+  newPassword: 'New password',
+  again: 'New password again',
+  mismatch: 'The two passwords differ.',
+  passwordRule: (n: number) => `At least ${n} characters.`,
+  savePassword: 'Save the new password',
+  passwordSaved: 'Password changed. Your other devices were signed out.',
+  firstPasswordTitle: (name: string) => `Welcome, ${name}`,
+  firstPasswordHelp:
+    'An admin set a temporary password for you. Choose your own to continue; nobody else will know it.',
+  userMenu: 'Your account',
+  signedInAs: (user: string, role: string) => `Signed in as ${user} (${role})`,
+  changePassword: 'Change password',
+  signOut: 'Sign out',
+  accountsNav: 'Accounts',
+  adminsOnly: 'Only admins can manage accounts.',
+  accountsIntro:
+    'Everyone who can sign in. Viewers read and download; reviewers also approve or reject verdicts and findings; editors also change projects, scrape and run analyses; admins also manage accounts and delete projects. A new or reset password is temporary: the person chooses their own at their next sign-in, and changing a role or disabling an account signs them out everywhere.',
+  roles: { viewer: 'Viewer', reviewer: 'Reviewer', editor: 'Editor', admin: 'Admin' } as Record<string, string>,
+  roleHelp: 'Viewer: read and download. Reviewer: also review. Editor: also change projects. Admin: also accounts.',
+  addTitle: 'Add an account',
+  addHelp: 'Give the person their user name and this temporary password; they choose their own when they first sign in.',
+  add: 'Add',
+  added: (u: string) => `${u} can now sign in.`,
+  name: 'Name',
+  role: 'Role',
+  status: 'Status',
+  usernameRule: '2-40 characters: letters, digits, dots, dashes or underscores.',
+  tempPassword: 'Temporary password',
+  reset: 'Reset password',
+  resetTitle: (name: string) => `New temporary password for ${name}`,
+  resetHelp: 'They are signed out everywhere and choose their own password at their next sign-in.',
+  resetDone: 'Password reset.',
+  disabled: 'Disabled',
+  waitingFirstSignIn: 'Waiting for first sign-in',
+  active: 'Active',
+  lastSignIn: 'Last sign-in',
+  never: 'Never',
+  enabled: 'Can sign in',
+  noRole: (role: string) => `Your role (${role}) cannot change projects.`,
 };
 
 export const PROJECTS = {
@@ -1745,6 +1863,7 @@ export const ANALYST = {
   backends: {
     pack: 'Context pack (free; nothing is sent anywhere)',
     claude: 'Claude writes the deliverable (paid; must be switched on)',
+    claude_desktop: 'Written in Claude Desktop',
   } as Record<string, string>,
   backendHelp: {
     pack: 'Writes the full brief with the data gathered for it, as a file you can give to Claude yourself where your data policy allows.',
@@ -1761,6 +1880,8 @@ export const ANALYST = {
   needsUnlock: 'Unlock the project with its password to run cards.',
   runsTitle: 'Card runs',
   noRuns: 'No card has been run for this project yet.',
+  desktopHow: 'Written in Claude Desktop',
+  versionTag: (n: number) => `${n} versions`,
   columns: {
     card: 'Card',
     how: 'How',
@@ -1782,6 +1903,14 @@ export const ANALYST = {
   view: 'Open',
   viewer: {
     title: (card: string) => `Card run: ${card}`,
+    desktopTitle: (title: string) => `Written in Claude Desktop: ${title}`,
+    author: 'Written by',
+    saved: 'Saved',
+    version: 'Version',
+    versionOption: (n: number, when: string, passed: boolean, latest: boolean) =>
+      `Version ${n} · ${when} · ${passed ? 'checked' : 'needs review'}${latest ? ' (latest)' : ''}`,
+    desktopHelp:
+      'Saved from a Claude Desktop chat through the app’s connector. The app checked every citation and quote against the data it had shown; nothing was sent anywhere to save it. Saving the same title again adds a version.',
     progress: 'Progress',
     result: 'Result',
     pack: 'Context pack',
@@ -1803,6 +1932,7 @@ export const ANALYST = {
     usage: (turns: number, calls: number) => `${turns} Claude turn(s), ${calls} data look-up(s)`,
   },
   events: {
+    saved: (version: number, status: string) => `Saved version ${version} (check: ${status})`,
     prefetch: (tool: string, error: boolean) => `Gathered data: ${tool.replace(/_/g, ' ')}${error ? ' (failed)' : ''}`,
     tool: (name: string, error: boolean) => `Claude looked up: ${name.replace(/_/g, ' ')}${error ? ' (failed)' : ''}`,
     cost: (usd: number) => `Cost so far: $${usd.toFixed(4)}`,
@@ -1912,6 +2042,7 @@ export const RECRAWL = {
 };
 
 export const MONITORING = {
+  downloadHistory: 'Download history',
   tab: 'Monitoring',
   intro:
     'What changed on the client’s and competitors’ websites between scrapes: new and removed pages, rewrites, price changes, and how each theme moved. A check reads the scrapes already made; nothing is fetched and it costs nothing.',
@@ -1945,6 +2076,11 @@ export const MONITORING = {
   templateTitle: 'Lines added or removed on many pages at once (template, navigation, related links)',
   priceChange: (before: string, after: string) => `${before} → ${after}`,
   pillar: 'pillar',
+  topicDrift: 0.85,
+  topicKept: 'Same topic',
+  topicMoved: 'Topic changed',
+  meaningHelp:
+    'How close the new version is in meaning to the old one (1 = the same topic, reworded or extended). Below 0.85 the page now covers a different topic.',
   drift: 'Theme drift',
   noDrift: 'No theme moved.',
   driftColumns: { theme: 'Theme', status: 'Status', ownership: 'Ownership', newPages: 'New pages', removed: 'Removed pages' },
@@ -1966,9 +2102,9 @@ export const MONITORING = {
 export const EXPORTS = {
   tab: 'Downloads',
   button: 'Download',
-  formats: { xlsx: 'Excel (.xlsx)', csv: 'CSV', docx: 'Word (.docx)' } as Record<string, string>,
+  formats: { xlsx: 'Excel (.xlsx)', csv: 'CSV', docx: 'Word (.docx)', pdf: 'PDF (.pdf)', json: 'JSON (.json)' } as Record<string, string>,
   intro:
-    "Every report of this project, one per module, built from each module's latest results. Excel has every row and the full text; CSV is for other tools (a zip when a report has several tables); Word is for reading and sharing (long tables show their first rows). Nothing is scraped or paid for to make them.",
+    "Every report of this project, one per module, built from each module's latest results. Excel has every row and the full text; CSV is for other tools (a zip when a report has several tables); Word and PDF are for reading and sharing (long tables show their first rows). Nothing is scraped or paid for to make them.",
   all: 'Download everything (zip)',
   ready: (n: number, total: number) => `${n} of ${total} reports ready.`,
   notYet: 'Not yet',
@@ -1984,6 +2120,7 @@ export const EXPORTS = {
   scrapeFiles:
     "Each scrape's own files (page-by-page reports, matching content) download from the Reports tab, and the cross-website reports from Project reports.",
   word: 'Word',
+  pdf: 'PDF',
 };
 
 export const GAP_SETTINGS = {
@@ -2092,6 +2229,7 @@ export const RESEARCH = {
 
 /** Gap Analysis module: the project's "Gaps" tab. */
 export const GAPS = {
+  basis: (basis: string) => `Competitor coverage: ${basis}. Pages not sampled are judged by their address only, so treat this as probable.`,
   tab: 'Gaps',
   intro:
     'What the client is missing compared with its competitors, ranked by priority: themes and pillar pages it lacks, funnel stages, keywords competitors win, page-two keywords, competitor momentum and offerings. It reads the themes, research and monitoring already in the app; nothing is fetched and it costs nothing.',

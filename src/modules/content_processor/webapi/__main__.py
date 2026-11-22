@@ -152,12 +152,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         exports, static_dir=static, projects=projects, knowledge=access, analyst=analyst
     )
     host, port = bind_address(args)
-    sys.stdout.write(f"Serving {exports} at http://{host}:{port}/\n")
-    if host not in ("127.0.0.1", "localhost", "::1"):
-        sys.stdout.write(
-            "Listening beyond this machine: every read is open (no login); "
-            "put access control in front of it.\n"
+    local = host in ("127.0.0.1", "localhost", "::1")
+    accounts = getattr(app.state, "accounts", None)
+    if not local and (accounts is None or not accounts.active()):
+        sys.stderr.write(
+            f"Refusing to listen on {host}: anyone could read and change everything. Create "
+            "the first admin first: python -m src.modules.content_processor.cli accounts "
+            "create-admin --username <name> --name '<Your name>'\n"
         )
+        return 2
+    sys.stdout.write(f"Serving {exports} at http://{host}:{port}/\n")
+    if not local:
+        sys.stdout.write("Listening beyond this machine: sign-in is required.\n")
     uvicorn.run(app, host=host, port=port, log_level="warning")
     return 0
 

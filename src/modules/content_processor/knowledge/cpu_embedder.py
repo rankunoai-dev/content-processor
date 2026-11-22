@@ -20,6 +20,7 @@ slower on a large site.
 from __future__ import annotations
 
 import importlib
+import importlib.util
 import math
 import os
 import threading
@@ -42,12 +43,11 @@ _SHARED: dict[tuple[str, int], CpuEmbedder] = {}
 
 
 def cpu_available() -> bool:
-    """True when `fastembed` is installed."""
+    """True when `fastembed` is installed (checked without importing it: onnxruntime is heavy)."""
     try:
-        importlib.import_module("fastembed")
-    except ImportError:
+        return importlib.util.find_spec("fastembed") is not None
+    except (ImportError, ValueError):
         return False
-    return True
 
 
 class CpuEmbedder:

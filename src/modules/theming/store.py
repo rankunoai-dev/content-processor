@@ -214,6 +214,8 @@ def theme_tables(theme_map: ThemeMap) -> list[Table]:
     """The workbook's sheets."""
     sites = [w.website for w in theme_map.websites]
     names = {w.website: f"{w.name} ({w.role})" for w in theme_map.websites}
+    lite = [w.website for w in theme_map.websites if w.scan == "lite"]
+    inferred_cols = {s: f"{names[s]}: inferred from sitemap" for s in lite}
     themes: list[dict[str, Cell]] = []
     matrix: list[dict[str, Cell]] = []
     for t in theme_map.themes:
@@ -241,6 +243,7 @@ def theme_tables(theme_map: ThemeMap) -> list[Table]:
                 "Theme": t.label,
                 "Ownership": t.ownership,
                 **{names[s]: cov[s].pages if s in cov else 0 for s in sites},
+                **{col: cov[s].inferred if s in cov else 0 for s, col in inferred_cols.items()},
             }
         )
     topics: list[dict[str, Cell]] = [
@@ -287,7 +290,11 @@ def theme_tables(theme_map: ThemeMap) -> list[Table]:
     ]
     return [
         Table("Themes", theme_cols, themes, widths={"Theme": 40, "Terms": 50, "Why": 45}),
-        Table("Ownership matrix", ["Theme", "Ownership", *[names[s] for s in sites]], matrix),
+        Table(
+            "Ownership matrix",
+            ["Theme", "Ownership", *[names[s] for s in sites], *inferred_cols.values()],
+            matrix,
+        ),
         Table("Topics", ["Theme", "Topic", "Topic id", "Pages", "Websites", "Terms"], topics),
         Table(
             "Pages",

@@ -11,7 +11,8 @@ import threading
 from pathlib import Path
 
 from src.modules.content_processor.export.tabular import Cell, Table, write_xlsx
-from src.modules.monitoring.models import MonitorCheck, RecrawlPlan, WatchSettings
+from src.modules.monitoring.check import GROWTH_WORDS
+from src.modules.monitoring.models import MonitorCheck, PageChange, RecrawlPlan, WatchSettings
 
 __all__ = ["MonitorStore", "check_tables", "plan_tables", "write_check_workbook"]
 
@@ -124,9 +125,28 @@ _HOW_TO_READ: list[tuple[str, str]] = [
         "or changed.",
     ),
     (
+        "Meaning (old vs new)",
+        "How close a changed page's new version is in meaning to its old one, from 0 to 1, "
+        "scored with the website's embedding model. Near 1: the same topic, reworded or "
+        "extended. Below 0.85: the page now covers a different topic (on a competitor "
+        "website this raises a topic drift alert). Empty when no meaning model is available "
+        "or the page has too little text.",
+    ),
+    (
         "Price change",
         "An amount (currency or percentage) in the same wording in both scrapes with a different "
         "value, for example '$25 per month' becoming '$19 per month'.",
+    ),
+    (
+        "Competitor moves",
+        "Competitor pages that grew by 500+ words, had their title or H1 rewritten, gained "
+        "new heading terms, new tables, pricing blocks, FAQs or forms, or changed a price. "
+        "Biggest growth first.",
+    ),
+    (
+        "Template changes",
+        "A line that appeared on (or disappeared from) many pages at once: navigation, "
+        "footer, related links. Counted once here instead of on every page.",
     ),
     (
         "Theme drift",
@@ -142,6 +162,23 @@ _HOW_TO_READ: list[tuple[str, str]] = [
         "moving towards the client.",
     ),
 ]
+
+
+def _competitor_move(page: PageChange) -> list[str]:
+    """Why a competitor page change is worth a look (empty: it is not)."""
+    why: list[str] = []
+    if page.words_delta >= GROWTH_WORDS:
+        why.append(f"added {page.words_delta:,} words")
+    if "h1" in page.head_changes or "title" in page.head_changes:
+        why.append("rewrote " + " and ".join(k for k in ("title", "h1") if k in page.head_changes))
+    if page.new_terms:
+        why.append("new heading terms")
+    blocks = [f"+{n} {k}" for k, n in sorted(page.blocks_added.items()) if n > 0]
+    if blocks:
+        why.append("new " + ", ".join(blocks))
+    if page.prices:
+        why.append(f"{len(page.prices)} price change(s)")
+    return why
 
 
 def check_tables(check: MonitorCheck) -> list[Table]:
@@ -167,7 +204,8 @@ def check_tables(check: MonitorCheck) -> list[Table]:
             "Unchanged pages": d.unchanged_pages,
             "Template changes": len(d.template_changes),
             "Drift": d.drift,
-            "Note": d.note,
+            "Meaning model": d.meaning_model or "",
+            "Note": "; ".join(n for n in (d.note, d.meaning_note) if n),
         }
         for d in check.websites
     ]
@@ -179,6 +217,7 @@ def check_tables(check: MonitorCheck) -> list[Table]:
             "Theme": c.theme or "",
             "Pillar": "yes" if c.is_pillar else "",
             "Drift": c.drift,
+            "Meaning (old vs new)": c.meaning if c.meaning is not None else "",
             "Sections added": c.sections_added,
             "Sections removed": c.sections_removed,
             "Words before": c.words_before,
@@ -224,7 +263,53 @@ def check_tables(check: MonitorCheck) -> list[Table]:
         }
         for t in check.theme_drift
     ]
-    wrap = frozenset({"Detail", "Pages", "Added text (start)"})
+    prices: list[dict[str, Cell]] = [
+        {
+            "Website": d.name,
+            "Role": d.role,
+            "URL": c.url,
+            "Title": c.title or "",
+            "Theme": c.theme or "",
+            "Before": p.before,
+            "After": p.after,
+            "Context": p.context,
+        }
+        for d in check.websites
+        for c in d.changed_pages
+        for p in c.prices
+    ]
+    templates: list[dict[str, Cell]] = [
+        {
+            "Website": d.name,
+            "Role": d.role,
+            "Line": t.line,
+            "Added on pages": t.added_on,
+            "Removed on pages": t.removed_on,
+        }
+        for d in check.websites
+        for t in d.template_changes
+    ]
+    moves: list[dict[str, Cell]] = []
+    for d in check.websites:
+        if d.role != "competitor":
+            continue
+        for c in d.changed_pages:
+            why = _competitor_move(c)
+            if why:
+                moves.append(
+                    {
+                        "Competitor": d.name,
+                        "URL": c.url,
+                        "Title": c.title or "",
+                        "Theme": c.theme or "",
+                        "What they did": "; ".join(why),
+                        "Words added": c.words_delta,
+                        "New heading terms": ", ".join(c.new_terms),
+                        "Headings added": "\n".join(c.headings_added),
+                    }
+                )
+    moves.sort(key=lambda r: -int(r["Words added"] or 0))
+    wrap = frozenset({"Detail", "Pages", "Added text (start)", "Context", "Line", "Headings added"})
     return [
         Table(
             "Alerts",
@@ -248,6 +333,36 @@ def check_tables(check: MonitorCheck) -> list[Table]:
             widths={"URL": 70, "Title": 40},
         ),
         Table("Theme drift", list(drift[0]) if drift else ["Theme"], drift),
+        Table(
+            "Competitor moves",
+            [
+                "Competitor",
+                "URL",
+                "Title",
+                "Theme",
+                "What they did",
+                "Words added",
+                "New heading terms",
+                "Headings added",
+            ],
+            moves,
+            wrap,
+            {"URL": 60, "What they did": 50, "Headings added": 50},
+        ),
+        Table(
+            "Price changes",
+            ["Website", "Role", "URL", "Title", "Theme", "Before", "After", "Context"],
+            prices,
+            wrap,
+            {"URL": 60, "Context": 60},
+        ),
+        Table(
+            "Template changes",
+            ["Website", "Role", "Line", "Added on pages", "Removed on pages"],
+            templates,
+            wrap,
+            {"Line": 80},
+        ),
         Table(
             "How to read",
             ["Column", "Meaning"],

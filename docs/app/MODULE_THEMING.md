@@ -52,3 +52,7 @@ Offline test project (John Hancock client, 272 pages; Flynn's competitor, 2 elig
 - Audience and brand-voice labels (planned with the local or Claude model, checked like card output).
 - Weighting by search demand (needs the Research module).
 - Embedding-based similarity when every website shares one real embedding model (bge-m3).
+
+## Lite-scanned competitors
+
+See [MODULE_LITE_SCAN.md](MODULE_LITE_SCAN.md): `ThemeWebsite.scan/inventory/basis` and `SiteCoverage.inferred` (sitemap pages placed by address words; never used for ownership).

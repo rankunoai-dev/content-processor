@@ -112,6 +112,11 @@ const run = (over: Partial<CardRun>): CardRun => ({
   message: 'context pack written',
   verification: null,
   files: { context_pack: 'context_pack.md' },
+  title: null,
+  author: null,
+  module: null,
+  version: 1,
+  versions: [],
   ...over,
 });
 
@@ -301,6 +306,65 @@ describe('analyst cards', () => {
       expect(within(viewer).getByText(/9 of 10 citations point at data from this run/)).toBeInTheDocument();
       expect(within(viewer).getByText(/claude-opus-5-5/)).toBeInTheDocument();
       expect(within(viewer).getByText(/## Sources/)).toBeInTheDocument();
+    },
+    TIMEOUT,
+  );
+
+  it(
+    'lists an answer saved from Claude Desktop with its title and versions, and opens it',
+    async () => {
+      const passed = {
+        references: 3,
+        resolved: 3,
+        unknown_refs: [],
+        quotes_checked: 1,
+        quotes_failed: [],
+        uncited_lines: [],
+        passed: true,
+      };
+      const saved = run({
+        run_id: 'run-cccccccccccc',
+        card_id: 'claude-desktop',
+        card_version: 0,
+        backend: 'claude_desktop',
+        finished_at: '2026-11-16T09:30:00Z',
+        inputs: { title: 'Term life review' },
+        message: 'saved from Claude Desktop; the check passed (version 2)',
+        verification: passed,
+        files: { deliverable: 'deliverable.v2.md', draft: 'draft.v2.md', ledger: 'ledger.json' },
+        title: 'Term life review',
+        author: 'Claude Desktop (Themes)',
+        module: 'themes',
+        version: 2,
+        versions: [
+          { version: 1, saved_at: '2026-11-15T09:00:00Z', passed: false, file: 'deliverable.v1.md', draft: 'draft.v1.md' },
+          { version: 2, saved_at: '2026-11-16T09:30:00Z', passed: true, file: 'deliverable.v2.md', draft: 'draft.v2.md' },
+        ],
+      });
+      fakeServer({
+        ...routes([saved]),
+        'GET /api/projects/p1/analyst/runs/run-cccccccccccc': () => [
+          200,
+          {
+            record: saved,
+            text: '## Findings\n\nThe page says so [1].\n\n**Sources**\n\n1. Term life (example.com)',
+            events: [{ at: '2026-11-16T09:30:00Z', type: 'saved', version: 2, status: 'passed' }],
+          },
+        ],
+      });
+      const user = userEvent.setup({ pointerEventsCheck: PointerEventsCheckLevel.Never });
+      renderApp('/projects/p1?tab=analyst');
+      expect(await screen.findByText('Term life review', {}, FIRST_PAINT)).toBeInTheDocument();
+      expect(screen.getByText('Written in Claude Desktop')).toBeInTheDocument();
+      expect(screen.getByText('2 versions')).toBeInTheDocument();
+      expect(screen.getByText('$0')).toBeInTheDocument();
+      await user.click(buttonIn(screen, 'Open'));
+      const viewer = await drawer('Written in Claude Desktop: Term life review');
+      expect(within(viewer).getByText('Claude Desktop (Themes)')).toBeInTheDocument();
+      expect(within(viewer).getByText(/Version 2 · .* · checked \(latest\)/)).toBeInTheDocument();
+      expect(within(viewer).getByText('Saved version 2 (check: passed)')).toBeInTheDocument();
+      expect(within(viewer).getByText(/The page says so \[1\]/)).toBeInTheDocument();
+      expect(within(viewer).queryByText(/Claude turn/)).toBeNull();
     },
     TIMEOUT,
   );

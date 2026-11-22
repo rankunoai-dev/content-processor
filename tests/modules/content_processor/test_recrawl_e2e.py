@@ -239,3 +239,16 @@ async def test_planned_skip_sends_no_request_and_keeps_the_capture_time(tmp_path
     other = Baseline([first])
     other.plan_skips(["http://127.0.0.1:8765/elsewhere"])
     assert not other.planned_skip(URL) and other.planned_skip("http://127.0.0.1:8765/elsewhere")
+
+
+async def test_a_page_a_reviewer_sent_back_is_fetched_in_full(tmp_path: Path):
+    """No conditional request, no reuse, and never a planned skip: the page is captured anew."""
+    _, first, _ = await _run(tmp_path / "a", "run-1", None)
+    baseline = Baseline([first])
+    baseline.plan_skips([URL], "not due")
+    baseline.force_fresh([URL])
+    ledger, second, sent = await _run(tmp_path / "b", "run-2", baseline)
+    assert sent == [""], "a plain GET: no If-None-Match"
+    assert second.reused_from_run_id is None and second.change_basis != "planned_skip"
+    assert _render_tasks(ledger) == 1, "the full pipeline runs again"
+    assert baseline.forced(URL.replace("http://", "HTTP://")) and not baseline.forced("http://x/y")

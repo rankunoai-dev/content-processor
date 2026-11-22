@@ -56,6 +56,8 @@ class Baseline:
         # forward without any request (see `planned_skip`).
         self.skip_fetch: frozenset[str] = frozenset()
         self.skip_reason = "not due in the recrawl plan"
+        # Pages a reviewer sent back ("scrape again"): fetched in full, never reused.
+        self.force_fetch: frozenset[str] = frozenset()
         for record in records:
             if not self.reusable(record):
                 self.skipped += 1
@@ -90,6 +92,18 @@ class Baseline:
         self.skip_fetch = frozenset(k for k in (url_key(u) for u in urls) if k)
         if reason:
             self.skip_reason = reason
+
+    def force_fresh(self, urls: Iterable[str]) -> None:
+        """Pages to fetch in full: no conditional request, no reuse, no planned skip."""
+        self.force_fetch = frozenset(k for k in (url_key(u) for u in urls) if k)
+
+    def forced(self, *urls: str | None) -> bool:
+        """True when a reviewer asked for this page to be scraped again in full."""
+        if not self.force_fetch:
+            return False
+        return any(
+            (url in self.force_fetch) or (url_key(url) in self.force_fetch) for url in urls if url
+        )
 
     def planned_skip(self, *urls: str | None) -> bool:
         """True when the recrawl plan says one of these addresses need not be fetched."""

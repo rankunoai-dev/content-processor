@@ -31,6 +31,8 @@ export interface Finding {
   evidence: Evidence[];
   status: FindingStatus;
   note: string;
+  /** What the competitor figures rest on when a competitor was lite-scanned. */
+  basis?: string;
 }
 
 export interface GapReport {

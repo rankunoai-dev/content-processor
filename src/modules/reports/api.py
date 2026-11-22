@@ -1,7 +1,7 @@
 """HTTP routes of the downloads.
 
 GET /api/projects/{project}/exports                  every report: available or what to do first
-GET /api/projects/{project}/exports/{key}.{format}   one report as xlsx, csv or docx
+GET /api/projects/{project}/exports/{key}.{format}   one report as xlsx, csv, docx, pdf or json
 GET /api/projects/{project}/exports/all.zip          every available report in every format
 
 Reports are built on request from the modules' latest saved data, into a temporary
@@ -29,6 +29,7 @@ from src.modules.reports.writers import (
     Format,
     Report,
     file_slug,
+    pdf_available,
     word_available,
     write_report,
 )
@@ -38,15 +39,18 @@ __all__ = ["formats", "register_report_routes"]
 _MEDIA = {
     "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "pdf": "application/pdf",
     "csv": "text/csv",
+    "json": "application/json",
     "zip": "application/zip",
 }
-_LABELS = {"xlsx": "Excel", "csv": "CSV", "docx": "Word"}
+_LABELS = {"xlsx": "Excel", "csv": "CSV", "docx": "Word", "pdf": "PDF", "json": "JSON"}
+_NEEDS: dict[str, Callable[[], bool]] = {"docx": word_available, "pdf": pdf_available}
 
 
 def formats() -> list[Format]:
-    """The formats this installation can write (Word needs python-docx)."""
-    return [f for f in FORMATS if f != "docx" or word_available()]
+    """The formats this installation can write (Word needs python-docx, PDF reportlab)."""
+    return [f for f in FORMATS if f not in _NEEDS or _NEEDS[f]()]
 
 
 def _name(project_name: str, key: str) -> str:
@@ -58,8 +62,9 @@ def _readme(project_name: str, built: list[tuple[Report, list[str]]], missing: l
         f"{project_name}: every report, downloaded {datetime.now(UTC):%d %b %Y %H:%M} UTC",
         "",
         "Excel (.xlsx) has every row and the full text. CSV has one file per table (a zip when",
-        "a report has several). Word (.docx) is for reading and sharing; long tables show",
-        "their first rows there.",
+        "a report has several). Word (.docx) and PDF are for reading and sharing; long",
+        "tables show their first rows there. JSON (.json) has every table in full, plus",
+        "the raw record where there is one, for other tools.",
         "",
     ]
     for report, files in built:
@@ -74,6 +79,7 @@ def register_report_routes(
     *,
     projects: ProjectStore,
     analyst_runs: Callable[[str], list[object]] | None = None,
+    analyst_text: Callable[[object], str | None] | None = None,
 ) -> None:
     """Add the download routes (before the app's catch-all routes)."""
 
@@ -84,7 +90,7 @@ def register_report_routes(
             raise HTTPException(status_code=404, detail="There is no such project.") from None
 
     def build(key: str, project_id: str) -> Report | None:
-        return build_report(key, projects, project_id, analyst_runs)
+        return build_report(key, projects, project_id, analyst_runs, analyst_text)
 
     @app.get("/api/projects/{project_id}/exports")
     def catalog(project_id: str) -> dict[str, Any]:

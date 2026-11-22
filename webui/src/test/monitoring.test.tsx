@@ -57,6 +57,7 @@ const check: MonitorCheck = {
           dropped_terms: ['Streamline'],
           blocks_added: { 'pricing blocks': 1, tables: 1 },
           blocks_removed: {},
+          meaning: 0.62,
         },
       ],
       unchanged_pages: 4,
@@ -252,6 +253,7 @@ describe('monitoring tab', () => {
       expect(screen.getByText(/New headings: AI-Powered RFP Evaluation · Generative AI Supplier Matching/)).toBeInTheDocument();
       expect(screen.getByText('Generative')).toBeInTheDocument();
       expect(screen.getByText('+1 pricing blocks, +1 tables')).toBeInTheDocument();
+      expect(screen.getByText('Topic changed 0.62')).toBeInTheDocument(); // meaning, old vs new
     },
     TIMEOUT,
   );

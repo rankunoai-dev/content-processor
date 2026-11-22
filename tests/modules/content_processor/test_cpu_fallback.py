@@ -124,6 +124,7 @@ def test_missing_fastembed_is_said(monkeypatch: pytest.MonkeyPatch) -> None:
         raise ImportError(name)
 
     monkeypatch.setattr(cpu_module.importlib, "import_module", no_module)
+    monkeypatch.setattr(cpu_module.importlib.util, "find_spec", lambda _name: None)
     assert cpu_module.cpu_available() is False
     with pytest.raises(RuntimeError, match="needs fastembed"):
         CpuEmbedder(MODEL)

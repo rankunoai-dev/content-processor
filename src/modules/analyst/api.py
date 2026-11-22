@@ -6,6 +6,8 @@
     POST /api/projects/{project}/analyst/runs                 {card, inputs, backend}
     GET  /api/projects/{project}/analyst/runs                 the project's runs
     GET  /api/projects/{project}/analyst/runs/{run}           record, deliverable, events
+                                                              (`?version=N` for one saved version
+                                                              of a Claude Desktop deliverable)
     GET  /api/projects/{project}/analyst/runs/{run}/events    live progress (Server-Sent Events)
 
 Starting a run writes files and may spend money, so it needs the project's unlock
@@ -33,13 +35,20 @@ from pydantic import Field
 from starlette.background import BackgroundTask
 
 from src.core.schemas import StrictModel
+from src.modules.analyst.desktop import deliverable_text
 from src.modules.analyst.library import CARDS, card
 from src.modules.analyst.models import ActionCard, Backend, Preflight, RunRecord
 from src.modules.analyst.runs import CardRunner
 from src.modules.analyst.tools import TOOLS
 from src.modules.content_processor.projects.security import TokenSigner
 from src.modules.content_processor.projects.store import ProjectNotFoundError
-from src.modules.reports.writers import markdown_to_docx, word_available
+from src.modules.reports.writers import (
+    file_slug,
+    markdown_to_docx,
+    markdown_to_pdf,
+    pdf_available,
+    word_available,
+)
 
 __all__ = ["AnalystWorker", "register_analyst_routes"]
 
@@ -47,6 +56,7 @@ TokenHeader = Annotated[str | None, Header(alias="X-Project-Token")]
 _MAX_TEXT = 2_000_000
 _EVENT_POLL_S = 0.5
 _EVENT_TIMEOUT_S = 1_800.0
+_WORD_MEDIA = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
 
 class CardSummary(StrictModel):
@@ -192,15 +202,26 @@ def register_analyst_routes(
         project(project_id)
         return [r for r in runner.runs.all() if project_id in r.project_ids]
 
+    def run_title(record: RunRecord) -> str:
+        """The card's title, or the deliverable's own title when written in Claude Desktop."""
+        if record.backend == "claude_desktop":
+            return record.title or record.author or "Claude Desktop"
+        try:
+            return card(record.card_id).title
+        except KeyError:
+            return record.card_id
+
     @app.get("/api/projects/{project_id}/analyst/runs/{run_id}")
-    def get_run(project_id: str, run_id: str) -> RunDetail:
+    def get_run(project_id: str, run_id: str, version: int | None = None) -> RunDetail:
         record = run_of(project_id, run_id)
-        folder = runner.runs.folder(run_id)
-        name = record.files.get("deliverable") or record.files.get("context_pack")
-        text = None
-        if name and (folder / name).exists():
-            text = (folder / name).read_text(encoding="utf-8")[:_MAX_TEXT]
-        return RunDetail(record=record, text=text, events=runner.runs.events(run_id))
+        if version is not None and all(v.version != version for v in record.versions):
+            raise HTTPException(status_code=404, detail="This run has no such version.")
+        text = deliverable_text(runner.runs, record, version)
+        return RunDetail(
+            record=record,
+            text=text[:_MAX_TEXT] if text is not None else None,
+            events=runner.runs.events(run_id),
+        )
 
     @app.get("/api/projects/{project_id}/analyst/runs/{run_id}/result/{file_name}")
     def run_result(project_id: str, run_id: str, file_name: str) -> FileResponse:
@@ -210,8 +231,11 @@ def register_analyst_routes(
         if not name or not (folder / name).exists():
             raise HTTPException(status_code=404, detail="This run has no result to download yet.")
         source = folder / name
-        title = f"{chosen_card(record.card_id).title} ({run_id})"
-        stem = f"{record.card_id}_{run_id}_{name.removesuffix('.md')}"
+        title = f"{run_title(record)} ({run_id})"
+        if record.backend == "claude_desktop":
+            stem = f"{file_slug(run_title(record))}_{run_id}_v{record.version}"
+        else:
+            stem = f"{record.card_id}_{run_id}_{name.removesuffix('.md')}"
         if file_name == "result.md":
             return FileResponse(
                 source,
@@ -219,14 +243,18 @@ def register_analyst_routes(
                 media_type="text/markdown",
                 content_disposition_type="attachment",
             )
-        if file_name != "result.docx" or not word_available():
+        if file_name == "result.docx" and word_available():
+            convert, media = markdown_to_docx, _WORD_MEDIA
+        elif file_name == "result.pdf" and pdf_available():
+            convert, media = markdown_to_pdf, "application/pdf"
+        else:
             raise HTTPException(status_code=404, detail="There is no such download.")
         out = Path(tempfile.mkdtemp(prefix="cp-card-"))
-        path = markdown_to_docx(source.read_text(encoding="utf-8"), out / stem, title)
+        path = convert(source.read_text(encoding="utf-8"), out / stem, title)
         return FileResponse(
             path,
             filename=path.name,
-            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            media_type=media,
             content_disposition_type="attachment",
             background=BackgroundTask(shutil.rmtree, out, ignore_errors=True),
         )

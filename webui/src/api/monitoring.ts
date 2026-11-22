@@ -42,6 +42,8 @@ export interface PageChange {
   dropped_terms: string[];
   blocks_added: Record<string, number>;
   blocks_removed: Record<string, number>;
+  /** Meaning of the new version against the old (1 = same topic); null when not scored. */
+  meaning?: number | null;
 }
 
 export interface TemplateChange {
@@ -65,6 +67,8 @@ export interface SiteDiff {
   unchanged_pages: number;
   template_changes: TemplateChange[];
   drift: number;
+  meaning_model?: string | null;
+  meaning_note?: string;
 }
 
 export interface ThemeDrift {

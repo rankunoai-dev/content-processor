@@ -367,10 +367,11 @@ class DecisionOut(StrictModel):
 
     at: datetime
     reviewer: str
-    kind: Literal["contradiction", "review"]
+    kind: Literal["contradiction", "review", "verdict"]
     key: str
     decision: str
     note: str
+    next_step: str = ""
 
 
 class DecisionsResponse(StrictModel):

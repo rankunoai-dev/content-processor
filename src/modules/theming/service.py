@@ -36,6 +36,11 @@ def build_project_themes(
     store = theme_store(projects)
     # a theme keeps its id from the previous build when it is the same theme
     theme_map = carry_ids(store.latest(project_id), build_theme_map(play, project_id, settings))
+    # competitors followed by a lite scan: their unscraped sitemap pages, by address
+    from src.modules.lite_scan.infer import add_inferred
+    from src.modules.lite_scan.service import lite_store
+
+    theme_map = add_inferred(theme_map, lite_store(projects).project(project_id).values())
     path = store.save(theme_map)
     workbook = write_theme_workbook(theme_map, workbook_path(store, theme_map))
     files = {"map": path, "workbook": workbook}

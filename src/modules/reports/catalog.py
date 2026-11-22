@@ -20,6 +20,7 @@ from src.modules.reports.writers import Report
 __all__ = ["REPORTS", "ReportDef", "build_report", "report_def"]
 
 _DATE: Final = "%d %b %Y %H:%M UTC"
+DESKTOP_LABEL: Final = "Written in Claude Desktop"
 
 
 def _when(moment: datetime) -> str:
@@ -33,6 +34,8 @@ class Context:
     projects: ProjectStore
     project: ProjectRecord
     analyst_runs: Callable[[str], list[object]] | None = None
+    analyst_text: Callable[[object], str | None] | None = None
+    """Reads a run's result text (the saved deliverables go into the Word file in full)."""
 
 
 @dataclass(frozen=True)
@@ -137,6 +140,112 @@ def _monitoring(ctx: Context) -> Report | None:
         subtitle=f"Check of {_when(found.created_at)}",
         summary=[f"{len(found.alerts)} alert(s), {high} high; {len(found.websites)} website(s)."],
         tables=check_tables(found),
+        data=found.model_dump(mode="json"),
+    )
+
+
+_HISTORY_CHECKS: Final = 200
+_SEVERITIES: Final = ("high", "medium", "low", "info")
+
+
+def _monitoring_history(ctx: Context) -> Report | None:
+    from src.modules.monitoring.service import monitor_store
+
+    store = monitor_store(ctx.projects)
+    pid = ctx.project.project_id
+    ids = store.history(pid)
+    checks = []
+    for check_id in ids[:_HISTORY_CHECKS]:
+        try:
+            checks.append(store.get(pid, check_id))
+        except (KeyError, ValueError):
+            continue
+    if not checks:
+        return None
+    checks.sort(key=lambda c: c.created_at)
+    runs: list[dict[str, Cell]] = []
+    alerts: list[dict[str, Cell]] = []
+    recurring: dict[tuple[str, str, str], dict[str, Cell]] = {}
+    for check in checks:
+        when = _when(check.created_at)
+        row: dict[str, Cell] = {
+            "Check": check.check_id,
+            "Date": when,
+            "Trigger": check.trigger,
+            "Websites": len(check.websites),
+            "Alerts": len(check.alerts),
+        }
+        for level in _SEVERITIES:
+            row[level.capitalize()] = sum(1 for a in check.alerts if a.severity == level)
+        row["New pages"] = sum(len(d.new_pages) for d in check.websites)
+        row["Removed pages"] = sum(len(d.removed_pages) for d in check.websites)
+        row["Changed pages"] = sum(len(d.changed_pages) for d in check.websites)
+        runs.append(row)
+        for a in check.alerts:
+            alerts.append(
+                {
+                    "Date": when,
+                    "Severity": a.severity,
+                    "Kind": a.kind.replace("_", " "),
+                    "Website": a.website,
+                    "Alert": a.title,
+                    "Detail": a.detail,
+                    "Pages": "\n".join(a.urls[:10]),
+                    "Check": check.check_id,
+                }
+            )
+            key = (a.kind, a.website, a.severity)
+            seen = recurring.setdefault(
+                key,
+                {
+                    "Kind": a.kind.replace("_", " "),
+                    "Website": a.website,
+                    "Severity": a.severity,
+                    "Checks raised": 0,
+                    "First seen": when,
+                    "Last seen": when,
+                    "Latest alert": a.title,
+                },
+            )
+            seen["Checks raised"] = int(seen["Checks raised"] or 0) + 1
+            seen["Last seen"] = when
+            seen["Latest alert"] = a.title
+    alerts.reverse()
+    order = {s: i for i, s in enumerate(_SEVERITIES)}
+    repeat = sorted(
+        recurring.values(),
+        key=lambda r: (order.get(str(r["Severity"]), 9), -int(r["Checks raised"] or 0)),
+    )
+    wrap = frozenset({"Detail", "Pages", "Alert", "Latest alert"})
+    first, last = checks[0], checks[-1]
+    summary = [
+        f"{len(checks)} check(s) from {_when(first.created_at)} to {_when(last.created_at)}; "
+        f"{len(alerts)} alert(s) in all, {sum(1 for a in alerts if a['Severity'] == 'high')} high.",
+    ]
+    if len(ids) > _HISTORY_CHECKS:
+        summary.append(f"Only the latest {_HISTORY_CHECKS} of {len(ids)} checks are included.")
+    return Report(
+        key="monitoring_history",
+        title=f"{ctx.project.name}: monitoring history",
+        subtitle=f"Every check up to {_when(last.created_at)}",
+        summary=summary,
+        tables=[
+            Table("Checks", list(runs[0]), runs),
+            Table(
+                "All alerts",
+                ["Date", "Severity", "Kind", "Website", "Alert", "Detail", "Pages", "Check"],
+                alerts,
+                wrap,
+                {"Alert": 50, "Detail": 70, "Pages": 60},
+            ),
+            Table(
+                "Recurring alerts",
+                list(repeat[0]) if repeat else ["Kind"],
+                repeat,
+                wrap,
+                {"Latest alert": 60},
+            ),
+        ],
     )
 
 
@@ -258,14 +367,20 @@ def _analyst(ctx: Context) -> Report | None:
     if not runs:
         return None
     titles = {c.id: c.title for c in CARDS}
+    how = {"pack": "context pack", "claude": "Claude", "claude_desktop": DESKTOP_LABEL}
     rows: list[dict[str, Cell]] = []
+    saved: list[dict[str, Cell]] = []
+    documents: list[tuple[str, str]] = []
     for r in sorted(runs, key=lambda r: r.created_at, reverse=True):
         check = r.verification
+        desktop = r.backend == "claude_desktop"
         rows.append(
             {
-                "Card": titles.get(r.card_id, r.card_id),
+                "Card": (r.title or r.card_id) if desktop else titles.get(r.card_id, r.card_id),
                 "Run": r.run_id,
-                "How": r.backend,
+                "How": how.get(r.backend, r.backend),
+                "Written by": r.author or "",
+                "Version": r.version if desktop else None,
                 "Status": r.status,
                 "Started": _when(r.created_at),
                 "Finished": _when(r.finished_at) if r.finished_at else "",
@@ -277,17 +392,79 @@ def _analyst(ctx: Context) -> Report | None:
                 "Message": r.message,
             }
         )
+        if not desktop:
+            continue
+        for v in sorted(r.versions, key=lambda v: v.version, reverse=True):
+            saved.append(
+                {
+                    "Title": r.title or "",
+                    "Version": v.version,
+                    "Latest": "yes" if v.version == r.version else "",
+                    "Written by": r.author or "",
+                    "Module": r.module or "",
+                    "Saved": _when(v.saved_at),
+                    "Check": "passed" if v.passed else "needs review",
+                    "Run": r.run_id,
+                }
+            )
+        text = ctx.analyst_text(r) if ctx.analyst_text is not None else None
+        if text:
+            heading = f"{r.title or r.card_id} (version {r.version}, {_when(r.created_at)})"
+            documents.append((heading, text))
+    tables = [Table("Analyst runs", list(rows[0]), rows, wrap_columns=frozenset({"Message"}))]
+    summary = [
+        f"{sum(1 for r in runs if r.status == 'finished')} finished; total cost "
+        f"${sum(r.cost_usd for r in runs):.2f}.",
+        "Each run's own result downloads from the Analyst cards tab (Markdown, Word or PDF).",
+    ]
+    if saved:
+        tables.append(Table(DESKTOP_LABEL, list(saved[0]), saved))
+        summary.append(
+            f"{len(documents)} deliverable(s) written in Claude Desktop, {len(saved)} version(s) "
+            "in all; the Word file has the latest version of each in full."
+        )
     return Report(
         key="analyst",
         title=f"{ctx.project.name}: analyst card runs",
         subtitle=f"{len(rows)} run(s)",
-        summary=[
-            f"{sum(1 for r in runs if r.status == 'finished')} finished; total cost "
-            f"${sum(r.cost_usd for r in runs):.2f}.",
-            "Each run's own result downloads from the Analyst cards tab (Markdown or Word).",
-        ],
-        tables=[Table("Analyst runs", list(rows[0]), rows, wrap_columns=frozenset({"Message"}))],
+        summary=summary,
+        tables=tables,
+        documents=documents,
     )
+
+
+def _semantic(ctx: Context) -> Report | None:
+    from src.modules.content_processor.analysis.semantic_report import read_tables
+    from src.modules.content_processor.projects.project_reports import (
+        project_report_files,
+        project_reports,
+    )
+
+    for bundle in project_reports(ctx.projects, ctx.project.project_id):
+        files = project_report_files(ctx.projects, ctx.project.project_id, bundle.stamp)
+        sidecar = next(
+            (p for n, p in files.items() if n.endswith("_semantic_similarity.json")), None
+        )
+        if sidecar is None:
+            continue
+        counts = bundle.manifest.get("semantic", {})
+        pairs = counts.get("pairs", {}) if isinstance(counts, dict) else {}
+        built = datetime.fromisoformat(str(bundle.manifest.get("built_at")))
+        return Report(
+            key="semantic_similarity",
+            title=f"{ctx.project.name}: semantic similarity",
+            subtitle=f"From the project report built {_when(built)}",
+            summary=[
+                f"{counts.get('pages', 0)} pages; {pairs.get('Identical', 0)} identical, "
+                f"{pairs.get('Copy', 0)} copy, {pairs.get('High', 0)} high and "
+                f"{pairs.get('Moderate', 0)} moderate pairs by meaning; "
+                f"{counts.get('series', 0)} recurring series set aside.",
+                "Scores are on each page's own content (site furniture removed); see the "
+                "Method sheet.",
+            ],
+            tables=read_tables(sidecar),
+        )
+    return None
 
 
 REPORTS: Final[tuple[ReportDef, ...]] = (
@@ -314,6 +491,15 @@ REPORTS: Final[tuple[ReportDef, ...]] = (
         "Alerts ranked by severity, what changed on each website and theme drift.",
         "Run a monitoring check in the Monitoring tab first.",
         _monitoring,
+    ),
+    ReportDef(
+        "monitoring_history",
+        "monitoring",
+        "Monitoring history",
+        "Every monitoring check over time: alert counts per check, every alert ever raised "
+        "and the alerts that keep coming back.",
+        "Run a monitoring check in the Monitoring tab first.",
+        _monitoring_history,
     ),
     ReportDef(
         "recrawl",
@@ -356,6 +542,15 @@ REPORTS: Final[tuple[ReportDef, ...]] = (
         "Run an analyst card in the Analyst cards tab first.",
         _analyst,
     ),
+    ReportDef(
+        "semantic_similarity",
+        "content",
+        "Semantic similarity",
+        "Pages that say the same thing in different words, tiered Identical / Copy / High / "
+        "Moderate on their own content, with recurring series, repeated blocks and topic hubs.",
+        "Build the project report in the Project reports tab first.",
+        _semantic,
+    ),
 )
 
 
@@ -372,7 +567,8 @@ def build_report(
     projects: ProjectStore,
     project_id: str,
     analyst_runs: Callable[[str], list[object]] | None = None,
+    analyst_text: Callable[[object], str | None] | None = None,
 ) -> Report | None:
     """Build one report, or None when its module has nothing yet; raises `KeyError`."""
-    ctx = Context(projects, projects.get(project_id), analyst_runs)
+    ctx = Context(projects, projects.get(project_id), analyst_runs, analyst_text)
     return report_def(key).build(ctx)
