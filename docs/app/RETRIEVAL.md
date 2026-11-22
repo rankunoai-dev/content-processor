@@ -59,5 +59,41 @@ model, fuses the websites by rank, then reranks all candidates together on one s
 
 ## Measured on John Hancock (40 questions, CPU models)
 
-See `docs/eval/john-hancock-2026-11-22/REPORT.md` for the cases. Results before and
-after this change are in the lane log entry of 22 November 2026.
+The same 40 questions as the 22 November test (`docs/eval/john-hancock-2026-11-22/`),
+answered extractively (no local instruct model), on a copy of the store with the
+publication dates added:
+
+| | Before | After |
+|---|---|---|
+| Answer contains the right fact | 15 of 36 | **24 of 36** |
+| Right page first in search | 18 of 36 | **29 of 36** |
+| Right page in the first 3 / 10 | 28 / 30 of 36 | 31 / 31 of 36 |
+| Unanswerable questions answered "not found" | 0 of 4 | 2 of 4 |
+| Answerable questions wrongly "not found" | 1 | 1 |
+| Quotes word for word | 81 of 81 | 103 of 103 |
+| Time per question (typical, this computer) | 0.2-0.4 s | about 3 s search, 4-5 s answer (up to 15 s while a scrape runs) |
+
+By intent after: facts 9 of 9, people 3 of 3, paraphrase and other language 2 of 2,
+explanations 4 of 5, rules 2 of 3, recency 1 of 2, numbers in tables 3 of 10, exact
+codes 0 of 2, not on the website 2 of 4.
+
+What is still missing:
+
+- **Numbers in tables** (7 of 10 fail): tables are stored one cell per line, so a value
+  is not next to its fund and column. The fix is in extraction (rows with headers), then
+  re-indexing.
+- **Two unanswerable questions still answered**: "Does John Hancock offer pet
+  insurance?" and a false premise ("Why did John Hancock shut down Vitality?") score like
+  real answers with the reranker; a local instruct model is needed to say "no".
+- **A form code alone** ("ACHEFTFM") finds its page first, but the code is only in the
+  title and address, so no sentence answers it.
+- **Speed**: the reranker is about 0.2 s per passage on this 20-thread CPU when it is not
+  busy; a small container (2 vCPUs) would take several times longer and needs about
+  1.1 GB of memory, so `CP_RERANK=auto` uses it only where the model was put in the
+  model cache. `CP_RERANK_POOL`, `CP_RERANK_SENTENCES` and `CP_RERANK_THREADS` trade time
+  for quality.
+
+**Dates in existing stores**: the publication date is written when a website is indexed.
+A store indexed before this change has none, and date hints stay off for it (they need
+dates on most candidates) until the run is indexed again (unchanged sections keep their
+vectors, so this is quick).

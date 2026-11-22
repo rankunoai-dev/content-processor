@@ -52,6 +52,7 @@ class CrossEncoderReranker:
         download: bool = False,
         backend: Any = None,
         max_chars: int = _MAX_PASSAGE_CHARS,
+        threads: int | None = None,
     ) -> None:
         """Load the model; raises `RuntimeError` when it cannot (missing and no download).
 
@@ -71,7 +72,10 @@ class CrossEncoderReranker:
             raise RuntimeError(msg) from exc
         try:
             self._model = TextCrossEncoder(
-                model_name=model_name, cache_dir=cache_dir, local_files_only=not download
+                model_name=model_name,
+                cache_dir=cache_dir,
+                local_files_only=not download,
+                threads=threads,
             )
         except Exception as exc:  # noqa: BLE001 - not cached, broken cache, unknown model
             how = "" if download else " (not in the model cache; CP_RERANK=on downloads it)"
@@ -122,6 +126,7 @@ def get_reranker() -> Reranker | None:
                 cache_dir=str(settings.cp_model_cache_dir),
                 download=mode == "on",
                 max_chars=settings.cp_rerank_max_chars,
+                threads=settings.cp_rerank_threads or None,
             )
         except RuntimeError as exc:
             _FAILED[key] = time.monotonic()

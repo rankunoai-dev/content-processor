@@ -196,6 +196,8 @@ class Settings(BaseSettings):
     cp_rerank_pool: int = Field(default=12, ge=3, le=200)
     cp_rerank_max_chars: int = Field(default=2_000, ge=100, le=4_000)
     cp_rerank_sentences: int = Field(default=15, ge=1, le=100)
+    # CPU threads the reranker may use (0 = all cores; set to the container's vCPUs).
+    cp_rerank_threads: int = Field(default=0, ge=0, le=64)
     cp_rerank_min_score: float = Field(default=-0.5, ge=-20.0, le=20.0)
     # Diversity (maximal marginal relevance): 1.0 = relevance only; lower values trade
     # some relevance for passages that differ from those already chosen.
