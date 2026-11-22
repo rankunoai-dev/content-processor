@@ -1,6 +1,6 @@
 # Content Processor: A Plain-Language Guide
 
-Last updated: 23 November 2026 · Code version: main with relevance checking and better search results (reranking, "not found", dates, diversity), bge-m3 multilingual embeddings, competitor lite scan, in-app verdict reviews, team accounts, and topic drift
+Last updated: 23 November 2026 · Code version: main with one search for every scope, relevance checking and better search results (reranking, "not found", dates, diversity), bge-m3 multilingual embeddings, competitor lite scan, in-app verdict reviews, team accounts, and topic drift
 
 ## 1. What this is, in one paragraph
 
@@ -572,6 +572,7 @@ On the John Hancock scrape the Review tab opens on four pages out of 306: a PDF 
 
 | Date | Significant change |
 |---|---|
+| 2026-11-23 | One search for everything: a question about one website and a question about a whole project (several websites and competitors) now go through exactly the same steps, so the relevance check, the one-copy rule for repeated text, the date hints and the variety of results work across all the websites together. Asking for one kind of passage (for example pricing or FAQ answers) now finds it even when it is rare. Same results on John Hancock (one website). |
 | 2026-11-23 | Search and answers: a second, multilingual model checks that each passage really answers the question, so the knowledge base can say "not found"; repeated paragraphs count once, results are chosen to add something new, a date or "latest" in a question moves the matching pages up, searches can be limited to a date range, and quoted answers skip titles and labels. On John Hancock the right fact was in the answer for 24 of 36 questions instead of 15. Searches on big websites no longer read every vector from disk each time. |
 | 2026-11-22 | PDFs: a password-protected PDF is reported as such and set aside for a person to obtain, without wasted OCR; lines repeated at the top or bottom of most pages (titles, page numbers, copyright) are marked as page furniture and kept out of search, duplicates and meaning scores. |
 | 2026-11-20 | Topic drift in Monitoring: each changed page's old and new versions are compared by meaning with the knowledge base's model (0 to 1). Below 0.85 the page changed topic, shown on the page in the Monitoring tab and in the workbook; a competitor page that changed topic raises an alert, high on a pillar page. Also: the safety check now reads the newer kind of internet address some networks give (NAT64) correctly, so those websites are no longer refused while private addresses stay blocked. |

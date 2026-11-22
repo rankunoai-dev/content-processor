@@ -1,90 +1,40 @@
 """Search several knowledge spaces at once: one website, a project, or several projects.
 
-Every website of every project has its own knowledge space (its own store
-namespace, see docs/app/ARCHITECTURE_PROJECTS_AND_SITES.md). A question is asked
-of a *scope*: the list of spaces the bot may read. Each space is searched on its
-own, with the embedding model it was built with, and the per-space rankings are
-fused by rank (RRF), so spaces built with different models can be searched
-together without comparing their vectors. Every hit says which project and
-website it came from. A space that cannot be searched (never indexed, or its
-model is not available) is skipped and named, never silently left out.
-
-With a reranker, the fused candidates of every space are scored together against the
-question (one scale for all websites, whatever model built their vectors); passages
-below the minimum score are dropped and counted, so a question none of the websites
-answers returns no passages instead of the closest-sounding ones.
+Every website of every project has its own knowledge space (its own store namespace,
+see docs/app/ARCHITECTURE_PROJECTS_AND_SITES.md). A question is asked of a *scope*: the
+list of spaces the bot may read. The search itself is `retrieve.retrieve` (RFC 0005):
+candidates per website with its own model and pre-filters, then one global fusion, one
+copy of repeated text, one rerank and one MMR. This module keeps the older names.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass, field
 
-from src.modules.content_processor.knowledge.embedders import Embedder, model_kind
+from src.modules.content_processor.knowledge.embedders import Embedder
 from src.modules.content_processor.knowledge.reranker import Reranker
-from src.modules.content_processor.knowledge.retrieval import (
-    SearchHit,
-    hybrid_search,
-    keyword_only_search,
-    rrf,
+from src.modules.content_processor.knowledge.retrieve import (
+    PER_SPACE_POOL,
+    Filters,
+    Retrieval,
+    RetrievedHit,
+    Space,
+    retrieve,
+    space_namespace,
 )
 from src.modules.content_processor.knowledge.vector_store import DateRange, VectorStore
 
-__all__ = ["FederatedHit", "FederatedResult", "Space", "federated_search", "space_namespace"]
+__all__ = [
+    "PER_SPACE_POOL",
+    "FederatedHit",
+    "FederatedResult",
+    "Space",
+    "federated_search",
+    "space_namespace",
+]
 
-PER_SPACE_POOL = 20
-
-
-def space_namespace(tenant: str, project_id: str, site_id: str) -> str:
-    """The store namespace of one website of one project."""
-    return f"{tenant}.{project_id}.{site_id}"
-
-
-@dataclass(frozen=True)
-class Space:
-    """One website's knowledge space, with the names a person recognises."""
-
-    namespace: str
-    project_id: str
-    project_name: str
-    site_id: str
-    site_name: str
-    role: str
-
-
-@dataclass
-class FederatedHit:
-    """A passage found in one space, with its place in the fused ranking."""
-
-    space: Space
-    hit: SearchHit
-    rank: int
-    score: float
-
-
-@dataclass
-class FederatedResult:
-    """The fused hits, which spaces were searched and which were skipped (with why).
-
-    `words_only` lists the spaces searched by exact words alone: indexed without a
-    meaning model, or the model could not be reached (still searched, with less recall).
-    `lighter` lists the spaces whose meaning came from the CPU fallback model.
-    """
-
-    hits: list[FederatedHit] = field(default_factory=list)
-    searched: list[Space] = field(default_factory=list)
-    skipped: list[tuple[Space, str]] = field(default_factory=list)
-    words_only: list[tuple[Space, str]] = field(default_factory=list)
-    lighter: list[tuple[Space, str]] = field(default_factory=list)
-    reranked_by: str | None = None
-    below_relevance: int = 0
-
-    def by_site(self) -> dict[str, list[FederatedHit]]:
-        """The hits grouped by website, best first: the side-by-side comparison view."""
-        out: dict[str, list[FederatedHit]] = {}
-        for hit in self.hits:
-            out.setdefault(hit.space.namespace, []).append(hit)
-        return out
+FederatedHit = RetrievedHit
+FederatedResult = Retrieval
 
 
 def federated_search(
@@ -99,101 +49,18 @@ def federated_search(
     reranker: Reranker | None = None,
     min_score: float | None = None,
     published: DateRange | None = None,
-) -> FederatedResult:
-    """Search every space in scope and fuse the results.
-
-    Args:
-        spaces: The scope: only these spaces are read.
-        query: The question or search words.
-        open_store: Opens a space's store (the caller decides SQLite or Postgres).
-        embedder_for: The embedder for a model name, as a space's metadata names it.
-        top_k: Hits to return overall.
-        per_site: When set, up to this many hits per website instead (comparisons).
-        pool: Hits taken from each space before fusing.
-        reranker: Scores the fused candidates against the question; those below
-            `min_score` (default `CP_RERANK_MIN_SCORE`) are dropped.
-        min_score: The reranker score a passage needs.
-        published: Only passages of pages published in this date range.
-    """
-    result = FederatedResult()
-    rankings: list[list[tuple[str, float]]] = []
-    found: dict[str, tuple[Space, SearchHit]] = {}
-    embedders: dict[str, Embedder] = {}
-    try:
-        for space in spaces:
-            store = open_store(space)
-            try:
-                model = store.meta().get("model")
-                if not model:
-                    result.skipped.append((space, "not indexed yet: scrape this website first"))
-                    continue
-                try:
-                    embedder = embedders.get(model) or embedder_for(model)
-                    embedders[model] = embedder
-                    hits = hybrid_search(store, embedder, query, top_k=pool, published=published)
-                    if model_kind(model) == "words only":
-                        result.words_only.append(
-                            (space, "indexed without a meaning model: searched by exact words")
-                        )
-                    elif model_kind(model) == "CPU fallback":
-                        result.lighter.append(
-                            (space, "meaning from the lighter CPU fallback model (not bge-m3)")
-                        )
-                except (RuntimeError, ValueError) as exc:
-                    try:
-                        hits = keyword_only_search(store, query, top_k=pool)
-                    except (RuntimeError, ValueError) as again:
-                        result.skipped.append((space, f"could not be searched: {again}"))
-                        continue
-                    result.words_only.append((space, f"searched by exact words only: {exc}"))
-            finally:
-                store.close()
-            result.searched.append(space)
-            ranking: list[tuple[str, float]] = []
-            for hit in hits:
-                key = f"{space.namespace}\x1f{hit.chunk.chunk_id}"
-                found[key] = (space, hit)
-                ranking.append((key, hit.score))
-            rankings.append(ranking)
-    finally:
-        for embedder in embedders.values():
-            embedder.close()
-
-    fused = rrf(rankings)
-    ordered = sorted(fused, key=lambda key: (-fused[key], key))
-    if reranker is not None and ordered:
-        from src.modules.content_processor.knowledge.retrieval import _settings
-
-        _lam, rerank_pool, default_min = _settings()
-        floor = default_min if min_score is None else min_score
-        wanted = top_k if per_site is None else per_site * max(len(result.searched), 1)
-        head = ordered[: max(rerank_pool, wanted)]
-        scores = reranker.score(
-            query,
-            [
-                f"{found[k][1].chunk.context_header}\n{found[k][1].chunk.verbatim_text}"
-                for k in head
-            ],
-        )
-        by_key = dict(zip(head, scores, strict=True))
-        for key, value in by_key.items():
-            found[key][1].rerank_score = round(value, 4)
-        kept = [k for k in sorted(head, key=lambda k: -by_key[k]) if by_key[k] >= floor]
-        result.reranked_by = reranker.model
-        result.below_relevance = len(head) - len(kept)
-        ordered = kept
-    if per_site is not None:
-        taken: dict[str, int] = {}
-        picked = []
-        for key in ordered:
-            namespace = found[key][0].namespace
-            if taken.get(namespace, 0) < per_site:
-                taken[namespace] = taken.get(namespace, 0) + 1
-                picked.append(key)
-        ordered = picked
-    else:
-        ordered = ordered[:top_k]
-    for rank, key in enumerate(ordered, start=1):
-        space, hit = found[key]
-        result.hits.append(FederatedHit(space=space, hit=hit, rank=rank, score=fused[key]))
-    return result
+    roles: frozenset[str] | None = None,
+) -> Retrieval:
+    """`retrieve` with the older argument names (see `retrieve` for each one)."""
+    return retrieve(
+        spaces,
+        query,
+        open_store=open_store,
+        embedder_for=embedder_for,
+        filters=Filters(published=published, roles=roles),
+        k=top_k,
+        per_site=per_site,
+        pool=pool,
+        reranker=reranker,
+        min_score=min_score,
+    )

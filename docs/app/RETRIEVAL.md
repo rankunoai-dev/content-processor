@@ -1,26 +1,34 @@
 # Retrieval: how the knowledge base finds passages, and why each choice
 
-Code: `src/modules/content_processor/knowledge/` (`vector_store.py`, `retrieval.py`,
-`reranker.py`, `query_dates.py`, `federated.py`). Settings: `CP_VECTOR_CACHE_MB`,
+Code: `src/modules/content_processor/knowledge/`: `retrieve.py` (the one retriever,
+RFC 0005 step 1), `vector_store.py`, `reranker.py`, `query_dates.py`; `retrieval.py`
+(answers) and `federated.py` re-export the search names for older callers. Settings: `CP_VECTOR_CACHE_MB`,
 `CP_HNSW_EF_SEARCH`, `CP_RERANK*`, `CP_MMR_LAMBDA` (see `.env.example`).
 
 ## Pipeline for one question
+
+The same function, `retrieve(scope, query, filters, k)`, runs for one website (`kb search`,
+`kb ask`) and for a project or several projects (the app's search, Claude Desktop's
+`search_knowledge`, action cards). Steps 1-3 run in each website with its own model;
+steps 4-7 run once, over all websites together.
 
 1. **Embed the question** with the model the website was indexed with (refused when it
    differs: vectors of two models are not comparable).
 2. **Dense retrieval** (vector similarity, cosine) and **sparse retrieval** (BM25 over
    FTS5 in SQLite, `ts_rank_cd` over a GIN `tsvector` index in Postgres), 50 candidates
    each. Question words such as "what", "is", "the" are left out of the keyword query.
-3. **Metadata pre-filtering**: an offering scope or a publication-date range chosen by a
-   person or a tool is applied *before* scoring (SQLite masks the matrix and puts the
+3. **Metadata pre-filtering**: an offering scope, a publication-date range or passage roles
+   (claim, feature, pricing, proof, FAQ, call to act) chosen by a person or a tool are
+   applied *before* scoring (SQLite masks the matrix and puts the
    filter in the FTS query; Postgres filters in SQL with pgvector's iterative scan), so a
    narrow filter still returns its best passages.
-4. **Reciprocal rank fusion** (k = 60) merges the two rankings. A question that names a
+4. **Reciprocal rank fusion** (k = 60) merges every website's two rankings into one. A question that names a
    date or asks for "the latest" adds a third ranking (closest publication date, or
    newest first), counted twice: a hint that reorders, never a filter ("the 2026 annual
    meeting" was announced in 2025).
-5. **One copy of the same text**: a paragraph repeated on many pages (a teaser on every
-   podcast page, a disclaimer, a re-published release) is kept once, at its best rank.
+5. **One copy of the same text**, across all websites: a paragraph repeated on many pages
+   (a teaser on every podcast page, a disclaimer, a release syndicated by two websites)
+   is kept once, at its best rank.
 6. **Reranking** with a cross-encoder (`jinaai/jina-reranker-v2-base-multilingual`, 100+
    languages, CPU via fastembed): the best 12 candidates are read together with the
    question. Passages below `CP_RERANK_MIN_SCORE` (-0.5) are dropped; when none are left,
@@ -34,8 +42,13 @@ Code: `src/modules/content_processor/knowledge/` (`vector_store.py`, `retrieval.
    reranker; headings and labels are never chosen, a bullet keeps its lead-in ("We do
    not: • sell..."), and an amount or date question prefers sentences that carry one.
 
-Federated search (a project, or several) runs steps 1-5 per website with that website's
-model, fuses the websites by rank, then reranks all candidates together on one scale.
+Comparisons (`per_site`): every website's best candidates are always reranked, and MMR
+takes up to that many passages from each website. Diversity compares passages of one
+website by their vectors and passages of two websites by their words (their vectors come
+from different models). Before RFC 0005 the project search reranked and diversified each
+website separately, then merged them: a passage the reranker would have ranked first
+could be cut by one website's diversity step, and a release syndicated by two websites
+came back twice.
 
 ## The concepts, and where each is used
 
@@ -45,7 +58,7 @@ model, fuses the websites by rank, then reranks all candidates together on one s
 | ANN / HNSW | Postgres store: `hnsw (vector_cosine_ops)` | The right index for many vectors that change; `ef_search` raised to 100 (pgvector's 40 returned at most 40 rows), iterative scan on pgvector 0.8+, exact rerun of a short filtered search on older versions |
 | IVF, product quantization | Not used | Pay off at millions of vectors; IVF needs retraining as pages change |
 | Vector index vs metadata indexes | HNSW for vectors; B-tree on site, offering, page, text hash, publication date; FTS5 / GIN for words | Hybrid search needs both |
-| Pre- vs post-filtering | Pre-filtering in both stores | Post-filtering after HNSW lost a small website's rows (all websites share one index) |
+| Pre- vs post-filtering | Pre-filtering in both stores, for offering, dates and passage role | Post-filtering after HNSW lost a small website's rows (all websites share one index) |
 | Vector DB vs relational | Vectors in the database with their verbatim text and evidence ids | Every answer must quote stored text; one store keeps them in step |
 | Persistence | SQLite file per website (needs a persistent volume on Railway); Postgres | Postgres path has not yet run against a real server |
 | Namespaces | One per tenant, project and website | Websites indexed with different models can be searched together |

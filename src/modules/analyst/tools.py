@@ -24,7 +24,6 @@ from src.integrations.evidence_store import LocalEvidenceStore
 from src.modules.analyst.playground import Playground, ScopeError, SiteData
 from src.modules.content_processor.export.commands import load_records
 from src.modules.content_processor.knowledge.catalog_models import Catalog
-from src.modules.content_processor.knowledge.federated import federated_search
 from src.modules.content_processor.knowledge.inventory_models import PageInventory
 from src.modules.content_processor.knowledge.models import PageStamp
 from src.modules.content_processor.knowledge.numeric import np
@@ -302,31 +301,27 @@ def _search(play: Playground, args: SearchInput) -> dict[str, Any]:
             skipped.append({"website": website.key, "reason": "not scraped or not indexed yet"})
         else:
             spaces.append(data.copy.space())
-    wanted = args.top_k * 3 if args.role else args.top_k
-    per_site = args.per_site * 3 if (args.per_site and args.role) else args.per_site
     from src.modules.content_processor.knowledge.reranker import get_reranker
+    from src.modules.content_processor.knowledge.retrieve import Filters, retrieve
 
-    result = federated_search(
+    # the role is a filter before scoring (a rare role still finds its best passages), and
+    # the per-website quota is part of the selection: no over-fetching and cutting after
+    result = retrieve(
         spaces,
         args.query,
         open_store=play.access.open_store,
         embedder_for=play.access.embedder_for,
-        top_k=wanted,
-        per_site=per_site,
+        filters=Filters(roles=frozenset({args.role}) if args.role else None),
+        k=args.top_k,
+        per_site=args.per_site,
         reranker=get_reranker(),
     )
     by_namespace = {d.copy.namespace: w for w in websites if (d := play.site_data(w)) is not None}
     passages = []
-    taken: dict[str, int] = {}
     for found in result.hits:
         chunk = found.hit.chunk
-        if args.role and chunk.chunk_role != args.role:
-            continue
         owner = by_namespace.get(found.space.namespace)
         key = owner.key if owner else found.space.site_name
-        if args.per_site and taken.get(key, 0) >= args.per_site:
-            continue
-        taken[key] = taken.get(key, 0) + 1
         ref = play.ledger.chunk(
             chunk.chunk_id,
             website=key,

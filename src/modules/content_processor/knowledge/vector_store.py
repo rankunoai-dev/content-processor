@@ -209,6 +209,7 @@ class VectorStore(Protocol):
         limit: int,
         offerings: set[str] | None,
         published: DateRange | None = None,
+        roles: set[str] | None = None,
     ) -> list[tuple[str, float]]:
         """Chunk ids by cosine similarity, best first, among chunks that pass the filters."""
         ...
@@ -219,6 +220,7 @@ class VectorStore(Protocol):
         limit: int,
         offerings: set[str] | None,
         published: DateRange | None = None,
+        roles: set[str] | None = None,
     ) -> list[tuple[str, float]]:
         """Chunk ids by full-text match, best first, among chunks that pass the filters."""
         ...
@@ -385,6 +387,7 @@ class _Matrix:
     ids: list[str]
     offerings: list[str | None]
     published: list[str | None]
+    roles: list[str | None]
     matrix: np.ndarray[Any, np.dtype[np.float32]]
     row_of: dict[str, int]
 
@@ -393,7 +396,7 @@ class _Matrix:
         return int(self.matrix.nbytes) + 200 * len(self.ids)
 
 
-_MATRICES: OrderedDict[str, tuple[tuple[int, int], _Matrix]] = OrderedDict()
+_MATRICES: OrderedDict[str, tuple[tuple[int, int, int], _Matrix]] = OrderedDict()
 _MATRICES_LOCK = threading.Lock()
 
 
@@ -413,12 +416,20 @@ def clear_vector_cache() -> None:
         _MATRICES.clear()
 
 
-def _file_version(path: str) -> tuple[int, int]:
+def _file_version(path: str) -> tuple[int, int, int]:
+    """What changes when the file is written: time, size and SQLite's change counter.
+
+    The counter (header bytes 24-27) goes up with every committed write in rollback-journal
+    mode; time and size alone can stay the same for two writes in one clock tick.
+    """
     try:
         st = os.stat(path)
+        with open(path, "rb") as handle:
+            header = handle.read(28)
     except OSError:
-        return (0, 0)
-    return (st.st_mtime_ns, st.st_size)
+        return (0, 0, 0)
+    counter = int.from_bytes(header[24:28], "big") if len(header) >= 28 else 0
+    return (st.st_mtime_ns, st.st_size, counter)
 
 
 def _in_range(value: str | None, published: DateRange | None) -> bool:
@@ -598,14 +609,16 @@ class SqliteVectorStore:
         ids: list[str] = []
         offerings: list[str | None] = []
         published: list[str | None] = []
+        roles: list[str | None] = []
         blobs: list[np.ndarray[Any, Any]] = []
         for row in self._db.execute(
-            "SELECT chunk_id, offering_id, published_at, embedding FROM chunk_vectors"
+            "SELECT chunk_id, offering_id, published_at, chunk_role, embedding FROM chunk_vectors"
             " ORDER BY chunk_id"
         ):
             ids.append(row["chunk_id"])
             offerings.append(row["offering_id"])
             published.append(row["published_at"])
+            roles.append(row["chunk_role"])
             blobs.append(np.frombuffer(row["embedding"], np.float32))
         # only the columns some vector uses: a 384-number model padded to 1,024 (older
         # stores kept the zeros on disk) is searched at 384 numbers per row
@@ -618,7 +631,9 @@ class SqliteVectorStore:
         for i, blob in enumerate(blobs):
             part = blob[:width]
             matrix[i, : len(part)] = part
-        loaded = _Matrix(ids, offerings, published, matrix, {c: i for i, c in enumerate(ids)})
+        loaded = _Matrix(
+            ids, offerings, published, roles, matrix, {c: i for i, c in enumerate(ids)}
+        )
         limit = _cache_limit()
         with _MATRICES_LOCK:
             _MATRICES.pop(self._key, None)
@@ -636,6 +651,7 @@ class SqliteVectorStore:
         limit: int,
         offerings: set[str] | None,
         published: DateRange | None = None,
+        roles: set[str] | None = None,
     ) -> list[tuple[str, float]]:
         """Exact cosine similarity over the chunks that pass the filters (unit vectors).
 
@@ -652,12 +668,13 @@ class SqliteVectorStore:
         else:
             query = np.concatenate([query, np.zeros(width - len(query), dtype=np.float32)])
         rows = np.arange(len(m.ids))
-        if offerings is not None or published is not None:
+        if offerings is not None or published is not None or roles is not None:
             rows = np.fromiter(
                 (
                     i
                     for i in range(len(m.ids))
                     if (offerings is None or m.offerings[i] in offerings)
+                    and (roles is None or m.roles[i] in roles)
                     and _in_range(m.published[i], published)
                 ),
                 dtype=np.int64,
@@ -683,6 +700,7 @@ class SqliteVectorStore:
         limit: int,
         offerings: set[str] | None,
         published: DateRange | None = None,
+        roles: set[str] | None = None,
     ) -> list[tuple[str, float]]:
         """FTS5 match on any meaningful query word (BM25), best first, filters in the query."""
         tokens = keyword_terms(query)
@@ -696,6 +714,11 @@ class SqliteVectorStore:
                 return []
             where.append(f"c.offering_id IN ({','.join('?' * len(offerings))})")
             params.extend(sorted(offerings))
+        if roles is not None:
+            if not roles:
+                return []
+            where.append(f"c.chunk_role IN ({','.join('?' * len(roles))})")
+            params.extend(sorted(roles))
         if published is not None:
             where.append("c.published_at IS NOT NULL")
             if published[0] is not None:
@@ -1005,11 +1028,17 @@ class PgVectorStore:
         return {r["offering_id"]: r["parent_id"] for r in rows}
 
     def _filters(
-        self, offerings: set[str] | None, published: DateRange | None
+        self,
+        offerings: set[str] | None,
+        published: DateRange | None,
+        roles: set[str] | None = None,
     ) -> tuple[str, list[Any]]:
         where = " AND (%s::text[] IS NULL OR offering_id = ANY(%s::text[]))"
         chosen = sorted(offerings) if offerings is not None else None
         params: list[Any] = [chosen, chosen]
+        if roles is not None:
+            where += " AND chunk_role = ANY(%s::text[])"
+            params.append(sorted(roles))
         if published is not None:
             where += " AND published_at IS NOT NULL"
             if published[0] is not None:
@@ -1026,6 +1055,7 @@ class PgVectorStore:
         limit: int,
         offerings: set[str] | None,
         published: DateRange | None = None,
+        roles: set[str] | None = None,
     ) -> list[tuple[str, float]]:
         """Nearest chunks by cosine distance through the HNSW index, filters applied.
 
@@ -1035,7 +1065,7 @@ class PgVectorStore:
         the filters. On older pgvector a filtered search that comes back short is run
         again exactly (index off), so a small website never loses its results.
         """
-        where, params = self._filters(offerings, published)
+        where, params = self._filters(offerings, published, roles)
         literal = _vector_literal(vector)
         statement = (
             "SELECT chunk_id, 1 - (embedding <=> %s::vector) AS score"  # noqa: S608 - placeholders only
@@ -1079,12 +1109,13 @@ class PgVectorStore:
         limit: int,
         offerings: set[str] | None,
         published: DateRange | None = None,
+        roles: set[str] | None = None,
     ) -> list[tuple[str, float]]:
         """`tsvector` match on any meaningful query word, ranked by `ts_rank_cd`."""
         tokens = keyword_terms(query)
         if not tokens:
             return []
-        where, params = self._filters(offerings, published)
+        where, params = self._filters(offerings, published, roles)
         statement = (
             "SELECT chunk_id, ts_rank_cd(tsv, q) AS score"  # noqa: S608 - placeholders only
             " FROM knowledge.chunk_vectors, to_tsquery('english', %s) AS q"

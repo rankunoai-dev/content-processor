@@ -1,6 +1,7 @@
 """Search and evidence-backed answers over the vector store (RFC 0002, Stage E).
 
-`hybrid_search` is a retriever followed by a reranker:
+Search lives in `retrieve.py` (one retriever for one website or a whole scope, RFC 0005);
+its names are re-exported here so older imports keep working. The stages:
 
 1. **Dense and sparse retrieval.** Vector similarity (dense: same meaning) and BM25 over
    the keyword index (sparse: exact terms such as form numbers, fund codes, product
@@ -41,19 +42,26 @@ highlights the quote on the live page), block ids and evidence ids.
 from __future__ import annotations
 
 import json
-import math
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from datetime import date
 from typing import Any, Literal
 from urllib.parse import quote as url_quote
 
 from src.modules.content_processor.knowledge.assist import LocalChat, quote_in
 from src.modules.content_processor.knowledge.embedders import Embedder
-from src.modules.content_processor.knowledge.numeric import np
-from src.modules.content_processor.knowledge.query_dates import DateIntent, date_intent
 from src.modules.content_processor.knowledge.reranker import Reranker
+from src.modules.content_processor.knowledge.retrieve import (
+    RRF_K,
+    EmbedderMismatchError,
+    SearchHit,
+    _text_key,
+    hybrid_search,
+    keyword_only_search,
+    mmr,
+    offering_scope,
+    rrf,
+)
 from src.modules.content_processor.knowledge.vector_store import (
     ChunkRow,
     DateRange,
@@ -64,6 +72,7 @@ from src.modules.content_processor.knowledge.vector_store import (
 __all__ = [
     "RRF_K",
     "Answer",
+    "EmbedderMismatchError",
     "AnswerPoint",
     "SearchHit",
     "Source",
@@ -72,6 +81,7 @@ __all__ = [
     "fragment_link",
     "hybrid_search",
     "keyword_only_search",
+    "mmr",
     "offering_scope",
     "render_answer",
     "render_hits",
@@ -79,13 +89,6 @@ __all__ = [
     "sentences",
 ]
 
-RRF_K = 60
-_POOL = 50
-_RERANK_POOL = 12
-_MMR_LAMBDA = 0.75
-_DEDUPE_CHARS = 600
-_DATE_WEIGHT = 2  # the date ranking counts twice in the fusion when the question names one
-_DATE_BAND = 0.5  # reranker scores this close count as a tie, broken by the date
 _MIN_SENTENCE_WORDS = 5
 _RERANK_SENTENCES = 15
 _SENTENCE_MARGIN = 3.0
@@ -178,269 +181,13 @@ _SYSTEM = (
 )
 
 
-@dataclass
-class SearchHit:
-    """One passage found, with its rank in each search and the fused score."""
-
-    chunk: ChunkRow
-    score: float
-    vector_rank: int | None = None
-    vector_score: float | None = None
-    keyword_rank: int | None = None
-    keyword_score: float | None = None
-    rerank_score: float | None = None
-    date_rank: int | None = None
-
-
-def rrf(rankings: Sequence[Sequence[tuple[str, float]]], k: int = RRF_K) -> dict[str, float]:
-    """Reciprocal rank fusion: sum of 1 / (k + rank) over the rankings an id appears in."""
-    fused: dict[str, float] = {}
-    for ranking in rankings:
-        for rank, (item, _score) in enumerate(ranking, start=1):
-            fused[item] = fused.get(item, 0.0) + 1.0 / (k + rank)
-    return fused
-
-
-def _settings() -> tuple[float, int, float]:
-    """(MMR lambda, rerank pool, minimum rerank score) from the settings."""
-    try:
-        from src.core.config import get_settings
-
-        cfg = get_settings()
-        return cfg.cp_mmr_lambda, cfg.cp_rerank_pool, cfg.cp_rerank_min_score
-    except Exception:  # noqa: BLE001 - settings unavailable: the documented defaults
-        return _MMR_LAMBDA, _RERANK_POOL, -0.5
-
-
 def _rerank_sentences() -> int:
     try:
         from src.core.config import get_settings
 
         return int(get_settings().cp_rerank_sentences)
-    except Exception:  # noqa: BLE001
+    except Exception:  # noqa: BLE001 - settings unavailable: the documented default
         return _RERANK_SENTENCES
-
-
-def _text_key(text: str) -> str:
-    return " ".join(_WORD.findall(text.casefold()))[:_DEDUPE_CHARS]
-
-
-def _date_ranking(order: Sequence[str], rows: dict[str, ChunkRow], intent: DateIntent) -> list[str]:
-    """Candidates by closeness to the named date (or newest first); [] when most lack a date."""
-    dated = [c for c in order if c in rows and rows[c].published_at]
-    if not intent.any or len(dated) * 2 < min(len(order), 20):
-        return []
-    if intent.target is not None:
-        target = intent.target
-
-        def distance(cid: str) -> int:
-            day = date.fromisoformat(str(rows[cid].published_at)[:10])
-            return abs((day - target).days)
-
-        return sorted(dated, key=lambda c: (distance(c), order.index(c)))
-    return sorted(dated, key=lambda c: (str(rows[c].published_at), -order.index(c)), reverse=True)
-
-
-def mmr(
-    candidates: Sequence[str],
-    relevance: dict[str, float],
-    vectors: dict[str, list[float]],
-    k: int,
-    lam: float,
-) -> list[str]:
-    """Maximal marginal relevance: pick the best balance of relevance and novelty.
-
-    Each pick maximises lam * relevance - (1 - lam) * its highest similarity to a passage
-    already picked; `relevance` is on a 0-1 scale.
-    """
-    if lam >= 1.0 or len(candidates) <= 1:
-        return list(candidates[:k])
-    scaled = relevance
-    unit: dict[str, Any] = {}
-    for c in candidates:
-        if c in vectors:
-            v = np.asarray(vectors[c], dtype=np.float32)
-            norm = float(np.linalg.norm(v))
-            unit[c] = v / norm if norm else v
-    picked: list[str] = []
-    left = list(candidates)
-    while left and len(picked) < k:
-
-        def gain(c: str) -> float:
-            if not picked or c not in unit:
-                return lam * scaled[c]
-            sims = [
-                float(unit[c][: len(unit[p])] @ unit[p][: len(unit[c])])
-                for p in picked
-                if p in unit
-            ]
-            return lam * scaled[c] - (1 - lam) * max(sims, default=0.0)
-
-        best = max(left, key=lambda c: (gain(c), -candidates.index(c)))
-        picked.append(best)
-        left.remove(best)
-    return picked
-
-
-def offering_scope(store: VectorStore, offering: str | None) -> set[str] | None:
-    """The offering and all offerings under it; None for no filter."""
-    if offering is None:
-        return None
-    parents = store.offering_parents()
-    if offering not in parents:
-        known = ", ".join(sorted(parents)) or "none (index a run with a catalog first)"
-        msg = f"unknown offering {offering!r}; known: {known}"
-        raise ValueError(msg)
-    scope = {offering}
-    changed = True
-    while changed:
-        changed = False
-        for child, parent in parents.items():
-            if parent in scope and child not in scope:
-                scope.add(child)
-                changed = True
-    return scope
-
-
-class EmbedderMismatchError(RuntimeError):
-    """The query was prepared with a different model than the store's vectors were made with.
-
-    Vectors from two models are not comparable (and differ in size), so the search refuses
-    instead of returning meaningless ranking. Federated search catches it and falls back
-    to exact words; a single-store search reports it.
-    """
-
-
-def hybrid_search(
-    store: VectorStore,
-    embedder: Embedder,
-    query: str,
-    *,
-    top_k: int = 5,
-    offering: str | None = None,
-    pool: int = _POOL,
-    published: DateRange | None = None,
-    reranker: Reranker | None = None,
-    min_score: float | None = None,
-    mmr_lambda: float | None = None,
-    use_dates: bool = True,
-) -> list[SearchHit]:
-    """The `top_k` best passages for `query` (see the module docstring for the stages).
-
-    `published` filters by publication date before searching; the date or "latest" in
-    the question only reorders. With a `reranker`, candidates scoring below `min_score`
-    (default `CP_RERANK_MIN_SCORE`) are dropped: fewer than `top_k`, or none, may return.
-    """
-    stored = store.meta().get("model")
-    if stored and stored != embedder.model:
-        msg = (
-            f"this site was indexed with {stored}, but the query was prepared with "
-            f"{embedder.model}. Bring {stored} back (run: ollama pull {stored}) or re-index "
-            "the site with the model you want."
-        )
-        raise EmbedderMismatchError(msg)
-    lam, rerank_pool, default_min = _settings()
-    lam = lam if mmr_lambda is None else mmr_lambda
-    floor = default_min if min_score is None else min_score
-    scope = offering_scope(store, offering)
-    vectors = embedder.embed([query])
-    if vectors is None:
-        msg = f"could not embed the query with {embedder.model}"
-        raise RuntimeError(msg)
-    width = max(pool, top_k)
-    by_vector = store.vector_search(vectors[0], width, scope, published)
-    by_keyword = store.keyword_search(query, width, scope, published)
-    fused = rrf([by_vector, by_keyword])
-    order = sorted(fused, key=lambda i: (-fused[i], i))[:width]
-    rows = store.get_chunks(order)
-    date_order = _date_ranking(order, rows, date_intent(query) if use_dates else DateIntent())
-    if date_order:
-        by_date = [(c, 0.0) for c in date_order]
-        fused = rrf([by_vector, by_keyword, *([by_date] * _DATE_WEIGHT)])
-        order = sorted((c for c in fused if c in rows), key=lambda i: (-fused[i], i))
-    # one copy of the same text: repeated teasers, disclaimers, re-published releases
-    seen: set[str] = set()
-    candidates: list[str] = []
-    for cid in order:
-        row = rows.get(cid)
-        if row is None:
-            continue
-        key = _text_key(row.verbatim_text)
-        if key in seen:
-            continue
-        seen.add(key)
-        candidates.append(cid)
-    top_fused = max((fused[c] for c in candidates), default=1.0) or 1.0
-    relevance = {c: fused[c] / top_fused for c in candidates}
-    rerank: dict[str, float] = {}
-    if reranker is not None and candidates:
-        head = candidates[: max(rerank_pool, top_k)]
-        scores = reranker.score(
-            query, [f"{rows[c].context_header}\n{rows[c].verbatim_text}" for c in head]
-        )
-        rerank = dict(zip(head, scores, strict=True))
-        d_pos = {c: n for n, c in enumerate(date_order)}
-
-        def reranked(c: str) -> tuple[float, int]:
-            # near-equal scores (the same release for another month) are ordered by date
-            band = round(rerank[c] / _DATE_BAND) if date_order else rerank[c]
-            return (-band, d_pos.get(c, len(d_pos)) if date_order else 0)
-
-        candidates = [c for c in sorted(head, key=reranked) if rerank[c] >= floor]
-        relevance = {c: 1.0 / (1.0 + math.exp(-rerank[c])) for c in candidates}
-    if not candidates:
-        return []
-    if lam < 1.0:
-        window = candidates[: max(top_k * 4, 20)]
-        best = mmr(window, relevance, store.vectors(window), top_k, lam)
-    else:
-        best = candidates[:top_k]
-    v_rank = {cid: (n, s) for n, (cid, s) in enumerate(by_vector, start=1)}
-    k_rank = {cid: (n, s) for n, (cid, s) in enumerate(by_keyword, start=1)}
-    d_rank = {cid: n for n, cid in enumerate(date_order, start=1)}
-    hits: list[SearchHit] = []
-    for cid in best:
-        vr = v_rank.get(cid)
-        kr = k_rank.get(cid)
-        hits.append(
-            SearchHit(
-                chunk=rows[cid],
-                score=round(fused[cid], 6),
-                vector_rank=vr[0] if vr else None,
-                vector_score=round(vr[1], 4) if vr else None,
-                keyword_rank=kr[0] if kr else None,
-                keyword_score=round(kr[1], 4) if kr else None,
-                rerank_score=round(rerank[cid], 4) if cid in rerank else None,
-                date_rank=d_rank.get(cid),
-            )
-        )
-    return hits
-
-
-def keyword_only_search(
-    store: VectorStore,
-    query: str,
-    *,
-    top_k: int = 5,
-    offering: str | None = None,
-    pool: int = _POOL,
-) -> list[SearchHit]:
-    """The `top_k` best passages by exact words alone (when the meaning model is down)."""
-    scope = offering_scope(store, offering)
-    by_keyword = store.keyword_search(query, max(pool, top_k), scope)[:top_k]
-    rows = store.get_chunks([cid for cid, _score in by_keyword])
-    return [
-        SearchHit(
-            chunk=rows[cid],
-            score=round(score, 6),
-            vector_rank=None,
-            vector_score=None,
-            keyword_rank=n,
-            keyword_score=round(score, 4),
-        )
-        for n, (cid, score) in enumerate(by_keyword, start=1)
-        if cid in rows
-    ]
 
 
 # -- answers ---------------------------------------------------------------------------
