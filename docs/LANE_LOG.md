@@ -1011,3 +1011,14 @@ git worktree add ../content-processor-lane4 -b lane/L4-verify
 - **Landed:** draft cross-language dataset (`fixtures/meaning/cross_language.json`, marked DRAFT); `knowledge/meaning_eval.py`; `scripts/measure_meaning.py`; tests; RFC 0004 addendum with the words-only baseline.
 - **Not done (need approval):** install Ollama and pull bge-m3; CPU MiniLM measurement (model not cached, would download); reviewed dataset.
 - **Flaky under `-n auto`:** browser timing tests (`test_settle_window`, `test_explorer`, `test_single_pass_capture`); each passes alone.
+
+## [2026-11-22] Branch feat/multilingual-bge-m3: slice 3 measured and verified
+
+- **What landed:** Ollama `v0.40.16` installed on local host (`C:\Users\RankUno\AppData\Local\Programs\Ollama\ollama.exe`) listening on `127.0.0.1:11434`; model `bge-m3:latest` pulled (1.2 GB, 1024-d, 8,192 token context window).
+- **Measurement (`scripts/measure_meaning.py` on `fixtures/meaning/cross_language.json`):**
+  - Baseline words-only (hashing): recall@3 0.90, cross-language recall@3 0.00.
+  - CPU MiniLM fallback: recall@3 1.00, cross-language recall@3 0.90 (passages capped at 128 tokens).
+  - Ollama `bge-m3`: recall@1 1.00, recall@3 1.00, MRR 1.00, cross-language recall@3 1.00.
+  - Passage embedding: 12 passages in 2.80 s; mean query latency 47 ms (warmed, GPU accelerated).
+- **RFC:** `docs/rfc/0004-multilingual-embeddings-bge-m3.md` updated with Section 10 measured results.
+
