@@ -634,7 +634,6 @@ On the John Hancock scrape the Review tab opens on four pages out of 306: a PDF 
 | 2026-10-22 | Paid access (Bright Data) built but off by default: one approval per website with a spending cap, checked before every paid request, with a spending log. |
 | 2026-10-21 | Reviewers save decisions in the web app (with name, time and full history); the next report carries them forward. |
 | 2026-10-21 | Live John Hancock: 32 of 34 verified again with all checks on (the 2 others are placeholder pages). FAQ sections built as web components are now opened, text is matched the way the browser shows it, and a brief network hiccup no longer pauses a whole website. |
-| 2026-11-22 | Retrieval quality: cross-encoder reranking for reliable "not found" abstention, in-memory vector cache, pre-filtering, and MMR diversity. |
 | 2026-11-22 | Multilingual search with bge-m3: installed and verified with Ollama; reads passages up to 8,192 tokens across languages with 100% cross-lingual recall on the benchmark. |
 | 2026-10-22 | Project report made unambiguous: an extraction-completeness statement and a High/Medium/Low confidence per page that always agree with the page's status; the confirmed share is named for what it measures; page text keeps its line breaks in Excel. |
 | 2026-10-21 | Project report: one Excel workbook per run with every page's text, whether it was fully extracted, the confirmed share and the confidence, plus, for every page, which other pages carry the same text and how much (exact matching). |

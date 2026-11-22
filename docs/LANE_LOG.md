@@ -1141,6 +1141,7 @@ git worktree add ../content-processor-lane4 -b lane/L4-verify
   7. Diversity & Lost-in-the-middle: Maximal Marginal Relevance (`mmr`) with `CP_MMR_LAMBDA` (0.75) suppresses redundant passages; prompt passages are ordered best first and second-best last (`_edges`).
   8. Federated search and Claude Desktop tools wired with reranker and relevance filtering.
 - **Verification:** 28 unit tests in `test_retrieval_quality.py` passing, ruff and mypy strict clean.
+- **Superseded by the 2026-11-23 entry below:** this was written from the work in progress; the final threshold is -0.5 (measured), passages are read whole (2,000 characters), and the measurements are there. The duplicate guide change-log row of 2026-11-22 was removed in favour of the 2026-11-23 row.
 
 
 
