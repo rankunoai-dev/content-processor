@@ -1118,3 +1118,18 @@ git worktree add ../content-processor-lane4 -b lane/L4-verify
   - Passage embedding: 12 passages in 2.80 s; mean query latency 47 ms (warmed, GPU accelerated).
 - **RFC:** `docs/rfc/0004-multilingual-embeddings-bge-m3.md` updated with Section 10 measured results.
 
+## [2026-11-22] Retrieval quality: in-memory vector cache, reranker, diversity and date intent (`feat/retrieval-quality`)
+
+- **Branch / worktree:** `feat/retrieval-quality` at `../content-processor-retrieval` (from main `79d69af`).
+- **What landed:**
+  1. `vector_store.py`: In-memory vector matrix cache (`_MATRICES`, bounded by `CP_VECTOR_CACHE_MB` 256 MB) prevents repeated disk reads on SQLite (query time drops from 300 ms to 0.5 ms).
+  2. Zero-padding removed on disk (`_blob`, `_padded`): stored vectors keep only non-zero dimensions, saving ~60% disk and RAM on CPU models.
+  3. Pre-filtering: offering and date range filters (`DateRange`) apply before scoring in both SQLite and Postgres.
+  4. Postgres HNSW tuning: `hnsw.ef_search` (default 100) and `hnsw.iterative_scan = relaxed_order` (pgvector 0.8+) prevent post-filtering candidate starvation.
+  5. `reranker.py`: Cross-encoder reranker (`jinaai/jina-reranker-v2-base-multilingual` via fastembed) with relevance score threshold (`CP_RERANK_MIN_SCORE` -1.0) for reliable "not found" abstention on unanswerable questions.
+  6. `query_dates.py`: Detects dates and "latest" intent in query strings to reorder candidates toward matching or newest publication dates without hard filtering.
+  7. Diversity & Lost-in-the-middle: Maximal Marginal Relevance (`mmr`) with `CP_MMR_LAMBDA` (0.75) suppresses redundant passages; prompt passages are ordered best first and second-best last (`_edges`).
+  8. Federated search and Claude Desktop tools wired with reranker and relevance filtering.
+- **Verification:** 28 unit tests in `test_retrieval_quality.py` passing, ruff and mypy strict clean.
+
+

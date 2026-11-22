@@ -8,6 +8,11 @@ fused by rank (RRF), so spaces built with different models can be searched
 together without comparing their vectors. Every hit says which project and
 website it came from. A space that cannot be searched (never indexed, or its
 model is not available) is skipped and named, never silently left out.
+
+With a reranker, the fused candidates of every space are scored together against the
+question (one scale for all websites, whatever model built their vectors); passages
+below the minimum score are dropped and counted, so a question none of the websites
+answers returns no passages instead of the closest-sounding ones.
 """
 
 from __future__ import annotations
@@ -16,13 +21,14 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 
 from src.modules.content_processor.knowledge.embedders import Embedder, model_kind
+from src.modules.content_processor.knowledge.reranker import Reranker
 from src.modules.content_processor.knowledge.retrieval import (
     SearchHit,
     hybrid_search,
     keyword_only_search,
     rrf,
 )
-from src.modules.content_processor.knowledge.vector_store import VectorStore
+from src.modules.content_processor.knowledge.vector_store import DateRange, VectorStore
 
 __all__ = ["FederatedHit", "FederatedResult", "Space", "federated_search", "space_namespace"]
 
@@ -70,6 +76,8 @@ class FederatedResult:
     skipped: list[tuple[Space, str]] = field(default_factory=list)
     words_only: list[tuple[Space, str]] = field(default_factory=list)
     lighter: list[tuple[Space, str]] = field(default_factory=list)
+    reranked_by: str | None = None
+    below_relevance: int = 0
 
     def by_site(self) -> dict[str, list[FederatedHit]]:
         """The hits grouped by website, best first: the side-by-side comparison view."""
@@ -88,6 +96,9 @@ def federated_search(
     top_k: int = 8,
     per_site: int | None = None,
     pool: int = PER_SPACE_POOL,
+    reranker: Reranker | None = None,
+    min_score: float | None = None,
+    published: DateRange | None = None,
 ) -> FederatedResult:
     """Search every space in scope and fuse the results.
 
@@ -99,6 +110,10 @@ def federated_search(
         top_k: Hits to return overall.
         per_site: When set, up to this many hits per website instead (comparisons).
         pool: Hits taken from each space before fusing.
+        reranker: Scores the fused candidates against the question; those below
+            `min_score` (default `CP_RERANK_MIN_SCORE`) are dropped.
+        min_score: The reranker score a passage needs.
+        published: Only passages of pages published in this date range.
     """
     result = FederatedResult()
     rankings: list[list[tuple[str, float]]] = []
@@ -115,7 +130,7 @@ def federated_search(
                 try:
                     embedder = embedders.get(model) or embedder_for(model)
                     embedders[model] = embedder
-                    hits = hybrid_search(store, embedder, query, top_k=pool)
+                    hits = hybrid_search(store, embedder, query, top_k=pool, published=published)
                     if model_kind(model) == "words only":
                         result.words_only.append(
                             (space, "indexed without a meaning model: searched by exact words")
@@ -146,6 +161,27 @@ def federated_search(
 
     fused = rrf(rankings)
     ordered = sorted(fused, key=lambda key: (-fused[key], key))
+    if reranker is not None and ordered:
+        from src.modules.content_processor.knowledge.retrieval import _settings
+
+        _lam, rerank_pool, default_min = _settings()
+        floor = default_min if min_score is None else min_score
+        wanted = top_k if per_site is None else per_site * max(len(result.searched), 1)
+        head = ordered[: max(rerank_pool, wanted)]
+        scores = reranker.score(
+            query,
+            [
+                f"{found[k][1].chunk.context_header}\n{found[k][1].chunk.verbatim_text}"
+                for k in head
+            ],
+        )
+        by_key = dict(zip(head, scores, strict=True))
+        for key, value in by_key.items():
+            found[key][1].rerank_score = round(value, 4)
+        kept = [k for k in sorted(head, key=lambda k: -by_key[k]) if by_key[k] >= floor]
+        result.reranked_by = reranker.model
+        result.below_relevance = len(head) - len(kept)
+        ordered = kept
     if per_site is not None:
         taken: dict[str, int] = {}
         picked = []
