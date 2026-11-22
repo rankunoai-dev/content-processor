@@ -1,9 +1,23 @@
 """Search and evidence-backed answers over the vector store (RFC 0002, Stage E).
 
-`hybrid_search` runs two searches and merges them with reciprocal rank fusion
-(RRF, k = 60): vector similarity finds passages with the same meaning, the
-keyword index finds exact terms (form numbers, fund codes, product names) that
-vectors blur. A passage found by both ranks highest.
+`hybrid_search` is a retriever followed by a reranker:
+
+1. **Dense and sparse retrieval.** Vector similarity (dense: same meaning) and BM25 over
+   the keyword index (sparse: exact terms such as form numbers, fund codes, product
+   names) each return a pool of 50 candidates, after any explicit metadata filter
+   (offering, publication dates), which is applied before the search.
+2. **Reciprocal rank fusion** (RRF, k = 60) merges the rankings; a passage found by both
+   ranks highest. When the question names a date or asks for the latest, a third ranking
+   (closest publication date, or newest first) joins the fusion: a hint, never a filter.
+3. **One copy of the same text:** a paragraph repeated on many pages (a teaser, a
+   disclaimer, a re-published release) is kept once, at its best rank.
+4. **Reranking** (when a cross-encoder is available, `reranker.py`): the best 30
+   candidates are scored together with the question; those below `CP_RERANK_MIN_SCORE`
+   are dropped, so k follows the evidence (fewer passages when few answer) and a
+   question the website does not answer finds nothing.
+5. **Diversity** (maximal marginal relevance, `CP_MMR_LAMBDA`): each next passage is the
+   one that best balances relevance against similarity to the passages already chosen,
+   so near-identical passages do not fill the results.
 
 `answer_question` takes the best passages, adds the passage before and after
 each (so a split section reads whole), and asks a local instruct model for an
@@ -14,25 +28,35 @@ copied from it. Code then checks every statement:
 - every number in the statement must appear in the quote;
 - most content words of the statement must appear in the cited passage.
 
-A statement that fails is dropped and listed with the reason. With no model, or
-when nothing survives the check, the answer is extractive: the best-matching
-sentences, quoted as they are. Every point cites its URL (with a link that
+A statement that fails is dropped and listed with the reason. The passages are given
+to the model best first and second-best last (models read the start and end of a long
+prompt best: "lost in the middle"). With no model, or when nothing survives the check,
+the answer is extractive: the best sentences, quoted as they are (chosen by the
+reranker when there is one; headings and labels are never chosen, a bullet keeps its
+lead-in, and a question about an amount or date prefers sentences that carry one).
+Every point cites its URL (with a link that
 highlights the quote on the live page), block ids and evidence ids.
 """
 
 from __future__ import annotations
 
 import json
+import math
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass, field
+from datetime import date
 from typing import Any, Literal
 from urllib.parse import quote as url_quote
 
 from src.modules.content_processor.knowledge.assist import LocalChat, quote_in
 from src.modules.content_processor.knowledge.embedders import Embedder
+from src.modules.content_processor.knowledge.numeric import np
+from src.modules.content_processor.knowledge.query_dates import DateIntent, date_intent
+from src.modules.content_processor.knowledge.reranker import Reranker
 from src.modules.content_processor.knowledge.vector_store import (
     ChunkRow,
+    DateRange,
     VectorStore,
     query_tokens,
 )
@@ -57,6 +81,21 @@ __all__ = [
 
 RRF_K = 60
 _POOL = 50
+_RERANK_POOL = 12
+_MMR_LAMBDA = 0.75
+_DEDUPE_CHARS = 600
+_DATE_WEIGHT = 2  # the date ranking counts twice in the fusion when the question names one
+_DATE_BAND = 0.5  # reranker scores this close count as a tie, broken by the date
+_MIN_SENTENCE_WORDS = 5
+_RERANK_SENTENCES = 15
+_SENTENCE_MARGIN = 3.0
+_BULLET = re.compile(r"^\s*(?:[•·\-*–]|\d+[.)])\s*")
+_WANTS_FIGURE = re.compile(
+    r"\b(how (?:much|many|long)|when|what (?:is|was|were) the (?:rate|amount|price|cost|"
+    r"date|nav|percentage|number|share)|percent(?:age)?|rate|per share|date|deadline|fee|"
+    r"price|cost|cuánto|cuándo|combien|quand|wie viel|wann)\b",
+    re.IGNORECASE,
+)
 _MAX_SOURCE_CHARS = 2_500
 _MAX_PROMPT_CHARS = 16_000
 _MIN_WORD_SUPPORT = 0.6
@@ -149,6 +188,8 @@ class SearchHit:
     vector_score: float | None = None
     keyword_rank: int | None = None
     keyword_score: float | None = None
+    rerank_score: float | None = None
+    date_rank: int | None = None
 
 
 def rrf(rankings: Sequence[Sequence[tuple[str, float]]], k: int = RRF_K) -> dict[str, float]:
@@ -158,6 +199,87 @@ def rrf(rankings: Sequence[Sequence[tuple[str, float]]], k: int = RRF_K) -> dict
         for rank, (item, _score) in enumerate(ranking, start=1):
             fused[item] = fused.get(item, 0.0) + 1.0 / (k + rank)
     return fused
+
+
+def _settings() -> tuple[float, int, float]:
+    """(MMR lambda, rerank pool, minimum rerank score) from the settings."""
+    try:
+        from src.core.config import get_settings
+
+        cfg = get_settings()
+        return cfg.cp_mmr_lambda, cfg.cp_rerank_pool, cfg.cp_rerank_min_score
+    except Exception:  # noqa: BLE001 - settings unavailable: the documented defaults
+        return _MMR_LAMBDA, _RERANK_POOL, -0.5
+
+
+def _rerank_sentences() -> int:
+    try:
+        from src.core.config import get_settings
+
+        return int(get_settings().cp_rerank_sentences)
+    except Exception:  # noqa: BLE001
+        return _RERANK_SENTENCES
+
+
+def _text_key(text: str) -> str:
+    return " ".join(_WORD.findall(text.casefold()))[:_DEDUPE_CHARS]
+
+
+def _date_ranking(order: Sequence[str], rows: dict[str, ChunkRow], intent: DateIntent) -> list[str]:
+    """Candidates by closeness to the named date (or newest first); [] when most lack a date."""
+    dated = [c for c in order if c in rows and rows[c].published_at]
+    if not intent.any or len(dated) * 2 < min(len(order), 20):
+        return []
+    if intent.target is not None:
+        target = intent.target
+
+        def distance(cid: str) -> int:
+            day = date.fromisoformat(str(rows[cid].published_at)[:10])
+            return abs((day - target).days)
+
+        return sorted(dated, key=lambda c: (distance(c), order.index(c)))
+    return sorted(dated, key=lambda c: (str(rows[c].published_at), -order.index(c)), reverse=True)
+
+
+def mmr(
+    candidates: Sequence[str],
+    relevance: dict[str, float],
+    vectors: dict[str, list[float]],
+    k: int,
+    lam: float,
+) -> list[str]:
+    """Maximal marginal relevance: pick the best balance of relevance and novelty.
+
+    Each pick maximises lam * relevance - (1 - lam) * its highest similarity to a passage
+    already picked; `relevance` is on a 0-1 scale.
+    """
+    if lam >= 1.0 or len(candidates) <= 1:
+        return list(candidates[:k])
+    scaled = relevance
+    unit: dict[str, Any] = {}
+    for c in candidates:
+        if c in vectors:
+            v = np.asarray(vectors[c], dtype=np.float32)
+            norm = float(np.linalg.norm(v))
+            unit[c] = v / norm if norm else v
+    picked: list[str] = []
+    left = list(candidates)
+    while left and len(picked) < k:
+
+        def gain(c: str) -> float:
+            if not picked or c not in unit:
+                return lam * scaled[c]
+            sims = [
+                float(unit[c][: len(unit[p])] @ unit[p][: len(unit[c])])
+                for p in picked
+                if p in unit
+            ]
+            return lam * scaled[c] - (1 - lam) * max(sims, default=0.0)
+
+        best = max(left, key=lambda c: (gain(c), -candidates.index(c)))
+        picked.append(best)
+        left.remove(best)
+    return picked
 
 
 def offering_scope(store: VectorStore, offering: str | None) -> set[str] | None:
@@ -197,8 +319,18 @@ def hybrid_search(
     top_k: int = 5,
     offering: str | None = None,
     pool: int = _POOL,
+    published: DateRange | None = None,
+    reranker: Reranker | None = None,
+    min_score: float | None = None,
+    mmr_lambda: float | None = None,
+    use_dates: bool = True,
 ) -> list[SearchHit]:
-    """The `top_k` best passages for `query`, vector and keyword results fused by RRF."""
+    """The `top_k` best passages for `query` (see the module docstring for the stages).
+
+    `published` filters by publication date before searching; the date or "latest" in
+    the question only reorders. With a `reranker`, candidates scoring below `min_score`
+    (default `CP_RERANK_MIN_SCORE`) are dropped: fewer than `top_k`, or none, may return.
+    """
     stored = store.meta().get("model")
     if stored and stored != embedder.model:
         msg = (
@@ -207,22 +339,67 @@ def hybrid_search(
             "the site with the model you want."
         )
         raise EmbedderMismatchError(msg)
+    lam, rerank_pool, default_min = _settings()
+    lam = lam if mmr_lambda is None else mmr_lambda
+    floor = default_min if min_score is None else min_score
     scope = offering_scope(store, offering)
     vectors = embedder.embed([query])
     if vectors is None:
         msg = f"could not embed the query with {embedder.model}"
         raise RuntimeError(msg)
-    by_vector = store.vector_search(vectors[0], max(pool, top_k), scope)
-    by_keyword = store.keyword_search(query, max(pool, top_k), scope)
+    width = max(pool, top_k)
+    by_vector = store.vector_search(vectors[0], width, scope, published)
+    by_keyword = store.keyword_search(query, width, scope, published)
     fused = rrf([by_vector, by_keyword])
-    best = sorted(fused, key=lambda i: (-fused[i], i))[:top_k]
-    rows = store.get_chunks(best)
+    order = sorted(fused, key=lambda i: (-fused[i], i))[:width]
+    rows = store.get_chunks(order)
+    date_order = _date_ranking(order, rows, date_intent(query) if use_dates else DateIntent())
+    if date_order:
+        by_date = [(c, 0.0) for c in date_order]
+        fused = rrf([by_vector, by_keyword, *([by_date] * _DATE_WEIGHT)])
+        order = sorted((c for c in fused if c in rows), key=lambda i: (-fused[i], i))
+    # one copy of the same text: repeated teasers, disclaimers, re-published releases
+    seen: set[str] = set()
+    candidates: list[str] = []
+    for cid in order:
+        row = rows.get(cid)
+        if row is None:
+            continue
+        key = _text_key(row.verbatim_text)
+        if key in seen:
+            continue
+        seen.add(key)
+        candidates.append(cid)
+    top_fused = max((fused[c] for c in candidates), default=1.0) or 1.0
+    relevance = {c: fused[c] / top_fused for c in candidates}
+    rerank: dict[str, float] = {}
+    if reranker is not None and candidates:
+        head = candidates[: max(rerank_pool, top_k)]
+        scores = reranker.score(
+            query, [f"{rows[c].context_header}\n{rows[c].verbatim_text}" for c in head]
+        )
+        rerank = dict(zip(head, scores, strict=True))
+        d_pos = {c: n for n, c in enumerate(date_order)}
+
+        def reranked(c: str) -> tuple[float, int]:
+            # near-equal scores (the same release for another month) are ordered by date
+            band = round(rerank[c] / _DATE_BAND) if date_order else rerank[c]
+            return (-band, d_pos.get(c, len(d_pos)) if date_order else 0)
+
+        candidates = [c for c in sorted(head, key=reranked) if rerank[c] >= floor]
+        relevance = {c: 1.0 / (1.0 + math.exp(-rerank[c])) for c in candidates}
+    if not candidates:
+        return []
+    if lam < 1.0:
+        window = candidates[: max(top_k * 4, 20)]
+        best = mmr(window, relevance, store.vectors(window), top_k, lam)
+    else:
+        best = candidates[:top_k]
     v_rank = {cid: (n, s) for n, (cid, s) in enumerate(by_vector, start=1)}
     k_rank = {cid: (n, s) for n, (cid, s) in enumerate(by_keyword, start=1)}
+    d_rank = {cid: n for n, cid in enumerate(date_order, start=1)}
     hits: list[SearchHit] = []
     for cid in best:
-        if cid not in rows:
-            continue
         vr = v_rank.get(cid)
         kr = k_rank.get(cid)
         hits.append(
@@ -233,6 +410,8 @@ def hybrid_search(
                 vector_score=round(vr[1], 4) if vr else None,
                 keyword_rank=kr[0] if kr else None,
                 keyword_score=round(kr[1], 4) if kr else None,
+                rerank_score=round(rerank[cid], 4) if cid in rerank else None,
+                date_rank=d_rank.get(cid),
             )
         )
     return hits
@@ -428,42 +607,95 @@ def _blocks(ids: Sequence[str]) -> str:
     return f"{shown} (+{more} more)" if more > 0 else shown
 
 
-def _extractive(question: str, sources: Sequence[Source]) -> list[AnswerPoint]:
-    wanted = {_stem(t) for t in query_tokens(question) if t not in _STOP}
-    candidates: list[tuple[int, int, AnswerPoint]] = []
-    for rank, source in enumerate(s for s in sources if s.matched):
-        best: tuple[int, str] | None = None
-        for sentence in sentences(source.chunk.verbatim_text):
-            sentence = sentence.strip()
-            if len(sentence) < 20:
+def _candidate_sentences(source: Source) -> list[str]:
+    """A passage's sentences worth quoting: no headings or labels; a bullet with its lead-in."""
+    heads = {_text_key(h) for h in source.chunk.heading_path}
+    heads |= {_text_key(line) for line in source.chunk.context_header.splitlines()}
+    out: list[str] = []
+    lead = ""
+    for raw in source.chunk.verbatim_text.splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        for sentence in sentences(line):
+            words = sentence.split()
+            if len(sentence) < 20 or _text_key(sentence) in heads:
                 continue
-            overlap = len(wanted & _content_words(sentence))
-            if overlap and (best is None or overlap > best[0]):
-                best = (overlap, sentence)
-        if best is not None:
-            candidates.append((-best[0], rank, AnswerPoint(best[1], source.label, best[1])))
-    candidates.sort(key=lambda c: (c[0], c[1]))
+            if len(words) < _MIN_SENTENCE_WORDS and not _NUMBER.search(sentence):
+                continue
+            quote = f"{lead} {sentence}" if lead and _BULLET.match(line) else sentence
+            out.append(quote)
+        if line.endswith(":"):
+            lead = line
+        elif not _BULLET.match(line):
+            lead = ""
+    return out
+
+
+def _extractive(
+    question: str,
+    sources: Sequence[Source],
+    reranker: Reranker | None = None,
+    min_score: float | None = None,
+) -> list[AnswerPoint]:
+    wanted = {_stem(t) for t in query_tokens(question) if t not in _STOP}
+    figure = bool(_WANTS_FIGURE.search(question))
+    candidates: list[tuple[float, int, AnswerPoint]] = []
+    for rank, source in enumerate(s for s in sources if s.matched):
+        for sentence in _candidate_sentences(source):
+            overlap = float(len(wanted & _content_words(sentence)))
+            if figure and _NUMBER.search(sentence):
+                overlap += 1.0
+            if overlap > 0:
+                candidates.append((overlap, rank, AnswerPoint(sentence, source.label, sentence)))
+    candidates.sort(key=lambda c: (-c[0], c[1]))
+    if reranker is not None and candidates:
+        head = candidates[: _rerank_sentences()]
+        scores = reranker.score(question, [p.statement for _o, _r, p in head])
+        # no threshold here: whether the website answers was decided on whole passages (a
+        # sentence alone scores lower than the passage it sits in); sentences are only ranked
+        scored = sorted(
+            ((sc, r, p) for sc, (_o, r, p) in zip(scores, head, strict=True)),
+            key=lambda c: (-c[0], c[1]),
+        )
+        top = scored[0][0]
+        candidates = [(sc, r, p) for sc, r, p in scored if sc >= top - _SENTENCE_MARGIN]
+    elif candidates:
+        top = candidates[0][0]
+        candidates = [c for c in candidates if c[0] * 2 >= top]
     points: list[AnswerPoint] = []
     seen: set[str] = set()
-    top = -candidates[0][0] if candidates else 0
-    for negative_overlap, _rank, point in candidates:
+    for _score, _rank, point in candidates:
         key = " ".join(point.statement.casefold().split())
-        if -negative_overlap * 2 >= top and key not in seen:
+        if key not in seen:
             seen.add(key)
             points.append(point)
     return points[:_EXTRACTIVE_POINTS]
 
 
+def _edges(groups: list[list[dict[str, str]]]) -> list[dict[str, str]]:
+    """Best group first, second best last, the weakest in the middle ("lost in the middle")."""
+    front: list[list[dict[str, str]]] = []
+    back: list[list[dict[str, str]]] = []
+    for i, group in enumerate(groups):
+        (front if i % 2 == 0 else back).append(group)
+    return [item for group in [*front, *reversed(back)] for item in group]
+
+
 def _ask_model(
     chat: LocalChat, question: str, sources: Sequence[Source]
 ) -> list[AnswerPoint] | None:
-    given: list[dict[str, str]] = []
+    groups: list[list[dict[str, str]]] = []
+    pages: dict[str, int] = {}
     size = 0
-    for s in sources:
+    for s in sources:  # in rank order, so the prompt budget keeps the best passages
         text = s.chunk.verbatim_text[:_MAX_SOURCE_CHARS]
-        if size + len(text) > _MAX_PROMPT_CHARS and given:
+        if size + len(text) > _MAX_PROMPT_CHARS and groups:
             break
-        given.append(
+        if s.chunk.page_key not in pages:
+            pages[s.chunk.page_key] = len(groups)
+            groups.append([])
+        groups[pages[s.chunk.page_key]].append(
             {
                 "id": s.label,
                 "url": s.chunk.url,
@@ -472,6 +704,7 @@ def _ask_model(
             }
         )
         size += len(text)
+    given = _edges(groups)
     reply = chat.ask_json(
         _SYSTEM, json.dumps({"question": question, "sources": given}, ensure_ascii=False)
     )
@@ -498,11 +731,34 @@ def answer_question(
     chat: LocalChat | None = None,
     top_k: int = 5,
     offering: str | None = None,
+    reranker: Reranker | None = None,
+    min_score: float | None = None,
+    published: DateRange | None = None,
 ) -> Answer:
-    """Answer from the stored passages only; every point is checked against its quote."""
-    hits = hybrid_search(store, embedder, question, top_k=top_k, offering=offering)
+    """Answer from the stored passages only; every point is checked against its quote.
+
+    With a `reranker`, passages (and, for extractive answers, sentences) that do not
+    answer the question well enough are dropped, so a question the website does not
+    answer comes back "not_found" instead of with the closest-sounding sentences.
+    """
+    hits = hybrid_search(
+        store,
+        embedder,
+        question,
+        top_k=top_k,
+        offering=offering,
+        published=published,
+        reranker=reranker,
+        min_score=min_score,
+    )
     if not hits:
-        return Answer(question, "not_found", note="no passage matches the question")
+        note = (
+            f"no passage answers the question well enough (checked by {reranker.model}): "
+            "the website does not seem to say"
+            if reranker is not None
+            else "no passage matches the question"
+        )
+        return Answer(question, "not_found", note=note)
     sources = _gather(store, hits)
     by_label = {s.label: s for s in sources}
     if chat is not None:
@@ -530,7 +786,7 @@ def answer_question(
             fallback = Answer(
                 question,
                 "extractive",
-                points=_extractive(question, sources),
+                points=_extractive(question, sources, reranker, min_score),
                 sources=sources,
                 dropped=answer.dropped,
                 model=chat.model,
@@ -546,7 +802,9 @@ def answer_question(
         note = f"the local model ({chat.model}) did not reply; showing the best-matching sentences"
     else:
         note = "no local instruct model: showing the best-matching sentences, quoted as they are"
-    points = _extractive(question, sources)
+    if reranker is not None:
+        note += f"; passages and sentences checked for relevance by {reranker.model}"
+    points = _extractive(question, sources, reranker, min_score)
     if not points:
         return Answer(
             question, "not_found", sources=sources, note="no sentence matches the question"

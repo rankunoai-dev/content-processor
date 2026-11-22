@@ -47,6 +47,27 @@ def _no_cpu_model(monkeypatch) -> None:
 
 
 @pytest.fixture(autouse=True)
+def _no_reranker(monkeypatch) -> Iterator[None]:
+    """Tests never load the reranker model (tests of it bring a fake).
+
+    Each test also starts with an empty in-memory vector cache.
+    """
+    from src.modules.content_processor.knowledge.reranker import reset_reranker
+    from src.modules.content_processor.knowledge.vector_store import clear_vector_cache
+
+    monkeypatch.setenv("CP_RERANK", "off")
+    # a model server running on this computer (Ollama with bge-m3) must not answer tests;
+    # tests of the model server bring their own transport or endpoint
+    monkeypatch.setenv("CP_MODEL_ENDPOINT", "http://127.0.0.1:9")
+    reset_settings_cache()
+    reset_reranker()
+    clear_vector_cache()
+    yield
+    reset_reranker()
+    clear_vector_cache()
+
+
+@pytest.fixture(autouse=True)
 def _isolate_registry() -> Iterator[None]:
     registry.clear()
     yield

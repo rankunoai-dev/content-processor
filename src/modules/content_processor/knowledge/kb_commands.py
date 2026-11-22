@@ -225,7 +225,16 @@ def cmd_search(args: argparse.Namespace) -> int:
         return _fail(str(exc))
     try:
         embedder = _query_embedder(args, store)
-        hits = hybrid_search(store, embedder, args.query, top_k=args.top_k, offering=args.offering)
+        from src.modules.content_processor.knowledge.reranker import get_reranker
+
+        hits = hybrid_search(
+            store,
+            embedder,
+            args.query,
+            top_k=args.top_k,
+            offering=args.offering,
+            reranker=get_reranker(),
+        )
     except (RuntimeError, ValueError, LocalOnlyError) as exc:
         return _fail(str(exc))
     finally:
@@ -276,8 +285,16 @@ def cmd_ask(args: argparse.Namespace) -> int:
     try:
         embedder = _query_embedder(args, store)
         chat = _chat_for(args)
+        from src.modules.content_processor.knowledge.reranker import get_reranker
+
         answer = answer_question(
-            store, embedder, args.question, chat=chat, top_k=args.top_k, offering=args.offering
+            store,
+            embedder,
+            args.question,
+            chat=chat,
+            top_k=args.top_k,
+            offering=args.offering,
+            reranker=get_reranker(),
         )
     except (RuntimeError, ValueError, LocalOnlyError) as exc:
         return _fail(str(exc))

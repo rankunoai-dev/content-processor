@@ -133,6 +133,13 @@ def load_run(folder: Path, run_name: str) -> RunInputs:
     return RunInputs(run_name, folder, chunks, stamps, catalog, page_types)
 
 
+def _published(stamp: PageStamp | None) -> str | None:
+    """The page's publication date (YYYY-MM-DD) for date filters and "latest" questions."""
+    if stamp is None or stamp.published_at is None:
+        return None
+    return stamp.published_at.date().isoformat()
+
+
 def _stamp_page_type(stamp: PageStamp | None) -> str | None:
     if stamp is None:
         return None
@@ -285,6 +292,7 @@ def index_run(
                 label_status=lab.status,
                 labels=lab.as_dict(),
                 embedding=by_chunk[c.chunk_id],
+                published_at=_published(run.stamps.get(c.page_key)),
             )
         )
     for start in range(0, len(rows), _WRITE_BATCH):

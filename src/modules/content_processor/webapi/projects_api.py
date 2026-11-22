@@ -1148,6 +1148,8 @@ def register_project_routes(
             if not scope:
                 raise HTTPException(status_code=404, detail="None of those websites exist.")
             considered = [s.site_name for s in scope]
+        from src.modules.content_processor.knowledge.reranker import get_reranker
+
         result = federated_search(
             scope,
             q,
@@ -1155,6 +1157,7 @@ def register_project_routes(
             embedder_for=knowledge.embedder_for,
             top_k=top_k,
             per_site=per_site,
+            reranker=get_reranker(),
         )
         return SearchOut(
             query=q,
@@ -1180,7 +1183,15 @@ def register_project_routes(
             searched=[s.namespace for s in result.searched],
             skipped=not_built
             + [{"space": s.namespace, "site": s.site_name, "reason": r} for s, r in result.skipped],
-            notes=[f"{s.site_name}: {why}" for s, why in [*result.words_only, *result.lighter]],
+            notes=[f"{s.site_name}: {why}" for s, why in [*result.words_only, *result.lighter]]
+            + (
+                [
+                    f"checked for relevance by {result.reranked_by}: "
+                    f"{result.below_relevance} passage(s) left out as not answering"
+                ]
+                if result.reranked_by
+                else []
+            ),
         )
 
 

@@ -41,6 +41,7 @@ __all__ = [
 MAX_RESULT_CHARS = 40_000
 _MAX_CHUNK_CHARS = 2_500
 _MAX_PAGES = 300
+_PAIR_POOL = 5_000
 _MAX_PAIRS = 40
 _MAX_CHANGED = 60
 
@@ -303,6 +304,8 @@ def _search(play: Playground, args: SearchInput) -> dict[str, Any]:
             spaces.append(data.copy.space())
     wanted = args.top_k * 3 if args.role else args.top_k
     per_site = args.per_site * 3 if (args.per_site and args.role) else args.per_site
+    from src.modules.content_processor.knowledge.reranker import get_reranker
+
     result = federated_search(
         spaces,
         args.query,
@@ -310,6 +313,7 @@ def _search(play: Playground, args: SearchInput) -> dict[str, Any]:
         embedder_for=play.access.embedder_for,
         top_k=wanted,
         per_site=per_site,
+        reranker=get_reranker(),
     )
     by_namespace = {d.copy.namespace: w for w in websites if (d := play.site_data(w)) is not None}
     passages = []
@@ -344,6 +348,11 @@ def _search(play: Playground, args: SearchInput) -> dict[str, Any]:
                 "chunk_role": chunk.chunk_role,
                 "offering": chunk.offering_id,
                 "text": _clip(chunk.verbatim_text),
+                **(
+                    {"relevance": found.hit.rerank_score}
+                    if found.hit.rerank_score is not None
+                    else {}
+                ),
                 "found_by": [
                     name
                     for name, rank in (
@@ -379,6 +388,17 @@ def _search(play: Playground, args: SearchInput) -> dict[str, Any]:
         f"{s.site_name}: {why}; paraphrases are found, but less reliably than with bge-m3"
         for s, why in result.lighter
     ]
+    if result.reranked_by:
+        notes.append(
+            f"passages checked for relevance by {result.reranked_by}; "
+            f"{result.below_relevance} candidate(s) did not answer the question well enough "
+            "and were left out"
+            + (
+                ": none of the websites seems to answer this; say so rather than guess"
+                if not passages
+                else ""
+            )
+        )
     if notes:
         out["notes"] = notes
     return out
@@ -615,31 +635,42 @@ def _similar_pages(play: Playground, args: SimilarInput) -> dict[str, Any]:
         store.close()
     if len(pages) < 2:
         return {"website": data.website.key, "pairs": [], "notes": ["fewer than two pages"]}
+    from src.modules.content_processor.analysis.semantic import _candidates
+
     matrix = np.asarray([p.embedding for p in pages], dtype=np.float32)
     norms = np.linalg.norm(matrix, axis=1, keepdims=True)
-    unit = matrix / np.where(norms == 0, 1, norms)
-    sims = unit @ unit.T
+    unit = (matrix / np.where(norms == 0, 1, norms)).astype(np.float32)
+    # compared 512 pages at a time (a 7,000-page website would need 200 MB at once)
+    found, capped = _candidates(unit, args.min_similarity, _PAIR_POOL)
     stamps = play.stamps(data)
+
+    def titled(i: int, j: int) -> bool:
+        sa, sb = stamps.get(pages[i].url), stamps.get(pages[j].url)
+        return bool(sa and sb and sa.title and sa.title == sb.title)
+
+    # copies first (different titles, same content: a re-published page, a near-identical
+    # form), then pages that share a title (recurring notices, templated pages)
+    copies = [(i, j, sim) for i, j, sim in found if not titled(i, j)]
+    series = [(i, j, sim) for i, j, sim in found if titled(i, j)]
     pairs = []
-    rows, cols = np.where(np.triu(sims, k=1) >= args.min_similarity)
-    for i, j in sorted(zip(rows.tolist(), cols.tolist(), strict=True), key=lambda ij: -sims[ij]):
+    for i, j, similarity in [*copies, *series]:
         a, b = pages[i], pages[j]
         sa, sb = stamps.get(a.url), stamps.get(b.url)
-        same_title = bool(sa and sb and sa.title and sa.title == sb.title)
+        same_title = titled(i, j)
         ref = play.ledger.fact(
             f"{a.url}\x1f{b.url}",
             kind="pair",
             website=data.website.key,
             url=a.url,
             title=f"{a.url} ~ {b.url}",
-            text=f"similarity {float(sims[i, j]):.3f}",
+            text=f"similarity {similarity:.3f}",
         )
         pairs.append(
             {
                 "ref": ref,
                 "url_a": a.url,
                 "url_b": b.url,
-                "similarity": round(float(sims[i, j]), 3),
+                "similarity": round(similarity, 3),
                 "title_a": sa.title if sa else a.title,
                 "title_b": sb.title if sb else b.title,
                 "same_title": same_title,
@@ -654,7 +685,12 @@ def _similar_pages(play: Playground, args: SimilarInput) -> dict[str, Any]:
         )
         if len(pairs) >= _MAX_PAIRS:
             break
-    notes = []
+    notes = [
+        f"{len(copies)} pair(s) with different titles (possible copies) listed first, then "
+        f"{len(series)} pair(s) sharing a title (recurring or templated pages)"
+        + (f"; only the strongest {_PAIR_POOL} pairs were kept" if capped else "")
+        + (f"; {len(found) - len(pairs)} more not listed" if len(found) > len(pairs) else "")
+    ]
     if str(model).startswith("hashing-"):
         notes.append(
             "similarity is word overlap (offline embedder), not meaning: confirm each pair "

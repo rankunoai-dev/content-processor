@@ -16,7 +16,7 @@ import logging
 from enum import StrEnum
 from functools import lru_cache
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from pydantic import Field, SecretStr, ValidationInfo, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
@@ -174,6 +174,32 @@ class Settings(BaseSettings):
     cp_semantic_max_paragraphs: int = Field(default=200, ge=10, le=2000)
     cp_semantic_embed_batch: int = Field(default=64, ge=1, le=1024)
     cp_semantic_max_pairs: int = Field(default=50_000, ge=100, le=2_000_000)
+    # Retrieval (knowledge/retrieval.py, vector_store.py). The SQLite store keeps each
+    # website's chunk vectors in memory between searches, up to this many MB in total
+    # (least recently used dropped first; 0 = read them from disk on every search).
+    cp_vector_cache_mb: int = Field(default=256, ge=0, le=16_384)
+    # Postgres/pgvector HNSW search depth (pgvector's default 40 returns at most 40 rows).
+    cp_hnsw_ef_search: int = Field(default=100, ge=10, le=1_000)
+    # Reranker: a cross-encoder reads the question with each candidate passage and scores
+    # how well it answers; passages below the minimum score are dropped, and an answer
+    # with none left says "not found". auto = used only when the model is already in
+    # CP_MODEL_CACHE_DIR (never downloaded during a search; about 1.1 GB of memory);
+    # on = download when missing; off = no reranker (no relevance check).
+    cp_rerank: Literal["auto", "on", "off"] = "auto"
+    cp_rerank_model: str = "jinaai/jina-reranker-v2-base-multilingual"
+    # Candidates scored per question, and characters of each read. Measured on John
+    # Hancock: clipping passages to 600 characters halved the time but lost the answer
+    # deeper in the passage (right page first in 25 of 36 questions, not 31) and left no
+    # usable threshold; whole passages (2,000) take about 0.3 s each on a busy CPU. The
+    # minimum score: every answerable question's best whole passage scored above -0.3;
+    # two of four unanswerable ones fell below -0.8.
+    cp_rerank_pool: int = Field(default=12, ge=3, le=200)
+    cp_rerank_max_chars: int = Field(default=2_000, ge=100, le=4_000)
+    cp_rerank_sentences: int = Field(default=15, ge=1, le=100)
+    cp_rerank_min_score: float = Field(default=-0.5, ge=-20.0, le=20.0)
+    # Diversity (maximal marginal relevance): 1.0 = relevance only; lower values trade
+    # some relevance for passages that differ from those already chosen.
+    cp_mmr_lambda: float = Field(default=0.75, ge=0.0, le=1.0)
     # Topic drift in monitoring checks (monitoring/meaning.py): each changed page's old
     # and new versions are compared by meaning with the website's knowledge-base model
     # (never the words-only stand-in). A competitor page scoring below the threshold
