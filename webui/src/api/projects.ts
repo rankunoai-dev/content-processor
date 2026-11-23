@@ -206,6 +206,19 @@ export interface SearchHit {
   text: string;
   chunk_id: string;
   evidence_ids: string[];
+  /** The top heading the passage sits under. */
+  section?: string;
+  /** The whole section is in before + text + after. */
+  section_complete?: boolean;
+  /** The passages just above and below it on the page (small-to-big context). */
+  before?: SearchContext[];
+  after?: SearchContext[];
+}
+
+export interface SearchContext {
+  chunk_id: string;
+  text: string;
+  evidence_ids: string[];
 }
 
 export interface SearchResult {

@@ -210,6 +210,9 @@ def test_tools_read_only_inside_the_scope_and_enter_the_ledger(world: World) -> 
     assert found["search_ref"].startswith("fact:search-")
     ref = found["passages"][0]["ref"]
     assert play.ledger.entries[ref].evidence_ids[0].startswith("evidence:")
+    assert {"section", "section_complete", "before", "after"} <= set(found["passages"][0])
+    bare = call(play, "search_knowledge", {"query": "convert term policy", "context_tokens": 0})
+    assert all(p["before"] == [] and p["after"] == [] for p in bare["passages"])
     only = call(play, "search_knowledge", {"query": "term", "websites": ["rival.com"], "top_k": 1})
     assert [p["website"] for p in only["passages"]] == ["rival.com"]
     faq = call(play, "search_knowledge", {"query": "convert term policy", "role": "faq"})

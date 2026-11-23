@@ -202,6 +202,12 @@ class Settings(BaseSettings):
     # Diversity (maximal marginal relevance): 1.0 = relevance only; lower values trade
     # some relevance for passages that differ from those already chosen.
     cp_mmr_lambda: float = Field(default=0.75, ge=0.0, le=1.0)
+    # Context builder (knowledge/context.py): tokens of text handed over with the hits
+    # (the hits plus their surrounding section), about four characters per token. Answers
+    # by the local model get the first (a small model's window); search results for Claude
+    # Desktop and the app the second (a larger reader, ~8 passages plus their sections).
+    cp_context_tokens: int = Field(default=4_000, ge=0, le=100_000)
+    cp_search_context_tokens: int = Field(default=8_000, ge=0, le=100_000)
     # Topic drift in monitoring checks (monitoring/meaning.py): each changed page's old
     # and new versions are compared by meaning with the website's knowledge-base model
     # (never the words-only stand-in). A competitor page scoring below the threshold
