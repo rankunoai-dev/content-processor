@@ -161,6 +161,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             "create-admin --username <name> --name '<Your name>'\n"
         )
         return 2
+    # Fail closed: should the accounts file go missing while the server runs, the gate
+    # then refuses every API request instead of opening them to anyone.
+    app.state.accounts_required = not local
     sys.stdout.write(f"Serving {exports} at http://{host}:{port}/\n")
     if not local:
         sys.stdout.write("Listening beyond this machine: sign-in is required.\n")

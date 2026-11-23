@@ -231,8 +231,6 @@ class RunScope(StrictModel):
         default_factory=lambda: ["video_frames", "hidden_revisions"]
     )
     budgets: Budgets = Field(default_factory=Budgets)
-    retention_class: Literal["standard_90d", "extended_1y", "legal_hold"] = "standard_90d"
-    pii_policy: Literal["tag_and_redact_exports", "tag_only"] = "tag_and_redact_exports"
     ocr_languages: list[str] | None = Field(
         default=None, description="Restrict OCR packs; None = full multilingual routing"
     )

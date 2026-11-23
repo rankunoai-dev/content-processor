@@ -28,6 +28,7 @@ from src.modules.accounts.access import (
     identify,
     required_role,
 )
+from src.modules.accounts.audit import ActionLog
 from src.modules.accounts.store import (
     MIN_ACCOUNT_PASSWORD,
     Account,
@@ -109,17 +110,68 @@ def _secure(request: Request) -> bool:
     return proto.split(",")[0].strip().lower() == "https"
 
 
-def install_accounts(app: FastAPI, *, accounts: AccountStore, sessions: SessionSigner) -> None:
-    """Add the gate (a middleware) and the account routes."""
+LOCKED_DETAIL = (
+    "Sign-in is unavailable: this server listens beyond this machine but finds no accounts, "
+    "so it refuses every request rather than open the data to anyone. An admin must restore "
+    "the accounts file (accounts/accounts.json in the app data folder) or create the first "
+    "admin: python -m src.modules.content_processor.cli accounts create-admin"
+)
+
+
+def _where(request: Request) -> dict[str, str | None]:
+    return {
+        "ip": request.client.host if request.client else None,
+        "forwarded_for": request.headers.get("x-forwarded-for"),
+    }
+
+
+def _is_download(response: Response) -> bool:
+    return response.headers.get("content-disposition", "").lower().startswith("attachment")
+
+
+def install_accounts(
+    app: FastAPI,
+    *,
+    accounts: AccountStore,
+    sessions: SessionSigner,
+    actions: ActionLog | None = None,
+) -> None:
+    """Add the gate (a middleware) and the account routes.
+
+    Without accounts the gate lets everything through, which is right on this machine.
+    When the server listens beyond it (`app.state.accounts_required`, set at start-up),
+    finding no accounts locks every API route instead (fail closed): the accounts file
+    may have gone missing while the server runs. Sign-ins and downloads go to `actions`
+    (default: `<app data>/audit/user_actions.jsonl`).
+    """
     attempts = AttemptLimiter()
+    log = actions or ActionLog(accounts.root.parent / "audit")
+    app.state.actions = log
+    locked = {"logged": False}
 
     @app.middleware("http")
     async def gate(
         request: Request, call_next: Callable[[Request], Awaitable[Response]]
     ) -> Response:
-        if not accounts.active():
-            return await call_next(request)
         path = request.url.path
+        if not accounts.active():
+            if getattr(request.app.state, "accounts_required", False) and path.startswith("/api/"):
+                if not locked["logged"]:
+                    locked["logged"] = True
+                    log.record("locked_no_accounts", user=None, path=path, **_where(request))
+                return JSONResponse({"detail": LOCKED_DETAIL}, status_code=503)
+            response = await call_next(request)
+            if _is_download(response):
+                log.record(
+                    "download",
+                    user=None,
+                    path=path,
+                    file=response.headers.get("content-disposition"),
+                    status=response.status_code,
+                    **_where(request),
+                )
+            return response
+        locked["logged"] = False
         need = required_role(request.method, path)
         caller = identify(
             accounts,
@@ -131,11 +183,23 @@ def install_accounts(app: FastAPI, *, accounts: AccountStore, sessions: SessionS
         if refusal is not None:
             return JSONResponse({"detail": refusal[1]}, status_code=refusal[0])
         request.state.caller = caller
-        reset = ACTING.set(caller.account.username if caller else None)
+        who = caller.account.username if caller else None
+        reset = ACTING.set(who)
         try:
-            return await call_next(request)
+            response = await call_next(request)
         finally:
             ACTING.reset(reset)
+        if _is_download(response):
+            log.record(
+                "download",
+                user=who,
+                via=caller.via if caller else None,
+                path=path,
+                file=response.headers.get("content-disposition"),
+                status=response.status_code,
+                **_where(request),
+            )
+        return response
 
     def caller_of(request: Request) -> Any:
         return getattr(request.state, "caller", None)
@@ -160,6 +224,7 @@ def install_accounts(app: FastAPI, *, accounts: AccountStore, sessions: SessionS
         client = request.client.host if request.client else "?"
         wait = max(attempts.wait_s(f"u:{name}"), attempts.wait_s(f"ip:{client}"))
         if wait > 0:
+            log.record("login_failed", user=name, reason="throttled", **_where(request))
             raise HTTPException(
                 status_code=429,
                 detail=f"Too many wrong passwords. Try again in {int(wait) + 1} seconds.",
@@ -168,10 +233,12 @@ def install_accounts(app: FastAPI, *, accounts: AccountStore, sessions: SessionS
         if account is None:
             attempts.failed(f"u:{name}")
             attempts.failed(f"ip:{client}")
+            log.record("login_failed", user=name, reason="wrong_password", **_where(request))
             raise HTTPException(status_code=401, detail="That user name and password do not match.")
         attempts.succeeded(f"u:{name}")
         attempts.succeeded(f"ip:{client}")
         account = accounts.update(account.username, last_login_at=datetime.now(UTC))
+        log.record("login_succeeded", user=account.username, **_where(request))
         response.set_cookie(
             COOKIE,
             sessions.issue(account),
@@ -184,7 +251,9 @@ def install_accounts(app: FastAPI, *, accounts: AccountStore, sessions: SessionS
         return MeOut(accounts=True, account=_out(account))
 
     @app.post("/api/auth/logout")
-    def logout(response: Response) -> dict[str, bool]:
+    def logout(request: Request, response: Response) -> dict[str, bool]:
+        caller = caller_of(request)
+        log.record("logout", user=caller.account.username if caller else None, **_where(request))
         response.delete_cookie(COOKIE, path="/")
         return {"signed_out": True}
 

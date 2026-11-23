@@ -309,8 +309,6 @@ class RunScope(StrictModel):
     content_includes: list[str]
     content_excludes: list[str]
     budgets: Budgets
-    retention_class: Literal["standard_90d", "extended_1y", "legal_hold"]
-    pii_policy: Literal["tag_and_redact_exports", "tag_only"]
     recrawl_of_run_id: str | None = None
 ```
 
@@ -619,6 +617,6 @@ Scope mode; authorized vs third-party hosts; UGC; soft paywalls; retention; depl
 3. **Worst-case spend**: $0 at T1–T3; T4/T5/cloud OCR/LLM capped by the run's `cost_ceiling_usd`; a 10,000-item batch cannot exceed the ceiling by construction.
 4. **Idempotency**: all tasks keyed; no WRITE-class operations exist.
 5. **Circuit breakers**: per host (governor) and per vendor (integrations).
-6. **PII**: tagged per block; retention class per tenant; redaction in exports; raw evidence access-controlled.
+6. **PII and retention: not implemented.** Nothing tags or redacts personal data and nothing expires stored data. The scope once carried `retention_class` and `pii_policy` fields; no code read them, so they were removed (2026-11-23) rather than promise protections that did not run. Deleting a project removes its folders and search data; shared evidence stays.
 7. **Input sanitization**: all scraped data enters through `StrictModel` contracts; page text is quoted data in prompts.
 8. **Secrets**: `get_settings()` + `SecretStr`; workers receive short-lived per-task credentials only.

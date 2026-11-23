@@ -14,10 +14,14 @@ export CP_URL_HISTORY_ROOT="${CP_URL_HISTORY_ROOT:-$CP_DATA_ROOT/url_history}"
 export CP_KNOWLEDGE_ROOT="${CP_KNOWLEDGE_ROOT:-$CP_DATA_ROOT/knowledge_store}"
 export CP_MODEL_CACHE_DIR="${CP_MODEL_CACHE_DIR:-$CP_DATA_ROOT/model_cache}"
 export CP_SPEND_DIR="${CP_SPEND_DIR:-$CP_DATA_ROOT/spend}"
+# The app log (logs/audit.jsonl in a checkout). The record of sign-ins and downloads is
+# app_data/audit/user_actions.jsonl, already under CP_APP_DATA_ROOT.
+export AUDIT_LOG_PATH="${AUDIT_LOG_PATH:-$CP_DATA_ROOT/logs/audit.jsonl}"
 EXPORTS="${CP_EXPORTS_DIR:-$CP_DATA_ROOT/exports}"
 
 mkdir -p "$CP_APP_DATA_ROOT" "$CP_EVIDENCE_ROOT" "$CP_URL_HISTORY_ROOT" \
-    "$CP_KNOWLEDGE_ROOT" "$CP_MODEL_CACHE_DIR" "$CP_SPEND_DIR" "$EXPORTS"
+    "$CP_KNOWLEDGE_ROOT" "$CP_MODEL_CACHE_DIR" "$CP_SPEND_DIR" "$EXPORTS" \
+    "$(dirname "$AUDIT_LOG_PATH")"
 
 exec python -m src.modules.content_processor.webapi \
     --exports "$EXPORTS" \

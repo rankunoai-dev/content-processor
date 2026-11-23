@@ -43,7 +43,8 @@ under it unless their own variable is set:
 
 | Folder | Variable | What is lost without it |
 | --- | --- | --- |
-| `/data/app_data` | `CP_APP_DATA_ROOT` | projects, URL lists, scrapes, reports, the unlock-token key, the email outbox |
+| `/data/app_data` | `CP_APP_DATA_ROOT` | projects, URL lists, scrapes, reports, the unlock-token key, the email outbox, accounts and the record of sign-ins and downloads (`audit/user_actions.jsonl`) |
+| `/data/logs` | `AUDIT_LOG_PATH` (`/data/logs/audit.jsonl`) | the app's own log (scrapes, errors, warnings) |
 | `/data/evidence` | `CP_EVIDENCE_ROOT` | the captured pages every claim cites |
 | `/data/url_history` | `CP_URL_HISTORY_ROOT` | the latest capture of every URL (reuse between scrapes) |
 | `/data/knowledge_store` | `CP_KNOWLEDGE_ROOT` | the search index of each website (SQLite, when Postgres is not used) |
@@ -53,6 +54,11 @@ under it unless their own variable is set:
 
 Railway: add a volume to the service and set its mount path to `/data`. The image runs as
 root, so a freshly created volume is writable without further steps.
+
+Sign-in fails closed. Once the server listens beyond the container and the accounts file
+(`/data/app_data/accounts/accounts.json`) cannot be found, for example because the volume
+is not mounted, every `/api/` request gets `503` until an admin exists again. It is never
+opened to anyone.
 
 ## Environment variables for a deployment
 

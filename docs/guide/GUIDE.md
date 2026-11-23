@@ -1,6 +1,6 @@
 # Content Processor: A Plain-Language Guide
 
-Last updated: 23 November 2026 · Code version: main with one search for every scope, relevance checking and better search results (reranking, "not found", dates, diversity), bge-m3 multilingual embeddings, competitor lite scan, in-app verdict reviews, team accounts, and topic drift
+Last updated: 23 November 2026 · Code version: main with sign-in that fails closed and a record of sign-ins and downloads, one search for every scope, relevance checking and better search results (reranking, "not found", dates, diversity), bge-m3 multilingual embeddings, competitor lite scan, in-app verdict reviews, team accounts, and topic drift
 
 ## 1. What this is, in one paragraph
 
@@ -488,6 +488,8 @@ Each decision is saved with who made it and when, and earlier decisions are kept
 - **Until the first admin exists,** the app works as before, but only on this computer: it refuses to listen to other machines without accounts.
 - **The first admin** is created on the server with one command (`accounts create-admin`). From that moment sign-in is required everywhere: nothing is shown and nothing can be downloaded without it.
 - **Sign-ins last 12 hours** (adjustable). Passwords are stored only in scrambled form, and wrong passwords are slowed down.
+- **The door stays locked if the account list goes missing.** On a server that other machines can reach (Railway), if the list of accounts cannot be found while the app is running (for example the storage disk was not attached), the app refuses every request with a message saying why, instead of opening up to anyone. It works again as soon as an admin exists.
+- **A record of who signed in and who downloaded what.** Every sign-in, wrong password, sign-out and download (reports, workbooks, archives, deliverables) is written with the person, the time and the address it came from, never the password. The record and the app's log are kept on Railway's permanent disk, so a redeploy does not erase them.
 - **Scrape again:** the next scrape of that website captures the page again in full. It does not reuse the earlier capture, even when the website says nothing changed.
 - **Project passwords and the Unlock button disappear:** the role decides. Every change is tied to a named person.
 - **Programs such as the Claude Desktop connector** use a personal access token instead of a password, created on the server with the role it may use (usually Viewer).
@@ -539,6 +541,7 @@ On the John Hancock scrape the Review tab opens on four pages out of 306: a PDF 
 - Action cards: Claude stays off until the data policy is confirmed, so no card has been run through Claude on real data yet; the Claude part is tested against a simulated Claude only. The three keyword cards run once a project has research (a Semrush export can be imported for free); a live Semrush pull has not been made yet.
 - The rest of the knowledge base: a screen that compares several projects at once is not built yet (gap findings are per project; stamping, the offering catalog, section labels, search and questions are done). The AI steps (embeddings with bge-m3, labels and answers from a local model) have been tested against a simulated server only, and the Postgres vector store only in automated tests, until Ollama and Postgres with pgvector are installed; until then the local file and the word-matching stand-in are used.
 - Hidden page text: some text present in the page code (for example frequently-asked-question answers) is not yet revealed and captured by the browser exploration; the engine flags these pages for review rather than counting them complete.
+- Personal data and retention: nothing finds or hides personal details (names, emails, phone numbers) in scraped pages or reports, and nothing deletes old data automatically. Deleting a project removes its folders and search data, but the captured pages it shared with other projects stay. Everyone with an account can see every project; there is no per-client access yet.
 - Pages scraped before a rule was corrected keep their old verdict until they are re-scored (`reverdict`) or scraped again; a repeat scrape reuses an unchanged page's earlier record, so clearing an old verdict on an unchanged page needs the re-score.
 
 ## 8. Glossary
@@ -572,6 +575,7 @@ On the John Hancock scrape the Review tab opens on four pages out of 306: a PDF 
 
 | Date | Significant change |
 |---|---|
+| 2026-11-23 | Security: on a server others can reach, a missing account list now locks the app instead of opening it; every sign-in, wrong password, sign-out and download is recorded with who, when and from where, and that record and the app log are kept on Railway's permanent disk. Two settings that promised removal of personal data and a 90-day retention, with nothing behind them, were removed; neither feature exists yet (section 7). |
 | 2026-11-23 | One search for everything: a question about one website and a question about a whole project (several websites and competitors) now go through exactly the same steps, so the relevance check, the one-copy rule for repeated text, the date hints and the variety of results work across all the websites together. Asking for one kind of passage (for example pricing or FAQ answers) now finds it even when it is rare. Same results on John Hancock (one website). |
 | 2026-11-23 | Search and answers: a second, multilingual model checks that each passage really answers the question, so the knowledge base can say "not found"; repeated paragraphs count once, results are chosen to add something new, a date or "latest" in a question moves the matching pages up, searches can be limited to a date range, and quoted answers skip titles and labels. On John Hancock the right fact was in the answer for 24 of 36 questions instead of 15. Searches on big websites no longer read every vector from disk each time. |
 | 2026-11-22 | PDFs: a password-protected PDF is reported as such and set aside for a person to obtain, without wasted OCR; lines repeated at the top or bottom of most pages (titles, page numbers, copyright) are marked as page furniture and kept out of search, duplicates and meaning scores. |

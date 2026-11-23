@@ -147,8 +147,7 @@ CREATE TABLE IF NOT EXISTS evidence (
     media_type   TEXT NOT NULL,
     bytes        BIGINT NOT NULL,
     captured_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-    redacted     BOOLEAN NOT NULL DEFAULT FALSE,
-    retention_class TEXT NOT NULL DEFAULT 'standard_90d'
+    redacted     BOOLEAN NOT NULL DEFAULT FALSE
 );
 CREATE INDEX IF NOT EXISTS evidence_sha_idx ON evidence (tenant_id, sha256);
 
