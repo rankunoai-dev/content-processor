@@ -49,9 +49,11 @@ from typing import Any, Literal
 from urllib.parse import quote as url_quote
 
 from src.modules.content_processor.knowledge.assist import LocalChat, quote_in
+from src.modules.content_processor.knowledge.context import build_context
 from src.modules.content_processor.knowledge.embedders import Embedder
 from src.modules.content_processor.knowledge.reranker import Reranker
 from src.modules.content_processor.knowledge.retrieve import (
+    _ONE_STORE,
     RRF_K,
     EmbedderMismatchError,
     SearchHit,
@@ -100,7 +102,6 @@ _WANTS_FIGURE = re.compile(
     re.IGNORECASE,
 )
 _MAX_SOURCE_CHARS = 2_500
-_MAX_PROMPT_CHARS = 16_000
 _MIN_WORD_SUPPORT = 0.6
 _EXTRACTIVE_POINTS = 3
 _SENTENCE_END = re.compile(r"(?<=[.!?])\s+(?=[A-Z0-9\"“(])")
@@ -306,28 +307,17 @@ def check_statement(statement: str, quote: str, source_text: str) -> str | None:
     return None
 
 
-def _gather(store: VectorStore, hits: Sequence[SearchHit]) -> list[Source]:
-    """Hits plus their neighbours, grouped by page in hit order, in page order inside."""
-    matched = [h.chunk.chunk_id for h in hits]
-    neighbour_ids = [
-        n
-        for h in hits
-        for n in (h.chunk.prev_chunk_id, h.chunk.next_chunk_id)
-        if n and n not in matched
-    ]
-    rows = {h.chunk.chunk_id: h.chunk for h in hits}
-    rows.update(store.get_chunks(neighbour_ids))
-    page_order: list[str] = []
-    for h in hits:
-        if h.chunk.page_key not in page_order:
-            page_order.append(h.chunk.page_key)
-    ordered = sorted(
-        rows.values(),
-        key=lambda c: (
-            page_order.index(c.page_key) if c.page_key in page_order else len(page_order),
-            c.order,
-        ),
+def _gather(
+    store: VectorStore, hits: Sequence[SearchHit], budget: int | None = None
+) -> list[Source]:
+    """Hits with their surrounding sections (`context.build_context`), best stretch first."""
+    found = build_context(
+        [(_ONE_STORE, h.chunk) for h in hits],
+        lambda _space, url: store.page_chunks(url),
+        budget=budget,
     )
+    matched = {h.chunk.chunk_id for h in hits}
+    ordered = [c for stretch in found.stretches for c in stretch.chunks]
     return [
         Source(label=f"S{i}", chunk=c, matched=c.chunk_id in matched)
         for i, c in enumerate(ordered, start=1)
@@ -434,11 +424,8 @@ def _ask_model(
 ) -> list[AnswerPoint] | None:
     groups: list[list[dict[str, str]]] = []
     pages: dict[str, int] = {}
-    size = 0
-    for s in sources:  # in rank order, so the prompt budget keeps the best passages
+    for s in sources:  # sized by the context builder (CP_CONTEXT_TOKENS), best first
         text = s.chunk.verbatim_text[:_MAX_SOURCE_CHARS]
-        if size + len(text) > _MAX_PROMPT_CHARS and groups:
-            break
         if s.chunk.page_key not in pages:
             pages[s.chunk.page_key] = len(groups)
             groups.append([])
@@ -450,7 +437,6 @@ def _ask_model(
                 "text": text,
             }
         )
-        size += len(text)
     given = _edges(groups)
     reply = chat.ask_json(
         _SYSTEM, json.dumps({"question": question, "sources": given}, ensure_ascii=False)
@@ -481,8 +467,12 @@ def answer_question(
     reranker: Reranker | None = None,
     min_score: float | None = None,
     published: DateRange | None = None,
+    context_tokens: int | None = None,
 ) -> Answer:
     """Answer from the stored passages only; every point is checked against its quote.
+
+    The passages found are handed over with their surrounding section, up to
+    `context_tokens` (default `CP_CONTEXT_TOKENS`); quotes may come from any of them.
 
     With a `reranker`, passages (and, for extractive answers, sentences) that do not
     answer the question well enough are dropped, so a question the website does not
@@ -506,7 +496,7 @@ def answer_question(
             else "no passage matches the question"
         )
         return Answer(question, "not_found", note=note)
-    sources = _gather(store, hits)
+    sources = _gather(store, hits, context_tokens)
     by_label = {s.label: s for s in sources}
     if chat is not None:
         proposed = _ask_model(chat, question, sources)

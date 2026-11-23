@@ -797,6 +797,7 @@ def test_the_bot_searches_several_websites_and_says_where_each_passage_came_from
     first = both["hits"][0]
     assert first["project_name"] == "Print security" and first["url"].startswith("https://www.")
     assert first["evidence_ids"] == ["evidence:1"]
+    assert first["section_complete"] in (True, False) and isinstance(first["before"], list)
 
     only_xerox = bot.get(
         "/api/knowledge/search", params={"q": "secure print", "space": xerox_ns}

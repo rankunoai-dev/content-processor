@@ -15,7 +15,7 @@ from __future__ import annotations
 import json
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field, ValidationError
 
@@ -27,6 +27,11 @@ from src.modules.content_processor.knowledge.catalog_models import Catalog
 from src.modules.content_processor.knowledge.inventory_models import PageInventory
 from src.modules.content_processor.knowledge.models import PageStamp
 from src.modules.content_processor.knowledge.numeric import np
+
+if TYPE_CHECKING:
+    from src.modules.content_processor.knowledge.context import Stretch
+    from src.modules.content_processor.knowledge.retrieve import RetrievedHit
+    from src.modules.content_processor.knowledge.vector_store import ChunkRow
 
 __all__ = [
     "MAX_RESULT_CHARS",
@@ -90,6 +95,13 @@ class SearchInput(StrictModel):
         default=None,
         description="Only passages labelled with this role: claim, feature, pricing, "
         "proof_point, faq, cta, disclaimer",
+    )
+    context_tokens: int | None = Field(
+        default=None,
+        ge=0,
+        le=20_000,
+        description="Tokens of text returned in all (passages plus the text around them, "
+        "about 4 characters each); default CP_SEARCH_CONTEXT_TOKENS; 0 = the passages alone",
     )
 
 
@@ -316,21 +328,22 @@ def _search(play: Playground, args: SearchInput) -> dict[str, Any]:
         per_site=args.per_site,
         reranker=get_reranker(),
     )
+    if not args.per_site:
+        result.hits = result.hits[: args.top_k]
+    from src.modules.content_processor.knowledge.context import context_for
+
+    # small-to-big (RFC 0005, L2): each passage with the text around it, within the budget
+    around = context_for(result, play.access.open_store, budget=args.context_tokens)
     by_namespace = {d.copy.namespace: w for w in websites if (d := play.site_data(w)) is not None}
+    shown: set[tuple[str, str]] = set()
     passages = []
     for found in result.hits:
         chunk = found.hit.chunk
         owner = by_namespace.get(found.space.namespace)
         key = owner.key if owner else found.space.site_name
-        ref = play.ledger.chunk(
-            chunk.chunk_id,
-            website=key,
-            url=chunk.url,
-            project=found.space.project_name,
-            headings=chunk.heading_path,
-            text=chunk.verbatim_text,
-            block_ids=chunk.block_ids,
-            evidence_ids=chunk.evidence_ids,
+        ref = _enter(play, found, key, chunk, shown)
+        context = _surrounding(
+            play, found, key, around.stretch_of(found.space, chunk.chunk_id), shown
         )
         passages.append(
             {
@@ -356,10 +369,9 @@ def _search(play: Playground, args: SearchInput) -> dict[str, Any]:
                     )
                     if rank
                 ],
+                **context,
             }
         )
-        if not args.per_site and len(passages) >= args.top_k:
-            break
     skipped += [{"website": s.site_name, "reason": why} for s, why in result.skipped]
     searched = sorted(w.key for w in websites if play.site_data(w) is not None)
     search_ref = play.ledger.fact(
@@ -383,6 +395,11 @@ def _search(play: Playground, args: SearchInput) -> dict[str, Any]:
         f"{s.site_name}: {why}; paraphrases are found, but less reliably than with bge-m3"
         for s, why in result.lighter
     ]
+    if around.cut:
+        notes.append(
+            f"{around.cut} passage(s) come with part of their section only (budget "
+            f"{around.budget} tokens); get_page has the whole page"
+        )
     if result.reranked_by:
         notes.append(
             f"passages checked for relevance by {result.reranked_by}; "
@@ -397,6 +414,50 @@ def _search(play: Playground, args: SearchInput) -> dict[str, Any]:
     if notes:
         out["notes"] = notes
     return out
+
+
+def _enter(
+    play: Playground, found: RetrievedHit, website: str, chunk: ChunkRow, shown: set[Any]
+) -> str:
+    shown.add((found.space.namespace, chunk.chunk_id))
+    return play.ledger.chunk(
+        chunk.chunk_id,
+        website=website,
+        url=chunk.url,
+        project=found.space.project_name,
+        headings=chunk.heading_path,
+        text=chunk.verbatim_text,
+        block_ids=chunk.block_ids,
+        evidence_ids=chunk.evidence_ids,
+    )
+
+
+def _surrounding(
+    play: Playground, found: RetrievedHit, website: str, stretch: Stretch | None, shown: set[Any]
+) -> dict[str, Any]:
+    """The text before and after one hit.
+
+    Each passage is shown once, with the first hit it surrounds; another hit in the same
+    stretch is a passage of its own.
+    """
+    if stretch is None:
+        return {"section": "", "section_complete": False, "before": [], "after": []}
+    before, after = stretch.around(found.hit.chunk.chunk_id)
+
+    def parts(rows: list[ChunkRow]) -> list[dict[str, str]]:
+        return [
+            {"ref": _enter(play, found, website, c, shown), "text": _clip(c.verbatim_text)}
+            for c in rows
+            if c.chunk_id not in stretch.matched
+            and (found.space.namespace, c.chunk_id) not in shown
+        ]
+
+    return {
+        "section": stretch.section,
+        "section_complete": stretch.complete,
+        "before": parts(before),
+        "after": parts(after),
+    }
 
 
 def _get_page(play: Playground, args: UrlInput) -> dict[str, Any]:
@@ -1098,8 +1159,10 @@ TOOLS: dict[str, ToolSpec] = {
             "search_knowledge",
             "content",
             "Hybrid search (meaning plus exact words) over the websites' captured text. Returns "
-            "verbatim passages with a `ref` to cite. Use per_site for side-by-side comparisons "
-            "and role to keep only claims, pricing, proof points, FAQs, CTAs or disclaimers.",
+            "verbatim passages with a `ref` to cite, each with the text around it on its page "
+            "(`before` / `after`, same section first, each part with its own `ref`). Use "
+            "per_site for side-by-side comparisons and role to keep only claims, pricing, "
+            "proof points, FAQs, CTAs or disclaimers.",
             SearchInput,
             _search,
         ),

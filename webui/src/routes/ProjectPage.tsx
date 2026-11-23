@@ -19,6 +19,7 @@ import {
   Button,
   Card,
   Checkbox,
+  Collapse,
   Descriptions,
   Empty,
   Form,
@@ -59,6 +60,8 @@ import {
   type Project,
   type RoutedImport,
   type RunState,
+  type SearchContext,
+  type SearchHit,
   type Site,
   type StartOptions,
 } from '../api/projects';
@@ -1118,6 +1121,7 @@ function SearchTab({ project }: { project: Project }) {
                           ) : null}
                         </Space>
                         <Typography.Paragraph style={{ marginBottom: 0 }}>{h.text}</Typography.Paragraph>
+                        <AroundPassage hit={h} />
                         <a href={h.url} target="_blank" rel="noopener noreferrer">
                           {h.url}
                         </a>
@@ -1131,6 +1135,40 @@ function SearchTab({ project }: { project: Project }) {
         </QueryState>
       ) : null}
     </Space>
+  );
+}
+
+/** The text above and below a hit on its page, collapsed until asked for. */
+function AroundPassage({ hit }: { hit: SearchHit }) {
+  const before = hit.before ?? [];
+  const after = hit.after ?? [];
+  const count = before.length + after.length;
+  if (count === 0) return null;
+  const part = (c: SearchContext) => (
+    <Typography.Paragraph key={c.chunk_id} type="secondary" style={{ marginBottom: 8 }}>
+      {c.text}
+    </Typography.Paragraph>
+  );
+  return (
+    <Collapse
+      ghost
+      size="small"
+      items={[
+        {
+          key: 'around',
+          label: PROJECTS.ask.around(count, hit.section_complete === true),
+          children: (
+            <>
+              {before.map(part)}
+              <Typography.Paragraph strong style={{ marginBottom: 8 }}>
+                {hit.text}
+              </Typography.Paragraph>
+              {after.map(part)}
+            </>
+          ),
+        },
+      ]}
+    />
   );
 }
 

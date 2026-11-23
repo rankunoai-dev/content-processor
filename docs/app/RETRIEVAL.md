@@ -1,9 +1,10 @@
 # Retrieval: how the knowledge base finds passages, and why each choice
 
 Code: `src/modules/content_processor/knowledge/`: `retrieve.py` (the one retriever,
-RFC 0005 step 1), `vector_store.py`, `reranker.py`, `query_dates.py`; `retrieval.py`
+RFC 0005 step 1), `context.py` (the context builder, step 2), `vector_store.py`, `reranker.py`, `query_dates.py`; `retrieval.py`
 (answers) and `federated.py` re-export the search names for older callers. Settings: `CP_VECTOR_CACHE_MB`,
-`CP_HNSW_EF_SEARCH`, `CP_RERANK*`, `CP_MMR_LAMBDA` (see `.env.example`).
+`CP_HNSW_EF_SEARCH`, `CP_RERANK*`, `CP_MMR_LAMBDA`, `CP_CONTEXT_TOKENS`,
+`CP_SEARCH_CONTEXT_TOKENS` (see `.env.example`).
 
 ## Pipeline for one question
 
@@ -36,7 +37,18 @@ steps 4-7 run once, over all websites together.
    the question is about a date.
 7. **Diversity** with maximal marginal relevance (`CP_MMR_LAMBDA` 0.75): each next passage
    balances relevance against similarity to those already chosen.
-8. **Answer**: with a local instruct model, the passages are given best first and second
+8. **Context (small-to-big)**, `context.py`: each hit gets the rest of its section (the
+   run of passages on its page under the same top heading, the chunker's
+   `parent_section_id`), nearest first, alternating after and before, then one passage
+   across each section edge. The budget is the whole text handed over, hits included:
+   `CP_CONTEXT_TOKENS` (4,000) for a local model's answer, `CP_SEARCH_CONTEXT_TOKENS`
+   (8,000) for search results (Claude Desktop's `search_knowledge`, `GET
+   /api/knowledge/search`); both callers can pass `context_tokens` (0 = hits alone). Hits
+   are always kept; the rest is shared one passage per hit per round, best hit first.
+   Hits on one page that meet are merged and shown once. The search tool enters every
+   surrounding passage in the evidence ledger with its own `ref`, so quotes from it pass
+   the citation check. No re-indexing: passages already carry page, order and headings.
+9. **Answer**: with a local instruct model, the passages are given best first and second
    best last (models lose the middle of long prompts), and every statement is checked
    against its quote. Without one, the answer is the best sentences, ranked by the
    reranker; headings and labels are never chosen, a bullet keeps its lead-in ("We do
@@ -68,7 +80,8 @@ came back twice.
 | Dense, sparse, BM25, hybrid, RRF | Steps 2 and 4 | |
 | MMR, diversity | Steps 5 and 7 | |
 | Retriever vs reranker | Steps 2-4 retrieve; step 6 reranks | |
-| Lost in the middle | Step 8 | |
+| Lost in the middle | Step 9 | |
+| Parent-document, small-to-big | Step 8 | Retrieve on precise 400-token passages, hand over their section within a token budget per reader |
 
 ## Measured on John Hancock (40 questions, CPU models)
 
@@ -105,6 +118,13 @@ What is still missing:
   1.1 GB of memory, so `CP_RERANK=auto` uses it only where the model was put in the
   model cache. `CP_RERANK_POOL`, `CP_RERANK_SENTENCES` and `CP_RERANK_THREADS` trade time
   for quality.
+
+**Context builder (RFC 0005 step 2), same 40 questions:** answers 24 of 36 and every
+ranking unchanged; the expected fact is in what search hands over for 35 of 36
+questions (34 with the passages alone; N01 gained, K01 is a table value missing from
+the stored text) and in the answer's sources for 35 (34 before). Search output: median
+3,900 tokens, at most 8,000. The step itself takes 13-18 ms. On John Hancock most pages
+have one top heading, so a section is usually the whole page (median 5 passages).
 
 **Dates in existing stores**: the publication date is written when a website is indexed.
 A store indexed before this change has none, and date hints stay off for it (they need

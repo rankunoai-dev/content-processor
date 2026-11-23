@@ -36,8 +36,12 @@ from pydantic import Field, ValidationError
 from src.core.logger import get_logger
 from src.core.schemas import StrictModel
 from src.modules.content_processor.knowledge.embedders import Embedder
-from src.modules.content_processor.knowledge.federated import Space, federated_search
-from src.modules.content_processor.knowledge.vector_store import VectorStore
+from src.modules.content_processor.knowledge.federated import (
+    FederatedHit,
+    Space,
+    federated_search,
+)
+from src.modules.content_processor.knowledge.vector_store import ChunkRow, VectorStore
 from src.modules.content_processor.projects.models import (
     MAX_NOTE_LENGTH,
     MAX_SITE_TAGS,
@@ -447,6 +451,14 @@ class WebsiteOut(StrictModel):
     freshest_project: str | None
 
 
+class ContextOut(StrictModel):
+    """A passage around a hit (small-to-big context), quotable like the hit itself."""
+
+    chunk_id: str
+    text: str
+    evidence_ids: list[str]
+
+
 class HitOut(StrictModel):
     """A passage the bot found, with the website and project it came from."""
 
@@ -463,6 +475,16 @@ class HitOut(StrictModel):
     text: str
     chunk_id: str
     evidence_ids: list[str]
+    section: str = Field(default="", description="the top heading the passage sits under")
+    section_complete: bool = Field(
+        default=False, description="the whole section is in before + text + after"
+    )
+    before: list[ContextOut] = Field(
+        default_factory=list, description="the passages just above it on the page"
+    )
+    after: list[ContextOut] = Field(
+        default_factory=list, description="the passages just below it on the page"
+    )
 
 
 class SearchOut(StrictModel):
@@ -1102,6 +1124,7 @@ def register_project_routes(
         website: Annotated[str | None, Query(max_length=500)] = None,
         top_k: Annotated[int, Query(ge=1, le=50)] = 8,
         per_site: Annotated[int | None, Query(ge=1, le=20)] = None,
+        context_tokens: Annotated[int | None, Query(ge=0, le=20_000)] = None,
     ) -> SearchOut:
         """Search a scope of knowledge spaces.
 
@@ -1159,27 +1182,53 @@ def register_project_routes(
             per_site=per_site,
             reranker=get_reranker(),
         )
+        from src.modules.content_processor.knowledge.context import context_for
+
+        around = context_for(result, knowledge.open_store, budget=context_tokens)
+        shown: set[tuple[str, str]] = set()
+
+        def parts(h: FederatedHit, rows: list[ChunkRow], matched: list[str]) -> list[ContextOut]:
+            out = []
+            for c in rows:
+                key = (h.space.namespace, c.chunk_id)
+                if c.chunk_id in matched or key in shown:
+                    continue
+                shown.add(key)
+                out.append(
+                    ContextOut(
+                        chunk_id=c.chunk_id, text=c.verbatim_text, evidence_ids=c.evidence_ids
+                    )
+                )
+            return out
+
+        def hit_out(h: FederatedHit) -> HitOut:
+            stretch = around.stretch_of(h.space, h.hit.chunk.chunk_id)
+            before, after = stretch.around(h.hit.chunk.chunk_id) if stretch else ([], [])
+            matched = stretch.matched if stretch else []
+            return HitOut(
+                rank=h.rank,
+                score=round(h.score, 6),
+                website=site_of.get(h.space.namespace, h.space.site_name),
+                project_id=h.space.project_id,
+                project_name=h.space.project_name,
+                site_id=h.space.site_id,
+                site_name=h.space.site_name,
+                role=role_of.get(h.space.namespace, h.space.role),
+                url=h.hit.chunk.url,
+                headings=h.hit.chunk.heading_path,
+                text=h.hit.chunk.verbatim_text,
+                chunk_id=h.hit.chunk.chunk_id,
+                evidence_ids=h.hit.chunk.evidence_ids,
+                section=stretch.section if stretch else "",
+                section_complete=stretch.complete if stretch else False,
+                before=parts(h, before, matched),
+                after=parts(h, after, matched),
+            )
+
         return SearchOut(
             query=q,
             scope=considered,
-            hits=[
-                HitOut(
-                    rank=h.rank,
-                    score=round(h.score, 6),
-                    website=site_of.get(h.space.namespace, h.space.site_name),
-                    project_id=h.space.project_id,
-                    project_name=h.space.project_name,
-                    site_id=h.space.site_id,
-                    site_name=h.space.site_name,
-                    role=role_of.get(h.space.namespace, h.space.role),
-                    url=h.hit.chunk.url,
-                    headings=h.hit.chunk.heading_path,
-                    text=h.hit.chunk.verbatim_text,
-                    chunk_id=h.hit.chunk.chunk_id,
-                    evidence_ids=h.hit.chunk.evidence_ids,
-                )
-                for h in result.hits
-            ],
+            hits=[hit_out(h) for h in result.hits],
             searched=[s.namespace for s in result.searched],
             skipped=not_built
             + [{"space": s.namespace, "site": s.site_name, "reason": r} for s, r in result.skipped],

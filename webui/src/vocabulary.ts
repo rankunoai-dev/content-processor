@@ -1697,6 +1697,8 @@ export const PROJECTS = {
       "The client's other websites and brands are included as the client's side, never as competitors. Every project that names the client's website, or lists it as a competitor, adds its websites here. Each website is searched once, in its most recent scrape.",
     considered: (names: string[]) => `Websites considered: ${names.join(', ')}`,
     otherProject: (name: string) => `from project ${name}`,
+    around: (count: number, complete: boolean) =>
+      `Text around this passage (${count} ${count === 1 ? 'part' : 'parts'}${complete ? ', whole section' : ''})`,
     noClientDomain: "Add the client's website address to search its competitors across projects.",
   },
   about: 'What it is',
