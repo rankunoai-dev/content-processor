@@ -4,6 +4,11 @@ It runs in the stdio server, not in the web app. It reads the project's theme ma
 app's existing read-only endpoint (`GET /api/projects/{id}/themes`), so the web app's code
 and its running scrapes are not touched. The map tags every captured page with the theme it
 belongs to, so the list is complete; nothing is truncated.
+
+Before answering, these tools ask the app which projects are closed to Claude Desktop
+(`GET /api/mcp/blocked`: confidential, or reading a confidential project's data). A closed
+project is refused, its scrapes are left out of the queue, and when the app cannot say,
+nothing is answered (fail closed).
 """
 
 from __future__ import annotations
@@ -16,7 +21,7 @@ from typing import Any
 
 import httpx
 
-__all__ = ["LOCAL_TOOLS", "theme_pages_text"]
+__all__ = ["LOCAL_TOOLS", "closed_projects", "scrape_queue_text", "theme_pages_text"]
 
 LOCAL_TOOLS: frozenset[str] = frozenset(
     {"get_theme_pages", "export_theme_pages_csv", "get_scrape_queue"}
@@ -47,6 +52,27 @@ def _match_theme(themes: list[dict[str, Any]], wanted: str) -> tuple[dict[str, A
     return None, f"'{wanted}' matches more than one theme; use the id. Themes: {names}"
 
 
+_UNCHECKED = (
+    "The app could not say which projects are confidential, so nothing is answered; try again."
+)
+
+
+async def closed_projects(client: httpx.AsyncClient) -> set[str] | str:
+    """The projects closed to Claude Desktop, or the reason the app cannot say (a str)."""
+    try:
+        response = await client.get("/api/mcp/blocked")
+    except httpx.ConnectError:
+        return "The Content Processor app is not running; start it, then try again."
+    except httpx.TimeoutException:
+        return "The app took too long to answer; try again."
+    if response.status_code != 200:
+        return _UNCHECKED
+    try:
+        return {str(p) for p in response.json()["projects"]}
+    except (ValueError, KeyError, TypeError):
+        return _UNCHECKED
+
+
 async def theme_pages_text(
     client: httpx.AsyncClient, arguments: dict[str, Any], *, as_csv: bool = False
 ) -> tuple[str, bool]:
@@ -58,6 +84,14 @@ async def theme_pages_text(
         return _error("Give the project_id from list_projects.")
     if not theme_arg:
         return _error("Give the theme id (th-...) or its name, as get_theme_map lists them.")
+    closed = await closed_projects(client)
+    if isinstance(closed, str):
+        return _error(closed)
+    if project in closed:
+        return _error(
+            "This project is confidential, or reads a confidential project's data, so Claude "
+            "Desktop gets nothing from it. Tell the user it can only be worked on in the app."
+        )
     try:
         response = await client.get(f"/api/projects/{project}/themes")
     except httpx.ConnectError:
@@ -111,7 +145,13 @@ async def theme_pages_text(
 
 
 async def scrape_queue_text(client: httpx.AsyncClient) -> tuple[str, bool]:
-    """Scrapes running, waiting and ready to start, with progress: read-only."""
+    """Scrapes running, waiting and ready to start, with progress: read-only.
+
+    Scrapes of projects closed to Claude Desktop are left out (only their number is given).
+    """
+    closed = await closed_projects(client)
+    if isinstance(closed, str):
+        return _error(closed)
     try:
         response = await client.get("/api/queue")
     except httpx.ConnectError:
@@ -138,10 +178,25 @@ async def scrape_queue_text(client: httpx.AsyncClient) -> tuple[str, bool]:
             "wait_s": entry.get("wait_s"),
         }
 
-    answer = {
-        "running": [brief(e) for e in data.get("running") or []],
-        "waiting": [brief(e) for e in data.get("waiting") or []],
-        "ready": [brief(e) for e in data.get("ready") or []],
+    hidden = 0
+
+    def shown(entries: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+        nonlocal hidden
+        out = []
+        for entry in entries or []:
+            if (entry.get("run") or {}).get("project_id") in closed:
+                hidden += 1
+            else:
+                out.append(brief(entry))
+        return out
+
+    answer: dict[str, Any] = {
+        "running": shown(data.get("running")),
+        "waiting": shown(data.get("waiting")),
+        "ready": shown(data.get("ready")),
         "seconds_per_url": data.get("seconds_per_url"),
     }
+    if hidden:
+        answer["hidden_scrapes"] = hidden
+        answer["hidden_note"] = "Scrapes of confidential projects are not shown."
     return json.dumps(answer, ensure_ascii=False, indent=2), False

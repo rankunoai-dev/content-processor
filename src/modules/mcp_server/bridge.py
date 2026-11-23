@@ -7,8 +7,17 @@ per-project ledger on disk (`<app data>/mcp/ledgers/<project>.json`), so
 `save_deliverable` checks an answer the same way and stores it in the analyst run history
 (`src.modules.analyst.desktop`), the one thing a connection may write.
 
-GET  /api/mcp/tools   the tool list (names, descriptions, input schemas)
-POST /api/mcp/call    {"tool": ..., "arguments": {...}} -> {"text": ..., "is_error": ...}
+Confidential projects are closed to Claude Desktop entirely, because everything a tool
+returns goes to Anthropic: no tool runs for them, `list_projects` leaves them out (only
+their number is given), and a project whose websites are read from a confidential
+project's scrape (the freshest copy of a shared website) is closed too. A project is
+confidential when its "Confidential" option is on or the analyst data policy file says
+`client_confidential`; a project whose record cannot be read counts as confidential.
+
+GET  /api/mcp/tools    the tool list (names, descriptions, input schemas)
+POST /api/mcp/call     {"tool": ..., "arguments": {...}} -> {"text": ..., "is_error": ...}
+GET  /api/mcp/blocked  {"projects": [ids closed to Claude Desktop]} (for the stdio
+                       server's own tools: theme pages and the scrape queue)
 """
 
 from __future__ import annotations
@@ -30,6 +39,7 @@ from src.modules.accounts.store import role_at_least
 from src.modules.analyst.desktop import DESKTOP_AUTHOR, save_deliverable
 from src.modules.analyst.library import card as card_of
 from src.modules.analyst.playground import EvidenceLedger, LedgerEntry, Playground, ScopeError
+from src.modules.analyst.policy import DataPolicy
 from src.modules.analyst.runs import RunStore
 from src.modules.analyst.tools import run_tool
 from src.modules.analyst.verify import readable_version, sources_section, verify_deliverable
@@ -41,7 +51,6 @@ from src.modules.mcp_server.catalog import (
     SCOPES,
     Scope,
     definitions,
-    exposes_text,
     parse_scope,
     scope_label,
     scope_of,
@@ -107,6 +116,7 @@ class McpBridge:
         self.access = access
         self.runs = runs
         self.root = Path(str(projects.root)) / "mcp" / "ledgers"
+        self.policy = DataPolicy(Path(str(projects.root)) / "analyst", projects)
         self._lock = threading.Lock()
         self._names = {d.name for d in definitions()}
 
@@ -137,6 +147,58 @@ class McpBridge:
             tmp.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
             tmp.replace(path)
 
+    # -- confidential projects --------------------------------------------------------
+
+    def confidential(self, project_id: str) -> bool:
+        """The project's own option or the data policy file; unreadable counts as confidential."""
+        try:
+            self.projects.get(project_id)
+            return self.policy.data_class(project_id) == "client_confidential"
+        except Exception:  # noqa: BLE001 - fail closed: when in doubt, nothing goes out
+            return True
+
+    def closed_because(self, project_id: str) -> str | None:
+        """Why Claude Desktop may not use this project (None when it may).
+
+        Closed when the project is confidential, or when one of the websites it reads
+        (its own and their competitors) is read from a confidential project's scrape.
+        The confidential project is never named.
+        """
+        if self.confidential(project_id):
+            return "own"
+        try:
+            play = Playground(self.projects, self.access, [project_id])
+            for website in play.websites():
+                fresh = website.freshest()
+                if (
+                    fresh is not None
+                    and fresh.project_id != project_id
+                    and self.confidential(fresh.project_id)
+                ):
+                    return website.name
+        except Exception:  # noqa: BLE001 - fail closed
+            _log.exception("mcp confidential check failed for %s", project_id)
+            return "unknown"
+        return None
+
+    def blocked(self) -> list[str]:
+        """Every project closed to Claude Desktop."""
+        return [p.project_id for p in self.projects.projects() if self.closed_because(p.project_id)]
+
+    @staticmethod
+    def _closed(name: str, why: str) -> tuple[str, bool]:
+        if why == "own":
+            reason = f"the project {name!r} is confidential"
+        elif why == "unknown":
+            reason = f"whether the project {name!r} uses confidential data could not be checked"
+        else:
+            reason = f"the project {name!r} reads {why} from the scrape of a confidential project"
+        return _error(
+            f"{reason}, so Claude Desktop gets nothing from it: no tool runs for it. Tell the "
+            "user plainly that this project can only be worked on in the app itself, and do not "
+            "guess its contents."
+        )
+
     # -- tools -------------------------------------------------------------------------
 
     def call(
@@ -157,8 +219,7 @@ class McpBridge:
                 "user which module the question needs."
             )
         if tool == "list_projects":
-            listed = self.list_projects(allowed)
-            return json.dumps({"projects": listed}, ensure_ascii=False), False
+            return json.dumps(self.list_projects(allowed), ensure_ascii=False), False
         args = dict(arguments)
         project_id = str(args.pop("project_id", "") or "")
         if not _PROJECT_ID.match(project_id):
@@ -167,13 +228,9 @@ class McpBridge:
             record = self.projects.get(project_id)
         except ProjectNotFoundError:
             return _error(f"there is no project {project_id!r}; call list_projects for the ids")
-        if record.confidential and exposes_text(tool):
-            return _error(
-                f"the project {record.name!r} is confidential: its page text is never shown to "
-                f"Claude Desktop, and {tool} returns page text. Use the tools that return counts, "
-                "names, themes, rankings and findings, and tell the user plainly that this "
-                "question needs the pages themselves."
-            )
+        why = self.closed_because(project_id)
+        if why is not None:
+            return self._closed(record.name, why)
         if tool == "check_deliverable":
             return self.check(project_id, args)
         if tool == "present_answer":
@@ -254,7 +311,7 @@ class McpBridge:
         """Check an answer written in Claude Desktop and keep it in the analyst run history.
 
         The check never blocks the save (a deliverable that needs review is stored with
-        that result); nothing leaves this computer, so confidential projects save too.
+        that result). Confidential projects never get here: every tool is refused for them.
         """
         if self.runs is None:
             return _error(
@@ -340,17 +397,29 @@ class McpBridge:
         }
         return json.dumps(payload, ensure_ascii=False), False
 
-    def list_projects(self, scope: Scope = None) -> list[dict[str, Any]]:
-        """Projects with their websites and which results exist, with dates (for `scope`)."""
+    def list_projects(self, scope: Scope = None) -> dict[str, Any]:
+        """Projects with their websites and which results exist, with dates (for `scope`).
+
+        Projects closed to Claude Desktop are left out; only their number is given.
+        """
         from src.modules.workspace.status import project_statuses
 
-        statuses = project_statuses(self.projects)  # each carries `confidential`
-        if scope is None:
-            return statuses
-        keep = set(_COMMON_FIELDS)
-        for key in scope:
-            keep |= set(_STATUS_FIELDS[key])
-        return [{k: v for k, v in s.items() if k in keep} for s in statuses]
+        closed = set(self.blocked())
+        statuses = [s for s in project_statuses(self.projects) if s["project_id"] not in closed]
+        if scope is not None:
+            keep = set(_COMMON_FIELDS)
+            for key in scope:
+                keep |= set(_STATUS_FIELDS[key])
+            statuses = [{k: v for k, v in s.items() if k in keep} for s in statuses]
+        out: dict[str, Any] = {"projects": statuses}
+        if closed:
+            out["hidden_projects"] = len(closed)
+            out["hidden_note"] = (
+                f"{len(closed)} project(s) are confidential, or use a confidential project's "
+                "data, and are not shown: Claude Desktop gets nothing from them. If the user asks "
+                "for one, say it can only be worked on in the app itself."
+            )
+        return out
 
 
 def register_mcp_routes(
@@ -374,6 +443,10 @@ def register_mcp_routes(
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from None
         return [asdict(d) for d in definitions(scope)]
+
+    @app.get("/api/mcp/blocked")
+    def blocked() -> dict[str, list[str]]:
+        return {"projects": bridge.blocked()}
 
     @app.post("/api/mcp/call")
     def call(body: CallIn, request: Request) -> CallOut:

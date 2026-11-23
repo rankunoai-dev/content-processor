@@ -41,6 +41,7 @@ __all__ = [
     "SqliteVectorStore",
     "StoreChoice",
     "VectorStore",
+    "cached_bytes",
     "clear_vector_cache",
     "keyword_terms",
     "open_store",
@@ -410,6 +411,12 @@ def _cache_limit() -> int:
         return 256 * 1024 * 1024
 
 
+def cached_bytes() -> int:
+    """Bytes of chunk vectors held in memory now (all stores)."""
+    with _MATRICES_LOCK:
+        return sum(m.nbytes for _v, m in _MATRICES.values())
+
+
 def clear_vector_cache() -> None:
     """Forget every store's vectors held in memory (tests, or after a large re-index)."""
     with _MATRICES_LOCK:
@@ -597,6 +604,10 @@ class SqliteVectorStore:
             r["offering_id"]: r["parent_id"]
             for r in self._db.execute("SELECT offering_id, parent_id FROM offerings")
         }
+
+    def warm(self) -> int:
+        """Read the chunk vectors into the shared cache now; the number of passages."""
+        return len(self._load_matrix().ids)
 
     def _load_matrix(self) -> _Matrix:
         """The chunk vectors in memory: shared across opens until the file changes."""

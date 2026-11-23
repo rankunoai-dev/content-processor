@@ -89,6 +89,28 @@ def queue_notifier(app_data: Path) -> Notifier:
     )
 
 
+def _warm_search_cache(store: ProjectStore, runner: ScrapeRunner, access: KnowledgeAccess) -> None:
+    """With `CP_VECTOR_WARM`: warm the search cache now and after each new knowledge space."""
+    settings = get_settings()
+    limit = int(settings.cp_vector_cache_mb) * 1024 * 1024
+    if not settings.cp_vector_warm or limit <= 0 or settings.cp_database_url:
+        return
+    from src.modules.content_processor.knowledge.federated import Space
+    from src.modules.content_processor.knowledge.warm import freshest_spaces, warm_in_background
+
+    warm_in_background(
+        lambda: freshest_spaces(store, runner.namespace), access.open_store, limit_bytes=limit
+    )
+
+    def after_build(namespace: str) -> None:
+        def spaces() -> list[Space]:
+            return [s for s in freshest_spaces(store, runner.namespace) if s.namespace == namespace]
+
+        warm_in_background(spaces, access.open_store, limit_bytes=limit, name="vector-warm-new")
+
+    runner.on_knowledge_ready = after_build
+
+
 def knowledge_access() -> KnowledgeAccess:
     """Open each website's knowledge space as indexing did: Postgres or the SQLite file."""
     from src.modules.content_processor.knowledge.embedders import (
@@ -139,6 +161,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         runner.start()
         projects = (store, runner, TokenSigner.from_file(data / "secret.key"))
     access = knowledge_access()
+    if projects is not None:
+        _warm_search_cache(projects[0], projects[1], access)
     analyst = None
     if projects is not None:
         from src.modules.analyst.runs import CardRunner

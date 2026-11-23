@@ -15,11 +15,12 @@ refuses any other module's tool on that connection. A module's own results may s
 mention what they were built from (a gap finding names its theme): that is the module's
 output, not a look-up in another module.
 
-**Confidential projects.** Every tool is marked `exposes_text`: whether its answer can
-carry verbatim page text (passages, sections, descriptions, FAQ questions, rewritten
-text). For a project marked confidential in the app, the web app runs only the tools
-that do not (counts, names, URLs, titles, themes, rankings, findings) and refuses the
-rest with a plain reason.
+**Confidential projects.** Everything a tool returns reaches Anthropic through Claude
+Desktop, and even names, titles, themes and findings describe the client. So for a
+project marked confidential in the app (or `client_confidential` in the data policy),
+and for a project that reads a confidential project's scrape, the web app runs no tool
+at all, and `list_projects` leaves it out. Every tool is still marked `exposes_text`
+(whether its answer can carry verbatim page text) for the instructions and the docs.
 """
 
 from __future__ import annotations
@@ -68,7 +69,7 @@ TEXT_TOOLS: Final[frozenset[str]] = frozenset(
 
 
 def exposes_text(tool: str) -> bool:
-    """True when the tool's answer can carry page text (refused for confidential projects)."""
+    """True when the tool's answer can carry page text (not a confidentiality rule any more)."""
     return tool in TEXT_TOOLS
 
 
@@ -149,14 +150,13 @@ How to work:
    quotes that do not match, uncited claims). Once it passes, call save_deliverable with a
    short title and the same text, so the answer is kept in the app's run history (Analyst
    cards tab, "Written in Claude Desktop"); then tell the user it is saved. Saving sends
-   nothing anywhere, so it works for confidential projects too.
+   nothing anywhere.
 5. You cannot scrape websites, pull from Semrush, change statuses or rebuild on request; say
    which button in the app does it when the user needs that.
 {scope_rule}
-7. A project listed with "confidential": true never shows you its page text: tools that
-   return passages, page sections, page facts or changed text are refused for it. Work from
-   what the other tools give (counts, names, themes, rankings, findings) and tell the user
-   plainly when a question needs the pages themselves.
+7. Confidential projects are not shown to you at all (list_projects only says how many are
+   hidden), and every tool refuses them. When the user asks about one, say plainly that it
+   can only be worked on in the app itself; never guess its contents.
 
 How to present answers to the user (readability comes first):
 - Give every answer with facts through present_answer: choose its type (answer, overview,
@@ -192,7 +192,7 @@ class ToolDef:
     input_schema: dict[str, object]
     module: str | None = None
     exposes_text: bool = False
-    """Whether its answer can carry page text (refused for confidential projects)."""
+    """Whether its answer can carry page text (not a confidentiality rule any more)."""
     writes: bool = False
     """Whether it writes app data (only the analyst run history, on this computer)."""
 
@@ -274,8 +274,8 @@ def definitions(scope: Scope = None) -> list[ToolDef]:
             ToolDef(
                 name,
                 f"{label}: {_title(name)}",
-                f"[{label}] {spec.description} (read-only"
-                + ("; not available for confidential projects)" if text else ")"),
+                f"[{label}] {spec.description} (read-only; "
+                "not available for confidential projects)",
                 _with_project(spec.input_model.model_json_schema()),
                 key,
                 text,
@@ -366,7 +366,7 @@ def definitions(scope: Scope = None) -> list[ToolDef]:
             'as "Written in Claude Desktop", with its title, the check result, its sources, '
             "who saved it and when. Saving the same title again for the same project adds a new "
             "version instead of a second entry. Nothing is sent anywhere (the text is already "
-            "here), so confidential projects can save too. Call it after check_deliverable "
+            "here). Call it after check_deliverable "
             "passes, with the same Markdown.",
             {
                 "type": "object",

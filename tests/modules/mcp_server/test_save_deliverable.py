@@ -229,14 +229,14 @@ def test_a_bad_citation_needs_review_but_is_still_saved(themed: World, tmp_path:
     assert "Unknown citations" in stored and "unknown source (chunk:invented-1)" in stored
 
 
-def test_a_confidential_project_can_save(themed: World, tmp_path: Path) -> None:
+def test_a_confidential_project_cannot_save_either(themed: World, tmp_path: Path) -> None:
     app, runner = _app(themed, tmp_path)
     client = TestClient(app, base_url="http://127.0.0.1")
     pid = themed.project_id
-    themed.store.update(pid, confidential=True)
     theme, is_error = _call(client, "get_theme_map", project_id=pid)
     assert not is_error
     theme_ref = theme["data"]["themes"][0]["ref"]
+    themed.store.update(pid, confidential=True)
     saved, is_error = _call(
         client,
         "save_deliverable",
@@ -244,11 +244,8 @@ def test_a_confidential_project_can_save(themed: World, tmp_path: Path) -> None:
         title="Themes in short",
         markdown=f"One theme stands out [{theme_ref}].\n",
     )
-    assert not is_error and saved["status"] == "passed"
-    assert runner.runs.get(saved["run_id"]).title == "Themes in short"
-    # the other rules still hold: page text is refused for it
-    refused, is_error = _call(client, "search_knowledge", project_id=pid, query="term life")
-    assert is_error and "confidential" in refused["error"]
+    assert is_error and "confidential" in saved["error"]
+    assert all(r.title != "Themes in short" for r in runner.runs.all()), "nothing saved"
 
 
 def test_a_scoped_connection_names_its_module_in_the_author(themed: World, tmp_path: Path) -> None:

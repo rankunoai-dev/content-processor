@@ -32,7 +32,9 @@ def test_status_follows_what_each_module_stored(themed: World, tmp_path: Path) -
     assert after["research_added"] and after["keywords"] > 0
     assert after["gaps_built"] and after["findings"] == after["open_findings"] > 0
     # the home screen and Claude Desktop say the same thing
-    assert McpBridge(themed.store, themed.access).list_projects() == project_statuses(themed.store)
+    assert McpBridge(themed.store, themed.access).list_projects()["projects"] == project_statuses(
+        themed.store
+    )
     exports = tmp_path / "exports"
     exports.mkdir()
     app = create_app(

@@ -74,7 +74,7 @@ came back twice.
 | Vector DB vs relational | Vectors in the database with their verbatim text and evidence ids | Every answer must quote stored text; one store keeps them in step |
 | Persistence | SQLite file per website (needs a persistent volume on Railway); Postgres | Postgres path has not yet run against a real server |
 | Namespaces | One per tenant, project and website | Websites indexed with different models can be searched together |
-| Memory | Vectors kept in memory across searches up to `CP_VECTOR_CACHE_MB` (256); stored without the zero padding of smaller models | Reading every vector from disk on each search took 300 ms for 0.5 ms of search; a 384-number model padded to 1,024 used 2.7x the memory |
+| Memory | Vectors kept in memory across searches up to `CP_VECTOR_CACHE_MB` (256), filled in the background when the web app starts and after each new knowledge space (`CP_VECTOR_WARM`, `knowledge/warm.py`: freshest copy of each website, newest first, stops when the cache is full); stored without the zero padding of smaller models | Reading every vector from disk on each search took 300 ms for 0.5 ms of search; a 384-number model padded to 1,024 used 2.7x the memory |
 | Top-k, choosing k | 5 passages for answers, 8 for Claude Desktop's search; with the reranker, k follows the evidence (only passages above the threshold) | |
 | Similarity threshold | On reranker scores, not on vector cosine | Cosine of questions the site cannot answer (0.61-0.67) fell inside the range of answerable ones (0.24-0.90) |
 | Dense, sparse, BM25, hybrid, RRF | Steps 2 and 4 | |

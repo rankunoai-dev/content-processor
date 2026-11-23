@@ -969,3 +969,33 @@ def test_a_question_about_a_website_covers_its_competitors_in_every_project(
     assert websites["canon.com"]["searchable"] is False
     unknown = bot.get("/api/knowledge/search", params={"q": "print", "website": "nowhere.example"})
     assert unknown.status_code == 404
+
+
+def test_a_built_knowledge_space_is_announced_so_the_app_can_warm_it(tmp_path: Path):
+    store = ProjectStore(tmp_path)
+    project = _flynns(store)
+    store.add_urls(project.project_id, "xerox", ["https://www.xerox.com/1"])
+    built: list[str] = []
+    runner = ScrapeRunner(
+        store,
+        command=FakeBatches(),
+        report=_fake_report,
+        knowledge=FakeKnowledge(),
+        on_knowledge_ready=built.append,
+    )
+    runner.start()
+    runner.submit(project.project_id, "xerox", started_by="G")
+    assert runner.wait_idle(20)
+    assert built == [runner.namespace(project.project_id, "xerox")]
+
+    failing = ScrapeRunner(
+        store,
+        command=FakeBatches(),
+        report=_fake_report,
+        knowledge=FakeKnowledge(fail=True),
+        on_knowledge_ready=built.append,
+    )
+    failing.start()
+    failing.submit(project.project_id, "xerox", started_by="G")
+    assert failing.wait_idle(20)
+    assert len(built) == 1, "not announced when the build failed"

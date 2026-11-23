@@ -271,13 +271,16 @@ class ScrapeRunner:
         attempts: int = ATTEMPTS,
         notifier: Notifier | None = None,
         ready_hours: float = READY_HOURS,
+        on_knowledge_ready: Callable[[str], None] | None = None,
     ) -> None:
         """Bind to a store; `command` runs one batch, `report` writes the bundle.
 
         `knowledge` builds a website's knowledge space after its reports; pass a
         no-op to switch that off. `notifier` sends the queue's emails (default: write
-        them to `<store root>/outbox/`).
+        them to `<store root>/outbox/`). `on_knowledge_ready` is called with the
+        namespace once a space is built (the web app warms its search cache there).
         """
+        self.on_knowledge_ready = on_knowledge_ready
         self._store = store
         self._tenant = tenant_id
         self._command = command
@@ -900,6 +903,11 @@ class ScrapeRunner:
         )
         self._finish(state, "finished", "Done.")
         shutil.rmtree(folder / CAPTURES_DIR, ignore_errors=True)  # its records are written
+        if built and self.on_knowledge_ready is not None:
+            try:
+                self.on_knowledge_ready(self.namespace(project_id, site_id))
+            except Exception:  # noqa: BLE001 - a follow-up, never the scrape's failure
+                _logger.exception("on_knowledge_ready failed")
 
     def _credit(self, state: RunState) -> RunState:
         """Add the time the scrape has been running since it was last credited."""

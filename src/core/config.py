@@ -178,6 +178,11 @@ class Settings(BaseSettings):
     # website's chunk vectors in memory between searches, up to this many MB in total
     # (least recently used dropped first; 0 = read them from disk on every search).
     cp_vector_cache_mb: int = Field(default=256, ge=0, le=16_384)
+    # Warm that cache in the background when the web app starts (freshest copy of each
+    # website, newest first, until the cache is full) and after a scrape builds a website's
+    # knowledge space, so the first search of a big website is not the slow one. Memory is
+    # bounded by CP_VECTOR_CACHE_MB; off = load on first search (knowledge/warm.py).
+    cp_vector_warm: bool = True
     # Postgres/pgvector HNSW search depth (pgvector's default 40 returns at most 40 rows).
     cp_hnsw_ef_search: int = Field(default=100, ge=10, le=1_000)
     # Reranker: a cross-encoder reads the question with each candidate passage and scores
