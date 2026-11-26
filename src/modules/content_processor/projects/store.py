@@ -68,7 +68,7 @@ __all__ = [
 
 _ID = re.compile(r"^[a-z0-9][a-z0-9-]{0,80}$")
 
-PROJECT_DATA_MODULES = ("theming", "monitoring", "gaps", "research")
+PROJECT_DATA_MODULES = ("theming", "monitoring", "gaps", "research", "backlinks")
 """Modules that keep `<root>/<module>/<project id>/` (see each module's `store.py`)."""
 
 
@@ -423,9 +423,9 @@ class ProjectStore:
     def delete(self, project_id: str) -> None:
         """Remove the project and everything in it, including the other modules' data.
 
-        Themes, monitoring checks, gap reports, research pulls and the Claude Desktop
-        ledger each keep a folder or file per project next to `projects/` under the
-        same root; they go too. Evidence is shared across projects and stays.
+        Themes, monitoring checks, gap reports, research and backlink pulls and the
+        Claude Desktop ledger each keep a folder or file per project next to `projects/`
+        under the same root; they go too. Evidence is shared across projects and stays.
         """
         with self._lock:
             folder = self.project_dir(project_id)

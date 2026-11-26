@@ -46,6 +46,8 @@ FindingKind = Literal[
     "ctr_opportunity",
     "unlinked_pages",
     "zero_traffic",
+    "link_intersect",
+    "authority_gap",
 ]
 FindingStatus = Literal["open", "accepted", "done", "dismissed"]
 

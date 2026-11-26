@@ -153,7 +153,8 @@ class GapInput(StrictModel):
         "keyword_gap (complete deficit: the client is not in the top 100, its data complete), "
         "keyword_unverified (probable gap: the client's data was cut short), keyword_behind "
         "(the client ranks 21-100), striking_distance (11-20), competitor_momentum, "
-        "offering_gap, unwatched_competitor",
+        "offering_gap, unwatched_competitor, link_intersect (websites linking to competitors "
+        "and not to the client), authority_gap (a competitor's much stronger links)",
     )
     limit: int = Field(default=40, ge=1, le=200)
     rebuild: bool = Field(default=False, description="Build the gap analysis again first")
@@ -191,6 +192,17 @@ class RankingsInput(StrictModel):
     theme_id: str | None = Field(default=None, description="Only keywords of this theme")
     max_position: int = Field(default=100, ge=1, le=100)
     limit: int = Field(default=100, ge=1, le=500)
+
+
+class BacklinksInput(StrictModel):
+    """The project's backlink data (Ahrefs pull or export)."""
+
+    website: str | None = Field(
+        default=None,
+        max_length=300,
+        description="Also list this website's strongest referring domains",
+    )
+    limit: int = Field(default=25, ge=1, le=200, description="Rows per list")
 
 
 # -- helpers -------------------------------------------------------------------------------
@@ -1296,6 +1308,99 @@ def _gaps(play: Playground, args: GapInput) -> dict[str, Any]:
     }
 
 
+def _backlinks(play: Playground, args: BacklinksInput) -> dict[str, Any]:
+    from src.modules.backlinks.insights import strongest
+    from src.modules.backlinks.service import backlinks_store
+
+    project_id = play.project_ids[0]
+    snapshot = backlinks_store(play.store).latest(project_id)
+    if snapshot is None:
+        msg = (
+            "no backlink data for this project yet: import an Ahrefs Referring domains export "
+            "or pull from Ahrefs in the Research tab"
+        )
+        raise ToolError(msg)
+    sid = snapshot.snapshot_id
+    websites = []
+    for w in snapshot.websites:
+        ref = play.ledger.fact(
+            f"{sid}{w.website}",
+            kind="backlinks",
+            website=w.website,
+            url=f"https://{w.website}/",
+            project=project_id,
+            title=f"{w.website}: Domain Rating "
+            + (f"{w.domain_rating:g}" if w.domain_rating is not None else "unknown"),
+            text=f"source {w.source}, snapshot {sid}, {len(w.refdomains)} referring domains listed"
+            + (f", {w.stats.live_refdomains} live" if w.stats else ""),
+        )
+        websites.append(
+            {
+                "ref": ref,
+                "website": w.website,
+                "role": w.role,
+                "source": w.source,
+                "domain_rating": w.domain_rating,
+                "ahrefs_rank": w.ahrefs_rank,
+                "stats": w.stats.model_dump() if w.stats else None,
+                "refdomains_listed": len(w.refdomains),
+                "list_cut_at": w.refdomains_asked or None,
+                "lost_since_last": len(w.lost_domains) if w.new_domains is not None else None,
+                "new_since_last": w.new_domains,
+            }
+        )
+    intersect = []
+    for i in snapshot.insights.link_intersect[: args.limit]:
+        ref = play.ledger.fact(
+            f"{sid}intersect{i.domain}",
+            kind="backlinks",
+            website=i.domain,
+            url=f"https://{i.domain}/",
+            project=project_id,
+            title=f"{i.domain} links to {', '.join(i.competitors)} and not to the client",
+            text=f"Domain Rating {i.domain_rating}, {i.links} links, snapshot {sid}",
+        )
+        intersect.append({"ref": ref, **i.model_dump()})
+    pages = []
+    client = snapshot.insights.client or ""
+    for p in snapshot.insights.client_top_pages[: args.limit]:
+        ref = play.ledger.fact(
+            f"{sid}page{p.url}",
+            kind="backlinks",
+            website=client,
+            url=p.url,
+            project=project_id,
+            title=f"{p.url}: {p.referring_domains} referring domains",
+            text=f"{p.links} links, URL Rating {p.url_rating}, snapshot {sid}",
+        )
+        pages.append({"ref": ref, **p.model_dump()})
+    out: dict[str, Any] = {
+        "snapshot": sid,
+        "created_at": snapshot.created_at.isoformat(),
+        "websites": websites,
+        "authority_gap": [g.model_dump() for g in snapshot.insights.authority],
+        "link_intersect_total": len(snapshot.insights.link_intersect),
+        "link_intersect_needs_competitors": snapshot.insights.min_competitors,
+        "link_intersect": intersect,
+        "client_top_pages": pages,
+        "notes": [*snapshot.notes, *snapshot.insights.notes],
+    }
+    if args.website:
+        try:
+            key = play.website(args.website).key
+        except ScopeError as exc:
+            raise ToolError(str(exc)) from exc
+        site = next((w for w in snapshot.websites if w.website == key), None)
+        if site is None:
+            msg = f"{key} is not in the latest backlink snapshot ({sid})"
+            raise ToolError(msg)
+        out["referring_domains"] = {
+            "website": key,
+            "rows": [r.model_dump() for r in strongest(site.refdomains, args.limit)],
+        }
+    return out
+
+
 TOOLS: dict[str, ToolSpec] = {
     spec.name: spec
     for spec in (
@@ -1460,6 +1565,17 @@ TOOLS: dict[str, ToolSpec] = {
             "example keywords, and whether each is already a website of the project.",
             NoInput,
             _competitors,
+        ),
+        ToolSpec(
+            "get_backlinks",
+            "research",
+            "The project's backlink data (Ahrefs pull or export): each website's Domain "
+            "Rating, Ahrefs rank and backlink counts, the authority gap against each "
+            "competitor, the link intersect (websites linking to competitors and not to the "
+            "client, strongest first) and the client's most linked pages; give a website to "
+            "list its strongest referring domains too.",
+            BacklinksInput,
+            _backlinks,
         ),
     )
 }

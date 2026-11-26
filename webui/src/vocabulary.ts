@@ -2367,6 +2367,8 @@ export const GAPS = {
     ctr_opportunity: 'Low CTR (Search Console)',
     unlinked_pages: 'Pages without links',
     zero_traffic: 'Pages that rank for nothing',
+    link_intersect: 'Link intersect',
+    authority_gap: 'Authority gap (links)',
   } as Record<string, string>,
   severity: { high: 'High', medium: 'Medium', low: 'Low' } as Record<string, string>,
   severityColor: { high: 'red', medium: 'orange', low: 'blue' } as Record<string, string>,
@@ -2443,4 +2445,56 @@ export const MODULES_TEXT = {
       none: 'Scrape first to run cards',
     },
   },
+};
+
+export const BACKLINKS = {
+  title: 'Backlinks (Ahrefs)',
+  intro:
+    "Who links to the client and its competitors: each website's Domain Rating, its referring domains and its most linked pages. The link intersect lists websites that link to competitors but not to the client: the likeliest to link to it too. Importing an Ahrefs export is free; pulling from Ahrefs spends units and stays off until it is switched on with a monthly cap.",
+  importHelp:
+    'In Ahrefs Site Explorer, open one website and export Backlink profile → Referring domains, or Pages → Best by links. Choose the website and which export it is, then the file (CSV, UTF-8 or UTF-16).',
+  website: 'Website',
+  kind: 'Which export',
+  kinds: { refdomains: 'Referring domains', pages: 'Best by links (top pages)' } as Record<string, string>,
+  chooseFile: 'Choose the export',
+  imported: (n: number, kind: string) =>
+    kind === 'pages' ? `Imported ${n} page${n === 1 ? '' : 's'}.` : `Imported ${n} referring domain${n === 1 ? '' : 's'}.`,
+  pullOff: (keySet: boolean) =>
+    keySet
+      ? 'Ahrefs pulls are switched off. Set CP_AHREFS_ENABLED=true and a monthly unit cap (CP_AHREFS_MONTHLY_UNITS) in .env.'
+      : 'Ahrefs pulls are switched off: no API key is set. Imports work without one.',
+  budget: (used: number, cap: number) => `Ahrefs units used this month: ${used.toLocaleString()} of ${cap.toLocaleString()}`,
+  estimate: (units: number, websites: number, cap: number) =>
+    `At most ${units.toLocaleString()} units for ${websites} website${websites === 1 ? '' : 's'} (limit per pull: ${cap.toLocaleString()}).`,
+  shared: 'The limit per pull is smaller: each website gets a fair share, so its lists are shorter (the result says so).',
+  pull: 'Pull from Ahrefs',
+  pulling: 'Pulling…',
+  pulled: (units: number) => `Pulled. ${units.toLocaleString()} units spent.`,
+  empty: 'No backlink data has been added to this project yet.',
+  addedAt: (when: string, units: number) => `Added ${when}${units ? `, ${units.toLocaleString()} units spent` : ', free (export)'}.`,
+  workbook: 'Download the workbook',
+  source: { ahrefs_api: 'Ahrefs API', csv_import: 'Export' } as Record<string, string>,
+  columns: {
+    website: 'Website',
+    source: 'Source',
+    dr: 'Domain Rating',
+    refdomains: 'Referring domains',
+    listed: 'Listed here',
+    lost: 'Lost since last',
+    pages: 'Top pages',
+    domain: 'Linking website',
+    competitors: 'Links to',
+    links: 'Links',
+    page: 'Page',
+  },
+  intersectTitle: (n: number, need: number) =>
+    `Link intersect: ${n} website${n === 1 ? '' : 's'} linking to ${need > 1 ? `${need} or more competitors` : 'the competitor'} but not to the client`,
+  noIntersect: 'No link intersect yet: it needs the referring domains of the client and of at least one competitor.',
+  authorityTitle: 'Authority gap',
+  gap: (g: { competitor: string; metric: string; client: number; competitor_value: number }) =>
+    g.metric === 'domain_rating'
+      ? `${g.competitor}: Domain Rating ${g.competitor_value} against the client's ${g.client}`
+      : `${g.competitor}: ${g.competitor_value.toLocaleString()} referring domains against the client's ${g.client.toLocaleString()}`,
+  topPagesTitle: "The client's most linked pages",
+  unknown: '-',
 };
