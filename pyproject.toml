@@ -49,6 +49,8 @@ ignore = ["D203", "D213", "ANN401"]
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S101", "S104", "S105", "S106", "D100", "D101", "D102", "D103", "D107", "ANN001", "ANN003", "ANN201", "ANN202"]
 "fixtures/**" = ["S104", "D103"]
+# Benchmark scripts (docs/eval): they print their results and write wide report tables.
+"docs/eval/**" = ["E501", "C408", "D103", "T201", "S101", "SIM115"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["src", "tests", "fixtures"]
