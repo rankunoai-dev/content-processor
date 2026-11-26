@@ -22,7 +22,14 @@ from pathlib import Path
 
 from src.core.logger import get_logger
 
-__all__ = ["Mailer", "Notifier", "check_email", "hide_email", "smtp_mailer"]
+__all__ = [
+    "Mailer",
+    "Notifier",
+    "check_email",
+    "hide_email",
+    "notifier_from_settings",
+    "smtp_mailer",
+]
 
 _logger = get_logger("content_processor.projects.notify")
 _EMAIL = re.compile(r"^[^@\s<>,;\"']{1,64}@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$")
@@ -105,3 +112,27 @@ class Notifier:
     def link(self, project_id: str, site_id: str) -> str:
         """The app page of a website's scrapes."""
         return f"{self.base_url.rstrip('/')}/projects/{project_id}?site={site_id}&view=scrape"
+
+
+def notifier_from_settings(app_data: Path) -> Notifier:
+    """Emails through the configured SMTP server, or into `<app data>/outbox/`."""
+    from src.core.config import get_settings
+
+    settings = get_settings()
+    mailer = None
+    if settings.cp_smtp_host and settings.cp_smtp_from:
+        mailer = smtp_mailer(
+            settings.cp_smtp_host,
+            settings.cp_smtp_port,
+            user=settings.cp_smtp_user,
+            password=settings.cp_smtp_password.get_secret_value()
+            if settings.cp_smtp_password
+            else None,
+            starttls=settings.cp_smtp_starttls,
+        )
+    return Notifier(
+        outbox=app_data / "outbox",
+        sender=settings.cp_smtp_from or "content-scraper@localhost",
+        base_url=settings.cp_app_base_url,
+        mailer=mailer,
+    )

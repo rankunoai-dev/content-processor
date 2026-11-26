@@ -5,6 +5,10 @@ POST /api/projects/{project}/monitoring            run a check now (project unlo
 GET  /api/projects/{project}/monitoring/workbook   the latest check's workbook
 GET  /api/projects/{project}/monitoring/watch      how the project is watched
 POST /api/projects/{project}/monitoring/watch      change it (project unlock token)
+
+Pinned core pages must be web addresses of the project's own websites (a typo or
+another site is refused with the addresses named); they are kept once each. Digest
+addresses are checked and kept apart; the settings show them partly hidden.
 """
 
 from __future__ import annotations
@@ -18,11 +22,14 @@ from fastapi.responses import FileResponse
 from pydantic import Field
 
 from src.core.schemas import StrictModel
+from src.modules.content_processor.knowledge.catalog import url_key
 from src.modules.content_processor.projects.runner import ScrapeRunner
 from src.modules.content_processor.projects.security import TokenSigner
 from src.modules.content_processor.projects.store import ProjectNotFoundError, ProjectStore
+from src.modules.content_processor.projects.urls import belongs_to, domain_of
 from src.modules.content_processor.webapi.projects_api import KnowledgeAccess
-from src.modules.monitoring.models import MonitorCheck, RecrawlPlan, WatchSettings
+from src.modules.monitoring.digest import MAX_ADDRESSES, check_addresses
+from src.modules.monitoring.models import DigestLevel, MonitorCheck, RecrawlPlan, WatchSettings
 from src.modules.monitoring.service import monitor_store, recrawl_project, run_project_check
 
 __all__ = ["WatchIn", "register_monitoring_routes"]
@@ -40,6 +47,30 @@ class WatchIn(StrictModel):
     other_every_days: int | None = Field(default=None, ge=1, le=365)
     use_sitemaps: bool | None = None
     core_urls: list[str] | None = Field(default=None, max_length=200)
+    rank_min_volume: int | None = Field(default=None, ge=0, le=1_000_000)
+    digest_level: DigestLevel | None = None
+    digest_to: list[str] | None = Field(
+        default=None, max_length=MAX_ADDRESSES, description="Full addresses; replaces the list"
+    )
+
+
+def pinned_pages(urls: list[str], domains: list[str]) -> tuple[list[str], list[str]]:
+    """(the pages kept, once each, in order; the ones refused: not on the project's websites)."""
+    kept: list[str] = []
+    seen: set[str] = set()
+    refused: list[str] = []
+    for raw in urls:
+        url = raw.strip()
+        if not url:
+            continue
+        key = url_key(url) if url.lower().startswith(("http://", "https://")) else None
+        if key is None or len(url) > 2000 or not belongs_to(url, domains):
+            refused.append(url[:200])
+            continue
+        if key not in seen:
+            seen.add(key)
+            kept.append(url)
+    return kept, refused
 
 
 class RecrawlIn(StrictModel):
@@ -109,7 +140,32 @@ def register_monitoring_routes(
     def set_watch(project_id: str, body: WatchIn, token: TokenHeader = None) -> WatchSettings:
         unlocked(project_id, token)
         current = store.watch(project_id)
-        changes = {k: v for k, v in body.model_dump().items() if v is not None}
+        changes = {k: v for k, v in body.model_dump(exclude={"digest_to"}).items() if v is not None}
+        if body.core_urls is not None:
+            domains = []
+            for site in projects.get(project_id).sites:
+                for address in site.domains:
+                    try:
+                        domains.append(domain_of(address))
+                    except ValueError:
+                        continue
+            kept, refused = pinned_pages(body.core_urls, domains)
+            if refused:
+                raise HTTPException(
+                    status_code=422,
+                    detail="These are not pages of this project's websites: "
+                    + ", ".join(refused[:5])
+                    + (f" and {len(refused) - 5} more" if len(refused) > 5 else ""),
+                )
+            changes["core_urls"] = kept
+        if body.digest_to is not None:
+            try:
+                addresses = check_addresses(body.digest_to)
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from None
+            store.set_digest(
+                project_id, store.digest(project_id).model_copy(update={"to": addresses})
+            )
         return store.set_watch(project_id, current.model_copy(update=changes))
 
     @app.get("/api/projects/{project_id}/monitoring/recrawl")

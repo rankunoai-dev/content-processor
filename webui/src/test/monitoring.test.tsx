@@ -1,4 +1,4 @@
-import { act, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent, { PointerEventsCheckLevel } from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MonitorCheck, RecrawlPlan, WatchSettings } from '../api/monitoring';
@@ -58,6 +58,9 @@ const check: MonitorCheck = {
           blocks_added: { 'pricing blocks': 1, tables: 1 },
           blocks_removed: {},
           meaning: 0.62,
+          noindex: 'added',
+          schema_added: ['Product'],
+          ctas_added: ['Book a demo'],
         },
       ],
       unchanged_pages: 4,
@@ -90,7 +93,36 @@ const check: MonitorCheck = {
       urls: [],
     },
   ],
-  stats: { new_pages: 1, removed_pages: 0, changed_pages: 1, price_changes: 1 },
+  stats: { new_pages: 1, removed_pages: 0, changed_pages: 1, price_changes: 1, ranking_drops: 1 },
+  signals: {
+    research_before: 'research-20261001-000000-000',
+    research_after: 'research-20261101-000000-000',
+    research_note: 'search data of 2026-10-01 against 2026-11-01 (31 days)',
+    backlinks_before: null,
+    backlinks_after: null,
+    backlinks_note: 'no backlink data yet (Backlinks module)',
+    dummy: true,
+    rankings: [
+      {
+        website: 'flynns.com',
+        name: "Flynn's",
+        role: 'client',
+        keyword: 'secure print',
+        before: 3,
+        after: 14,
+        volume: 1900,
+        intent: 'commercial',
+        theme: 'Secure print',
+        url_before: 'https://www.flynns.com/secure-print',
+        url_after: 'https://www.flynns.com/secure-print',
+        uncertain: false,
+        page_change: 'H1 rewritten, words 1,200 → 800',
+        client_position: null,
+      },
+    ],
+    links: [],
+  },
+  notes: ['Xerox: structured data: the older scrape recorded none on any page'],
 };
 
 const watch: WatchSettings = {
@@ -254,6 +286,15 @@ describe('monitoring tab', () => {
       expect(screen.getByText('Generative')).toBeInTheDocument();
       expect(screen.getByText('+1 pricing blocks, +1 tables')).toBeInTheDocument();
       expect(screen.getByText('Topic changed 0.62')).toBeInTheDocument(); // meaning, old vs new
+      expect(screen.getByText('Worse for search engines: now noindex')).toBeInTheDocument();
+      expect(screen.getByText('Structured data added: Product')).toBeInTheDocument();
+      expect(screen.getByText('New calls to action: “Book a demo”')).toBeInTheDocument();
+      // rankings: the drop, its page change, the dummy-data tag and what was compared
+      expect(screen.getByText('secure print')).toBeInTheDocument();
+      expect(screen.getByText('#3 → #14')).toBeInTheDocument();
+      expect(screen.getByText('H1 rewritten, words 1,200 → 800')).toBeInTheDocument();
+      expect(screen.getByText('Dummy data (stand-in)')).toBeInTheDocument();
+      expect(screen.getByText(/search data of 2026-10-01 against 2026-11-01/)).toBeInTheDocument();
     },
     TIMEOUT,
   );
@@ -282,8 +323,41 @@ describe('monitoring tab', () => {
         smart_recrawl: true,
         other_every_days: 30,
         use_sitemaps: true,
+        rank_min_volume: 50,
+        digest_level: 'off',
       });
       expect(screen.getByText(/contacts the client’s and competitors’ websites/)).toBeInTheDocument();
+    },
+    TIMEOUT,
+  );
+
+  it(
+    'pins core pages and sets the digest, sending the addresses only when typed',
+    async () => {
+      const sent = fakeServer({
+        ...base,
+        'GET /api/projects/p1/monitoring': () => [200, check],
+        'GET /api/projects/p1/monitoring/watch': () => [200, { ...watch, digest_to: ['g***@rankuno.com'] }],
+        'POST /api/projects/p1/monitoring/watch': (body) => [200, { ...watch, ...(body as object) }],
+      });
+      const user = userEvent.setup({ pointerEventsCheck: PointerEventsCheckLevel.Never });
+      renderApp('/projects/p1?tab=monitoring');
+      act(() => useProjectTokens.getState().remember('p1', 'tok-1', '2099-01-01T00:00:00Z'));
+      expect(await screen.findByText(/Now: g\*\*\*@rankuno\.com/, {}, FIRST_PAINT)).toBeInTheDocument();
+      await waitFor(() => expect(screen.getByText('Save').closest('button')).not.toBeDisabled());
+      // typing letter by letter into a textarea takes minutes in jsdom: set the values
+      fireEvent.change(screen.getByLabelText('Pinned core pages'), {
+        target: { value: 'https://www.flynns.com/pricing\nhttps://www.flynns.com/demo' },
+      });
+      fireEvent.change(screen.getByLabelText('Send the digest to'), {
+        target: { value: 'team@flynns.com, lead@flynns.com' },
+      });
+      await user.click(screen.getByText('Save').closest('button') as HTMLElement);
+      await waitFor(() => expect(sent).toHaveLength(1));
+      expect(sent[0]?.body).toMatchObject({
+        core_urls: ['https://www.flynns.com/pricing', 'https://www.flynns.com/demo'],
+        digest_to: ['team@flynns.com', 'lead@flynns.com'],
+      });
     },
     TIMEOUT,
   );

@@ -904,6 +904,25 @@ def _monitoring(play: Playground, args: MonitorInput) -> dict[str, Any]:
             for t in check.theme_drift
             if t.new_pages or t.removed_pages or t.ownership_before != t.ownership_after
         ],
+        "search_signals": check.signals.model_dump(exclude={"links"}) if check.signals else None,
+        "link_signals": [
+            {**x.model_dump(exclude={"lost"}), "lost": len(x.lost)} for x in check.signals.links
+        ]
+        if check.signals
+        else [],
+        "seo_changes": [
+            {
+                "website": d.website,
+                "url": c.url,
+                "regressions": c.seo_regressions,
+                "schema_added": c.schema_added,
+                "ctas_added": c.ctas_added,
+            }
+            for d in check.websites
+            for c in d.changed_pages
+            if c.seo_regressions or c.schema_added or c.ctas_added
+        ][:60],
+        "notes": check.notes,
     }
 
 
@@ -1495,8 +1514,11 @@ TOOLS: dict[str, ToolSpec] = {
             "monitoring",
             "The project's latest monitoring check: alerts ranked by severity (competitor pushes "
             "into client themes, new competitor themes, ownership shifts, price changes, removed "
-            "pages, rewrites, pillar drift), what changed on each website, and theme drift. Runs "
-            "a check when none exists.",
+            "pages, rewrites, pillar drift, client SEO regressions such as noindex or lost "
+            "structured data, competitors adding rich data or calls to action, client ranking "
+            "drops matched with page changes, competitor top-3 gains, lost backlinks and Domain "
+            "Rating shifts), what changed on each website, theme drift, and the ranking and link "
+            "changes between research and backlink snapshots. Runs a check when none exists.",
             MonitorInput,
             _monitoring,
         ),

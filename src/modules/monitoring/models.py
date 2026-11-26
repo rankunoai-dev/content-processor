@@ -32,6 +32,10 @@ __all__ = [
     "PageDecision",
     "RecrawlPlan",
     "SitePlan",
+    "DigestLevel",
+    "LinkSignal",
+    "RankSignal",
+    "SearchSignals",
 ]
 
 CHECK_VERSION: Final = "monitor-v1"
@@ -51,7 +55,15 @@ AlertKind = Literal[
     "competitor_messaging_shift",
     "competitor_new_tables",
     "competitor_topic_drift",
+    "ranking_drop",
+    "competitor_ranking_gain",
+    "backlinks_lost",
+    "authority_shift",
+    "client_seo_regression",
+    "competitor_schema_added",
+    "competitor_intent_shift",
 ]
+DigestLevel = Literal["off", "high", "medium"]
 
 
 class PageRef(StrictModel):
@@ -108,6 +120,53 @@ class PageChange(StrictModel):
         description="How close the new version's meaning is to the old (1 = same topic); "
         "None when no meaning model scored it or the page is too thin",
     )
+    schema_added: list[str] = Field(
+        default_factory=list, description="Structured-data types the page gained"
+    )
+    schema_removed: list[str] = Field(
+        default_factory=list, description="Structured-data types the page lost"
+    )
+    schema_broken: bool = Field(
+        default=False, description="A structured-data block that was readable no longer is"
+    )
+    noindex: Literal["added", "removed"] | None = Field(
+        default=None, description="The robots meta tag started (or stopped) saying noindex"
+    )
+    canonical_moved: bool = Field(
+        default=False, description="The canonical pointed at the page itself and now elsewhere"
+    )
+    ctas_added: list[str] = Field(
+        default_factory=list, description="Strong calls to action new on this page"
+    )
+    ctas_removed: list[str] = Field(default_factory=list, description="Strong ones gone")
+    strong_ctas_before: int = Field(
+        default=0, ge=0, description="Strong calls to action the page had before"
+    )
+    images_missing_alt: tuple[int, int] | None = Field(
+        default=None,
+        description="Images without alt text before and after; None when either scrape has "
+        "no inventory",
+    )
+
+    @property
+    def seo_regressions(self) -> list[str]:
+        """What got worse for search engines, in plain words."""
+        out: list[str] = []
+        if self.noindex == "added":
+            out.append("now noindex")
+        if self.canonical_moved:
+            after = (self.head_changes.get("canonical") or {}).get("after")
+            out.append(f"canonical now points to {after}" if after else "canonical moved away")
+        if self.schema_broken:
+            out.append("structured data no longer readable")
+        if self.schema_removed:
+            out.append("structured data removed: " + ", ".join(self.schema_removed))
+        if self.images_missing_alt and self.images_missing_alt[1] - self.images_missing_alt[0] >= 3:
+            out.append(
+                f"images without alt text {self.images_missing_alt[0]} → "
+                f"{self.images_missing_alt[1]}"
+            )
+        return out
 
     @property
     def words_delta(self) -> int:
@@ -173,6 +232,65 @@ class Alert(StrictModel):
     urls: list[str] = Field(default_factory=list)
 
 
+class RankSignal(StrictModel):
+    """A keyword whose position moved enough to matter, with what changed on its page."""
+
+    website: str
+    name: str
+    role: Literal["client", "competitor"]
+    keyword: str
+    before: int | None = Field(description="Position at the earlier snapshot (None: not ranked)")
+    after: int | None = Field(description="Position now (None: not in the list any more)")
+    volume: int = Field(default=0, ge=0)
+    intent: str | None = None
+    theme: str | None = None
+    url_before: str | None = None
+    url_after: str | None = None
+    uncertain: bool = Field(
+        default=False,
+        description="The list it is missing from was cut at a line limit, so it may still rank",
+    )
+    page_change: str = Field(
+        default="", description="What a scrape saw change on the ranking page in the same window"
+    )
+    client_position: int | None = Field(
+        default=None, description="Competitor gains: the client's position now on that keyword"
+    )
+
+
+class LinkSignal(StrictModel):
+    """A website's authority and referring domains between two backlink snapshots."""
+
+    website: str
+    name: str
+    role: Literal["client", "competitor"]
+    dr_before: float | None = None
+    dr_after: float | None = None
+    refdomains_before: int | None = None
+    refdomains_after: int | None = None
+    lost: list[str] = Field(default_factory=list, description="Referring domains gone (no spam)")
+    lost_strong: list[str] = Field(
+        default_factory=list, description="Lost domains of DR 50+, with their DR"
+    )
+    note: str = ""
+
+
+class SearchSignals(StrictModel):
+    """Rankings and links compared between the snapshots seen by two checks."""
+
+    research_before: str | None = None
+    research_after: str | None = Field(
+        default=None, description="The research snapshot this check read (the next one's base)"
+    )
+    research_note: str = ""
+    backlinks_before: str | None = None
+    backlinks_after: str | None = None
+    backlinks_note: str = ""
+    dummy: bool = Field(default=False, description="Either snapshot came from a stand-in")
+    rankings: list[RankSignal] = Field(default_factory=list)
+    links: list[LinkSignal] = Field(default_factory=list)
+
+
 class MonitorCheck(StrictModel):
     """One monitoring check of a project."""
 
@@ -188,6 +306,10 @@ class MonitorCheck(StrictModel):
     theme_drift: list[ThemeDrift] = Field(default_factory=list)
     alerts: list[Alert] = Field(default_factory=list)
     stats: dict[str, int] = Field(default_factory=dict)
+    signals: SearchSignals | None = Field(
+        default=None, description="Ranking and link changes (Research and Backlinks)"
+    )
+    notes: list[str] = Field(default_factory=list)
 
 
 class WatchSettings(StrictModel):
@@ -221,8 +343,24 @@ class WatchSettings(StrictModel):
     push_threshold: int = Field(
         default=3, ge=1, le=100, description="New competitor pages in a client theme that alert"
     )
+    rank_min_volume: int = Field(
+        default=50,
+        ge=0,
+        le=1_000_000,
+        description="Ranking alerts: keywords with fewer monthly searches are left out "
+        "unless they are buyer searches (commercial or transactional)",
+    )
+    digest_level: DigestLevel = Field(
+        default="off", description="Email the new alerts of this severity and above"
+    )
+    digest_to: list[str] = Field(
+        default_factory=list,
+        description="Who gets the digest, partly hidden (the addresses are kept apart)",
+    )
     last_rescrape_at: datetime | None = None
     last_auto_check_at: datetime | None = None
+    last_digest_at: datetime | None = None
+    last_digest_note: str = ""
 
 
 class PageDecision(StrictModel):

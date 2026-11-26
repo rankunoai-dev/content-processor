@@ -226,6 +226,10 @@ def test_store_watch_and_workbook(watched: World) -> None:
         "Competitor moves",
         "Price changes",
         "Template changes",
+        "SEO changes",
+        "Rankings",
+        "Links",
+        "Data compared",
         "How to read",
     ]
     with zipfile.ZipFile(files["workbook"]) as book:

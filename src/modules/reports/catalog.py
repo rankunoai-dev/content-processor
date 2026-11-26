@@ -180,6 +180,10 @@ def _monitoring_history(ctx: Context) -> Report | None:
         row["New pages"] = sum(len(d.new_pages) for d in check.websites)
         row["Removed pages"] = sum(len(d.removed_pages) for d in check.websites)
         row["Changed pages"] = sum(len(d.changed_pages) for d in check.websites)
+        # older checks have none of these: 0 there means "not measured then" as well
+        row["SEO regressions"] = check.stats.get("seo_regressions", 0)
+        row["Ranking drops"] = check.stats.get("ranking_drops", 0)
+        row["Competitor top-3 gains"] = check.stats.get("competitor_gains", 0)
         runs.append(row)
         for a in check.alerts:
             alerts.append(

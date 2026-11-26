@@ -11,6 +11,10 @@ The watcher wakes up every few minutes and, for every project:
   default) the pass follows a recrawl plan (`recrawl.py`): core pages and pages
   the sitemap shows changed are checked, the others only once a month; pages not
   due are carried forward without a request. The plan is saved with the pass.
+
+Every check also reads the project's newest research and backlink snapshots (pulled
+or imported in their modules; nothing is pulled here) against the ones the previous
+check read, and emails a digest of its new alerts when the project asked for one.
 """
 
 from __future__ import annotations
@@ -19,20 +23,23 @@ import threading
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Protocol, TypeVar
 
 import httpx
 
 from src.core.config import get_settings
 from src.core.logger import get_logger
 from src.modules.analyst.playground import Playground
+from src.modules.analyst.policy import DataPolicy
 from src.modules.content_processor.analysis.semantic import VectorCache
 from src.modules.content_processor.projects.models import RunState
+from src.modules.content_processor.projects.notify import Notifier, notifier_from_settings
 from src.modules.content_processor.projects.runner import ScrapeRunner
 from src.modules.content_processor.projects.store import ProjectStore
 from src.modules.content_processor.webapi.projects_api import KnowledgeAccess
 from src.modules.monitoring.check import run_check
-from src.modules.monitoring.models import MonitorCheck, RecrawlPlan
+from src.modules.monitoring.digest import send_digest
+from src.modules.monitoring.models import MonitorCheck, RecrawlPlan, SiteDiff
 from src.modules.monitoring.store import MonitorStore, write_check_workbook
 
 __all__ = ["MonitorWatcher", "monitor_store", "recrawl_project", "run_project_check"]
@@ -40,11 +47,96 @@ __all__ = ["MonitorWatcher", "monitor_store", "recrawl_project", "run_project_ch
 _logger = get_logger("rankuno.monitoring")
 WAKE_S = 300.0
 _ACTIVE = {"queued", "running"}
+_EARLIER_CHECKS = 12
+_T = TypeVar("_T", covariant=True)
 
 
 def monitor_store(projects: ProjectStore) -> MonitorStore:
     """The monitoring store next to the projects (`<app data>/monitoring`)."""
     return MonitorStore(Path(str(projects.root)) / "monitoring")
+
+
+class _Snapshots(Protocol[_T]):
+    def latest(self, project_id: str) -> _T | None: ...
+    def get(self, project_id: str, snapshot_id: str) -> _T: ...
+    def history(self, project_id: str) -> list[str]: ...
+
+
+def _snapshot_pair(
+    store: _Snapshots[_T], project_id: str, used_before: str | None
+) -> tuple[_T | None, _T | None]:
+    """(the snapshot the previous check read, else the one before the newest; the newest)."""
+    try:
+        latest = store.latest(project_id)
+    except (KeyError, ValueError):
+        return None, None
+    if latest is None:
+        return None, None
+    if used_before:
+        try:
+            return store.get(project_id, used_before), latest
+        except (KeyError, ValueError):
+            pass  # deleted since: fall back to the snapshot before the newest
+    history = store.history(project_id)
+    if len(history) < 2:
+        return None, latest
+    try:
+        return store.get(project_id, history[1]), latest
+    except (KeyError, ValueError):
+        return None, latest
+
+
+def _earlier_diffs(store: MonitorStore, project_id: str, since: datetime | None) -> list[SiteDiff]:
+    """The client websites' comparisons of recent checks (for matching ranking drops)."""
+    if since is None:
+        return []
+    out: list[SiteDiff] = []
+    for check_id in store.history(project_id)[:_EARLIER_CHECKS]:
+        try:
+            check = store.get(project_id, check_id)
+        except (KeyError, ValueError):
+            continue
+        if check.created_at < since:
+            break
+        out += [
+            d for d in check.websites if d.role == "client" and d.changed_pages + d.removed_pages
+        ]
+    return out
+
+
+def _deliver_digest(
+    projects: ProjectStore, store: MonitorStore, check: MonitorCheck, notifier: Notifier | None
+) -> None:
+    """Email the check's new alerts when the project asked for it (never fails the check)."""
+    project_id = check.project_id
+    settings = store.watch(project_id)
+    book = store.digest(project_id)
+    if settings.digest_level == "off" or not book.to:
+        return
+    try:
+        record = projects.get(project_id)
+        confidential = (
+            DataPolicy(Path(str(projects.root)) / "analyst", projects).data_class(project_id)
+            == "client_confidential"
+        )
+        book, note = send_digest(
+            check,
+            settings.digest_level,
+            book,
+            notifier or notifier_from_settings(Path(str(projects.root))),
+            project_name=record.name,
+            confidential=confidential,
+        )
+    except Exception as exc:  # noqa: BLE001 - a digest problem never loses the check
+        _logger.warning("monitor_digest_failed", extra={"project": project_id, "error": str(exc)})
+        note = f"the digest could not be prepared ({type(exc).__name__})"
+    if not note:
+        return
+    store.set_digest(project_id, book)
+    store.set_watch(
+        project_id,
+        settings.model_copy(update={"last_digest_at": datetime.now(UTC), "last_digest_note": note}),
+    )
 
 
 def run_project_check(
@@ -53,11 +145,24 @@ def run_project_check(
     project_id: str,
     *,
     trigger: Literal["manual", "auto"] = "manual",
+    notifier: Notifier | None = None,
 ) -> tuple[MonitorCheck, dict[str, str]]:
-    """Run a check, save it and its workbook; returns both."""
+    """Run a check, save it and its workbook, send the digest if asked; returns both."""
+    from src.modules.backlinks.service import backlinks_store
+    from src.modules.research.service import research_store
+
     store = monitor_store(projects)
     play = Playground(projects, access, [project_id])
     settings = store.watch(project_id)
+    previous = store.latest(project_id)
+    signals = previous.signals if previous is not None else None
+    research = _snapshot_pair(
+        research_store(projects), project_id, signals.research_after if signals else None
+    )
+    backlinks = _snapshot_pair(
+        backlinks_store(projects), project_id, signals.backlinks_after if signals else None
+    )
+    since = research[0].created_at if research[0] is not None else None
     app = get_settings()
     # line vectors for meaning scores, shared by every project's checks (keyed by model)
     cache = (
@@ -69,17 +174,22 @@ def run_project_check(
         check = run_check(
             play,
             project_id,
-            store.latest(project_id),
+            previous,
             push_threshold=settings.push_threshold,
             trigger=trigger,
             meaning_cache=cache,
             topic_drift=app.cp_monitor_topic_drift,
+            research=research,
+            backlinks=backlinks,
+            earlier_diffs=_earlier_diffs(store, project_id, since),
+            rank_min_volume=settings.rank_min_volume,
         )
     finally:
         if cache is not None:
             cache.close()
     path = store.save(check)
     workbook = write_check_workbook(check, store.workbook(check))
+    _deliver_digest(projects, store, check, notifier)
     prefix = "\\\\?\\"  # Windows extended-length path prefix, not shown to people
     return check, {
         k: str(v).removeprefix(prefix) for k, v in {"check": path, "workbook": workbook}.items()
@@ -223,8 +333,9 @@ class MonitorWatcher:
                 and (latest is None or last_scrape > latest.created_at)
             ):
                 run_project_check(self.projects, self.access, pid, trigger="auto")
+                # read again: the check may have saved its digest note meanwhile
                 self.store.set_watch(
-                    pid, settings.model_copy(update={"last_auto_check_at": moment})
+                    pid, self.store.watch(pid).model_copy(update={"last_auto_check_at": moment})
                 )
                 done["checked"].append(pid)
                 settings = self.store.watch(pid)
@@ -253,6 +364,8 @@ class MonitorWatcher:
                         self.runner.submit_all(pid, started_by="scheduled monitoring")
                     except ValueError:  # no website has addresses to scrape
                         continue
-                self.store.set_watch(pid, settings.model_copy(update={"last_rescrape_at": moment}))
+                self.store.set_watch(
+                    pid, self.store.watch(pid).model_copy(update={"last_rescrape_at": moment})
+                )
                 done["rescraped"].append(pid)
         return done

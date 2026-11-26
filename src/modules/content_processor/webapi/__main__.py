@@ -18,7 +18,7 @@ from pathlib import Path
 import uvicorn
 
 from src.core.config import get_settings
-from src.modules.content_processor.projects.notify import Notifier, smtp_mailer
+from src.modules.content_processor.projects.notify import Notifier, notifier_from_settings
 from src.modules.content_processor.projects.runner import ScrapeRunner
 from src.modules.content_processor.projects.security import TokenSigner
 from src.modules.content_processor.projects.store import ProjectStore
@@ -69,24 +69,7 @@ def bind_address(args: argparse.Namespace) -> tuple[str, int]:
 
 def queue_notifier(app_data: Path) -> Notifier:
     """Queue emails through the configured SMTP server, or into `<app data>/outbox/`."""
-    settings = get_settings()
-    mailer = None
-    if settings.cp_smtp_host and settings.cp_smtp_from:
-        mailer = smtp_mailer(
-            settings.cp_smtp_host,
-            settings.cp_smtp_port,
-            user=settings.cp_smtp_user,
-            password=settings.cp_smtp_password.get_secret_value()
-            if settings.cp_smtp_password
-            else None,
-            starttls=settings.cp_smtp_starttls,
-        )
-    return Notifier(
-        outbox=app_data / "outbox",
-        sender=settings.cp_smtp_from or "content-scraper@localhost",
-        base_url=settings.cp_app_base_url,
-        mailer=mailer,
-    )
+    return notifier_from_settings(app_data)
 
 
 def _warm_search_cache(store: ProjectStore, runner: ScrapeRunner, access: KnowledgeAccess) -> None:

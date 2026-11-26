@@ -9,7 +9,8 @@ For each website in the project's scope (its freshest copy):
 
 The project's theme map is rebuilt (theme ids carried over), new pages are placed in
 their themes, removed pages in the themes of the previous check's map, and theme
-ownership is compared with that map. Alerts follow from both.
+ownership is compared with that map. Alerts follow from both, and from the search and
+link signals (`signals.py`) when the project has research or backlink snapshots.
 """
 
 from __future__ import annotations
@@ -20,6 +21,7 @@ from datetime import UTC, datetime
 from typing import Literal
 
 from src.modules.analyst.playground import Playground, SiteData
+from src.modules.backlinks.models import BacklinkSnapshot
 from src.modules.content_processor.analysis.semantic import VectorCache
 from src.modules.content_processor.knowledge.embedders import is_semantic
 from src.modules.monitoring.diff import diff_runs, load_run_files
@@ -30,10 +32,20 @@ from src.modules.monitoring.models import (
     MonitorCheck,
     PageChange,
     PageRef,
+    RankSignal,
+    SearchSignals,
     Severity,
     SiteDiff,
     ThemeDrift,
 )
+from src.modules.monitoring.signals import (
+    DR_STEP,
+    LOST_ALERT,
+    TOP,
+    link_signals,
+    rank_signals,
+)
+from src.modules.research.models import ResearchSnapshot
 from src.modules.theming.models import ThemeMap
 from src.modules.theming.service import build_project_themes, theme_store
 from src.modules.theming.store import match_themes
@@ -47,6 +59,27 @@ SHIFT_HEADINGS = 2
 _CLIENT_SIDE = {"client_owned", "contested", "competitor_led", "client_only"}
 _RANK = {"client_only": 4, "client_owned": 3, "contested": 2, "competitor_led": 1, "client_gap": 0}
 _SEVERITY_ORDER = {"high": 0, "medium": 1, "low": 2, "info": 3}
+# structured-data types that can earn rich results or say "this page sells"
+RICH_TYPES = frozenset(
+    {
+        "Product",
+        "Offer",
+        "AggregateOffer",
+        "FAQPage",
+        "QAPage",
+        "Review",
+        "AggregateRating",
+        "HowTo",
+        "Service",
+        "SoftwareApplication",
+        "Course",
+        "Event",
+        "VideoObject",
+        "LocalBusiness",
+        "JobPosting",
+    }
+)
+_DUMMY_PREFIX = "[dummy data] "
 
 
 def _alert(
@@ -120,6 +153,7 @@ def _site_diffs(
     themes_before: dict[str, tuple[str, str]],
     pillars: set[str],
     cache: VectorCache | None = None,
+    notes: list[str] | None = None,
 ) -> list[SiteDiff]:
     earlier = {s.website: s.latest_run for s in previous.websites} if previous else {}
     diffs: list[SiteDiff] = []
@@ -185,6 +219,8 @@ def _site_diffs(
             folder(data.copy.project_id, data.copy.site_id, latest.run_id), latest.run_id
         )
         result = diff_runs(old, new)
+        if notes is not None:
+            notes.extend(f"{website.name}: {n}" for n in result.notes)
         added, removed, changed = result.added, result.removed, result.changed
         unchanged = result.unchanged
         sample_note = ""
@@ -374,12 +410,252 @@ def _competitor_moves(d: SiteDiff, topic_drift: float = TOPIC_DRIFT) -> list[Ale
     return out
 
 
+def _examples(changes: list[PageChange], limit: int = 6) -> str:
+    return "; ".join(f"{_page_name(c)}: {', '.join(c.seo_regressions)}" for c in changes[:limit])
+
+
+def _seo_alerts(d: SiteDiff) -> list[Alert]:
+    """Search-engine regressions on the client's pages; competitors adding rich data or CTAs."""
+    out: list[Alert] = []
+    if d.role == "client":
+        worse = [c for c in d.changed_pages if c.seo_regressions]
+        if worse:
+            severe = any(
+                c.noindex == "added"
+                or c.canonical_moved
+                or (c.is_pillar and (c.schema_removed or c.schema_broken))
+                for c in worse
+            )
+            kinds: Counter[str] = Counter()
+            for c in worse:
+                kinds.update(
+                    label
+                    for label, hit in (
+                        ("now noindex", c.noindex == "added"),
+                        ("canonical moved away", c.canonical_moved),
+                        ("structured data broken", c.schema_broken),
+                        ("structured data removed", bool(c.schema_removed)),
+                        (
+                            "more images without alt text",
+                            c.images_missing_alt is not None
+                            and c.images_missing_alt[1] - c.images_missing_alt[0] >= 3,
+                        ),
+                    )
+                    if hit
+                )
+            out.append(
+                _alert(
+                    "client_seo_regression",
+                    "high" if severe else "medium",
+                    d.website,
+                    f"{len(worse)} client page(s) got worse for search engines",
+                    (
+                        ", ".join(f"{k}: {n} page(s)" for k, n in kinds.most_common())
+                        + ". "
+                        + _examples(worse)
+                    )[:700],
+                    urls=[c.url for c in worse],
+                )
+            )
+        return out
+    rich = [c for c in d.changed_pages if RICH_TYPES & set(c.schema_added)]
+    if rich:
+        types = Counter(t for c in rich for t in c.schema_added if t in RICH_TYPES)
+        out.append(
+            _alert(
+                "competitor_schema_added",
+                "high" if any(c.is_pillar for c in rich) else "medium",
+                d.website,
+                f"{d.name} added rich-result structured data on {len(rich)} page(s)",
+                (
+                    ", ".join(f"{t} on {n}" for t, n in types.most_common())
+                    + ". Search results may now show their prices, ratings or FAQs: "
+                    + "; ".join(_page_name(c) for c in rich[:6])
+                )[:700],
+                urls=[c.url for c in rich],
+            )
+        )
+    selling = [c for c in d.changed_pages if c.ctas_added and c.strong_ctas_before == 0]
+    if selling:
+        out.append(
+            _alert(
+                "competitor_intent_shift",
+                "high" if any(c.is_pillar for c in selling) else "medium",
+                d.website,
+                f"{d.name} turned {len(selling)} informing page(s) into selling pages",
+                "Strong calls to action where there were none: "
+                + "; ".join(
+                    f"{_page_name(c)}: {', '.join(repr(t) for t in c.ctas_added[:3])}"
+                    for c in selling[:6]
+                )[:650],
+                urls=[c.url for c in selling],
+            )
+        )
+    sitewide = [
+        t for t in d.template_changes if t.line.startswith("Call to action: ") and t.added_on
+    ]
+    if sitewide:
+        out.append(
+            _alert(
+                "competitor_intent_shift",
+                "medium",
+                d.website,
+                f"{d.name} added a call to action across the website",
+                "; ".join(
+                    f"“{t.line.removeprefix('Call to action: ')}” on {t.added_on} page(s)"
+                    for t in sitewide[:6]
+                ),
+            )
+        )
+    return out
+
+
+def _place(n: int | None) -> str:
+    return f"#{n}" if n is not None else "out"
+
+
+def _signal_alerts(signals: SearchSignals | None) -> list[Alert]:
+    """Ranking and link alerts from the search signals."""
+    if signals is None:
+        return []
+    out: list[Alert] = []
+    prefix = _DUMMY_PREFIX if signals.dummy else ""
+    by_site: dict[str, list[RankSignal]] = {}
+    for rank in signals.rankings:
+        by_site.setdefault(rank.website, []).append(rank)
+    for website, rows in by_site.items():
+        name = rows[0].name
+        if rows[0].role == "client":
+
+            def certain_out(r: RankSignal) -> bool:
+                return (r.after is None and not r.uncertain) or (r.after or 0) > TOP
+
+            severe = any(
+                certain_out(r)
+                and (
+                    (r.before or 99) <= 3
+                    or r.volume >= 1000
+                    or (r.intent or "") in ("commercial", "transactional")
+                )
+                for r in rows
+            )
+            caused = [r for r in rows if r.page_change]
+            detail = "; ".join(
+                f"“{r.keyword}” {_place(r.before)} → {_place(r.after)}"
+                + (" (list cut, may rank lower)" if r.uncertain else "")
+                + f", {r.volume:,}/mo"
+                + (f": {r.page_change}" if r.page_change else "")
+                for r in rows[:8]
+            )
+            if caused:
+                detail += (
+                    ". Page changes are what a scrape saw in the same weeks: a lead to check, "
+                    "not proof of the cause."
+                )
+            out.append(
+                _alert(
+                    "ranking_drop",
+                    "high" if severe else "medium",
+                    website,
+                    f"{prefix}{name} dropped on {len(rows)} keyword(s)"
+                    + (f", {len(caused)} after page changes" if caused else ""),
+                    detail[:800],
+                    urls=list(dict.fromkeys(r.url_before for r in rows if r.url_before)),
+                )
+            )
+        else:
+            ahead = [
+                r
+                for r in rows
+                if r.client_position is not None
+                and r.client_position <= TOP
+                and r.after is not None
+                and r.after < r.client_position
+            ]
+            out.append(
+                _alert(
+                    "competitor_ranking_gain",
+                    "high" if ahead else "medium",
+                    website,
+                    f"{prefix}{name} entered the top 3 for {len(rows)} keyword(s) the client "
+                    "ranks for",
+                    "; ".join(
+                        f"“{r.keyword}” {_place(r.before)} → {_place(r.after)}, {r.volume:,}/mo"
+                        + (
+                            f" (client {_place(r.client_position)})"
+                            if r.client_position
+                            else " (client no longer ranks)"
+                        )
+                        for r in rows[:8]
+                    )[:800],
+                    urls=list(dict.fromkeys(r.url_after for r in rows if r.url_after)),
+                )
+            )
+    client = next((r for r in signals.links if r.role == "client"), None)
+    for link in signals.links:
+        if link.role == "client" and (len(link.lost) >= LOST_ALERT or link.lost_strong):
+            out.append(
+                _alert(
+                    "backlinks_lost",
+                    "high" if len(link.lost_strong) >= 3 or len(link.lost) >= 20 else "medium",
+                    link.website,
+                    f"{prefix}{link.name} lost {len(link.lost)} referring domain(s)",
+                    (
+                        (
+                            "Strongest: " + ", ".join(link.lost_strong[:8]) + ". "
+                            if link.lost_strong
+                            else ""
+                        )
+                        + "Others: "
+                        + ", ".join(d for d in link.lost[:12])
+                        + (f". {link.note}" if link.note else "")
+                    )[:700],
+                )
+            )
+        if link.dr_before is None or link.dr_after is None:
+            continue
+        delta = link.dr_after - link.dr_before
+        overtook = (
+            link.role == "competitor"
+            and client is not None
+            and client.dr_before is not None
+            and client.dr_after is not None
+            and link.dr_before <= client.dr_before
+            and link.dr_after > client.dr_after
+        )
+        if abs(delta) < DR_STEP and not overtook:
+            continue
+        if link.role == "client":
+            severity: Severity = (
+                "info" if delta > 0 else ("high" if delta <= -2 * DR_STEP else "medium")
+            )
+        else:
+            severity = "high" if overtook else ("medium" if delta > 0 else "info")
+        out.append(
+            _alert(
+                "authority_shift",
+                severity,
+                link.website,
+                f"{prefix}{link.name}: Domain Rating {link.dr_before:.0f} → {link.dr_after:.0f}"
+                + (" (now above the client)" if overtook else ""),
+                (
+                    f"Referring domains {link.refdomains_before:,} → {link.refdomains_after:,}."
+                    if link.refdomains_before is not None and link.refdomains_after is not None
+                    else "Referring domain totals not in both snapshots."
+                )
+                + (f" {link.note}" if link.note else ""),
+            )
+        )
+    return out
+
+
 def _alerts(
     diffs: list[SiteDiff],
     drift: list[ThemeDrift],
     current: ThemeMap,
     push_threshold: int,
     topic_drift: float = TOPIC_DRIFT,
+    signals: SearchSignals | None = None,
 ) -> list[Alert]:
     roles = {d.website: d.role for d in diffs}
     owners = {t.theme_id: t.ownership for t in current.themes}
@@ -481,6 +757,7 @@ def _alerts(
             )
         if d.role == "competitor":
             alerts += _competitor_moves(d, topic_drift)
+        alerts += _seo_alerts(d)
         drifted = [c for c in d.changed_pages if c.is_pillar and c.drift >= PILLAR_DRIFT]
         if drifted:
             alerts.append(
@@ -506,6 +783,7 @@ def _alerts(
                     urls=[c.url for c in d.changed_pages],
                 )
             )
+    alerts += _signal_alerts(signals)
     return sorted(alerts, key=lambda a: (_SEVERITY_ORDER[a.severity], a.kind, a.website, a.title))
 
 
@@ -518,11 +796,18 @@ def run_check(
     trigger: Literal["manual", "auto"] = "manual",
     meaning_cache: VectorCache | None = None,
     topic_drift: float = TOPIC_DRIFT,
+    research: tuple[ResearchSnapshot | None, ResearchSnapshot | None] = (None, None),
+    backlinks: tuple[BacklinkSnapshot | None, BacklinkSnapshot | None] = (None, None),
+    earlier_diffs: list[SiteDiff] | None = None,
+    rank_min_volume: int = 50,
 ) -> MonitorCheck:
     """One check of the project (it also saves a fresh theme map).
 
     With `meaning_cache`, changed pages are scored by meaning (old vs new) with each
     website's index model, and competitor pages below `topic_drift` raise an alert.
+    `research` and `backlinks` are (baseline, newest) snapshots; `earlier_diffs` are
+    the comparisons of earlier checks, so a ranking drop can be matched with a page
+    change seen by an earlier check in the same weeks.
     """
     store = theme_store(play.store)
     before = (
@@ -532,11 +817,27 @@ def run_check(
     )
     current, _files = build_project_themes(play.store, play.access, project_id)
     pillars = {c.pillar.url for t in current.themes for c in t.coverage if c.pillar is not None}
+    notes: list[str] = []
     diffs = _site_diffs(
-        play, previous, _themes_of(current), _themes_of(before or current), pillars, meaning_cache
+        play,
+        previous,
+        _themes_of(current),
+        _themes_of(before or current),
+        pillars,
+        meaning_cache,
+        notes,
     )
     drift = _drift(current, before, diffs)
-    alerts = _alerts(diffs, drift, current, push_threshold, topic_drift)
+    signals = SearchSignals()
+    rank_signals(
+        signals,
+        research[0],
+        research[1],
+        [*diffs, *(earlier_diffs or [])],
+        min_volume=rank_min_volume,
+    )
+    link_signals(signals, backlinks[0], backlinks[1])
+    alerts = _alerts(diffs, drift, current, push_threshold, topic_drift, signals)
     created = datetime.now(UTC)
     return MonitorCheck(
         check_id="check-"
@@ -562,7 +863,14 @@ def run_check(
                 for c in d.changed_pages
                 if c.meaning is not None and c.meaning < topic_drift
             ),
+            "seo_regressions": sum(
+                1 for d in diffs if d.role == "client" for c in d.changed_pages if c.seo_regressions
+            ),
+            "ranking_drops": sum(1 for r in signals.rankings if r.role == "client"),
+            "competitor_gains": sum(1 for r in signals.rankings if r.role == "competitor"),
             "alerts_high": sum(1 for a in alerts if a.severity == "high"),
             "alerts": len(alerts),
         },
+        signals=signals,
+        notes=notes,
     )

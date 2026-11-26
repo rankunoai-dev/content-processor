@@ -1,7 +1,9 @@
 """Monitoring checks and watch settings on disk, and the check workbook.
 
 `<app data>/monitoring/<project>/`: every check as `<check id>.json`, the newest as
-`latest.json`, the watch settings as `watch.json`, and each check's workbook.
+`latest.json`, the watch settings as `watch.json`, the digest's addresses and sent
+alerts as `digest.json` (kept apart: the watch settings show the addresses hidden),
+and each check's workbook.
 """
 
 from __future__ import annotations
@@ -11,7 +13,9 @@ import threading
 from pathlib import Path
 
 from src.modules.content_processor.export.tabular import Cell, Table, write_xlsx
+from src.modules.content_processor.projects.notify import hide_email
 from src.modules.monitoring.check import GROWTH_WORDS
+from src.modules.monitoring.digest import DigestBook
 from src.modules.monitoring.models import MonitorCheck, PageChange, RecrawlPlan, WatchSettings
 
 __all__ = ["MonitorStore", "check_tables", "plan_tables", "write_check_workbook"]
@@ -74,10 +78,29 @@ class MonitorStore:
     def watch(self, project_id: str) -> WatchSettings:
         """The project's watch settings (defaults when never set)."""
         path = self.folder(project_id) / "watch.json"
+        settings = WatchSettings()
+        if path.exists():
+            with self._lock:
+                settings = WatchSettings.model_validate_json(path.read_text(encoding="utf-8"))
+        hidden = [hide_email(a) for a in self.digest(project_id).to]
+        return settings.model_copy(update={"digest_to": hidden})
+
+    def digest(self, project_id: str) -> DigestBook:
+        """Who gets the project's digest, and what was sent (empty when never set)."""
+        path = self.folder(project_id) / "digest.json"
         if not path.exists():
-            return WatchSettings()
+            return DigestBook()
         with self._lock:
-            return WatchSettings.model_validate_json(path.read_text(encoding="utf-8"))
+            return DigestBook.model_validate_json(path.read_text(encoding="utf-8"))
+
+    def set_digest(self, project_id: str, book: DigestBook) -> None:
+        """Save the digest's addresses and sent alerts."""
+        folder = self.folder(project_id)
+        folder.mkdir(parents=True, exist_ok=True)
+        with self._lock:
+            tmp = folder / "digest.json.tmp"
+            tmp.write_text(book.model_dump_json(indent=1), encoding="utf-8")
+            tmp.replace(folder / "digest.json")
 
     def set_watch(self, project_id: str, settings: WatchSettings) -> WatchSettings:
         """Save the project's watch settings."""
@@ -85,9 +108,10 @@ class MonitorStore:
         folder.mkdir(parents=True, exist_ok=True)
         with self._lock:
             tmp = folder / "watch.json.tmp"
-            tmp.write_text(settings.model_dump_json(indent=1), encoding="utf-8")
+            # the addresses live in digest.json; the hidden forms are never written here
+            tmp.write_text(settings.model_dump_json(indent=1, exclude={"digest_to"}), "utf-8")
             tmp.replace(folder / "watch.json")
-        return settings
+        return self.watch(project_id)
 
     def save_plan(self, plan: RecrawlPlan) -> Path:
         """Keep a recrawl plan (`plans/<plan id>.json`, the newest as `plans/latest.json`)."""
@@ -136,6 +160,33 @@ _HOW_TO_READ: list[tuple[str, str]] = [
         "Price change",
         "An amount (currency or percentage) in the same wording in both scrapes with a different "
         "value, for example '$25 per month' becoming '$19 per month'.",
+    ),
+    (
+        "SEO changes",
+        "Pages whose search-engine facts changed: noindex added or removed, a canonical that "
+        "pointed at the page itself now pointing elsewhere, structured-data types removed, "
+        "broken or added, strong calls to action added or removed, and more images without "
+        "alt text (only when both scrapes have an inventory). Compared only when both scrapes "
+        "read the page's stored HTML.",
+    ),
+    (
+        "Rankings",
+        "Keywords that moved between the research snapshot the previous check read and the "
+        "newest one. Client: left the top 10, or fell 5+ places in the top 20. Competitors: "
+        "entered the top 3 for a keyword the client ranks for. Keywords under the project's "
+        "minimum volume are left out unless they are buyer searches. 'out' with 'list cut' "
+        "means the new list stopped at a line limit, so the keyword may still rank lower.",
+    ),
+    (
+        "Page change seen in the same weeks",
+        "What a scrape saw change on the page that ranked, in a comparison that overlaps the "
+        "two snapshots' dates. A lead to check, not proof of the cause.",
+    ),
+    (
+        "Links",
+        "Each website's Domain Rating and referring domains between two backlink snapshots, "
+        "and the referring domains lost (spam left out; for a cut list, only domains the new "
+        "list would have held).",
     ),
     (
         "Competitor moves",
@@ -233,11 +284,90 @@ def check_tables(check: MonitorCheck) -> list[Table]:
                 f"{k}: {v.get('before')} → {v.get('after')}" for k, v in c.head_changes.items()
             ),
             "Prices": "; ".join(f"{p.before} → {p.after} ({p.context})" for p in c.prices),
+            "SEO regressions": "; ".join(c.seo_regressions),
+            "Schema added": ", ".join(c.schema_added),
+            "Calls to action added": ", ".join(c.ctas_added),
             "Added text (start)": "\n".join(t[:300] for t in c.added_text[:3]),
         }
         for d in check.websites
         for c in d.changed_pages
     ]
+    seo: list[dict[str, Cell]] = [
+        {
+            "Website": d.name,
+            "Role": d.role,
+            "URL": c.url,
+            "Title": c.title or "",
+            "Pillar": "yes" if c.is_pillar else "",
+            "Noindex": c.noindex or "",
+            "Canonical moved": "yes" if c.canonical_moved else "",
+            "Schema removed": ", ".join(c.schema_removed),
+            "Schema broken": "yes" if c.schema_broken else "",
+            "Schema added": ", ".join(c.schema_added),
+            "Images without alt (before → after)": f"{c.images_missing_alt[0]} → "
+            f"{c.images_missing_alt[1]}"
+            if c.images_missing_alt
+            else "",
+            "Calls to action added": ", ".join(c.ctas_added),
+            "Calls to action removed": ", ".join(c.ctas_removed),
+        }
+        for d in check.websites
+        for c in d.changed_pages
+        if c.seo_regressions or c.schema_added or c.ctas_added or c.ctas_removed or c.noindex
+    ]
+    signals = check.signals
+    rankings: list[dict[str, Cell]] = [
+        {
+            "Website": r.name,
+            "Role": r.role,
+            "Keyword": r.keyword,
+            "Before": r.before if r.before is not None else "",
+            "After": r.after if r.after is not None else "out",
+            "Uncertain": "list cut: may rank lower" if r.uncertain else "",
+            "Volume": r.volume,
+            "Intent": r.intent or "",
+            "Theme": r.theme or "",
+            "Client position": r.client_position if r.client_position is not None else "",
+            "URL before": r.url_before or "",
+            "URL after": r.url_after or "",
+            "Page change seen in the same weeks": r.page_change,
+        }
+        for r in (signals.rankings if signals else [])
+    ]
+    links: list[dict[str, Cell]] = [
+        {
+            "Website": x.name,
+            "Role": x.role,
+            "DR before": x.dr_before if x.dr_before is not None else "",
+            "DR after": x.dr_after if x.dr_after is not None else "",
+            "Referring domains before": x.refdomains_before
+            if x.refdomains_before is not None
+            else "",
+            "Referring domains after": x.refdomains_after if x.refdomains_after is not None else "",
+            "Lost": len(x.lost),
+            "Strongest lost": ", ".join(x.lost_strong[:15]),
+            "Lost domains": ", ".join(x.lost[:60]),
+            "Note": x.note,
+        }
+        for x in (signals.links if signals else [])
+    ]
+    basis: list[dict[str, Cell]] = (
+        [
+            {
+                "Source": "Research",
+                "Compared": f"{signals.research_before or '-'} → {signals.research_after or '-'}",
+                "Note": signals.research_note,
+            },
+            {
+                "Source": "Backlinks",
+                "Compared": f"{signals.backlinks_before or '-'} → {signals.backlinks_after or '-'}",
+                "Note": signals.backlinks_note,
+            },
+        ]
+        if signals
+        else []
+    )
+    basis += [{"Source": "Check", "Compared": "", "Note": n} for n in check.notes]
     pages: list[dict[str, Cell]] = [
         {
             "Website": d.website,
@@ -363,6 +493,28 @@ def check_tables(check: MonitorCheck) -> list[Table]:
             wrap,
             {"Line": 80},
         ),
+        Table(
+            "SEO changes",
+            list(seo[0]) if seo else ["Website", "URL"],
+            seo,
+            wrap,
+            {"URL": 60},
+        ),
+        Table(
+            "Rankings",
+            list(rankings[0]) if rankings else ["Website", "Keyword"],
+            rankings,
+            frozenset({"Page change seen in the same weeks"}),
+            {"Keyword": 35, "URL before": 50, "Page change seen in the same weeks": 60},
+        ),
+        Table(
+            "Links",
+            list(links[0]) if links else ["Website"],
+            links,
+            frozenset({"Strongest lost", "Lost domains"}),
+            {"Strongest lost": 50, "Lost domains": 70},
+        ),
+        Table("Data compared", ["Source", "Compared", "Note"], basis, widths={"Note": 90}),
         Table(
             "How to read",
             ["Column", "Meaning"],

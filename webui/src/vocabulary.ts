@@ -2055,7 +2055,9 @@ export const MONITORING = {
   needsUnlock: 'Unlock the project with its password to run a check or change how it is watched.',
   workbook: 'Download workbook',
   stats: (s: Record<string, number>) =>
-    `${s.new_pages ?? 0} new · ${s.removed_pages ?? 0} removed · ${s.changed_pages ?? 0} changed pages · ${s.price_changes ?? 0} price changes`,
+    `${s.new_pages ?? 0} new · ${s.removed_pages ?? 0} removed · ${s.changed_pages ?? 0} changed pages · ${s.price_changes ?? 0} price changes` +
+    (s.ranking_drops ? ` · ${s.ranking_drops} ranking drops` : '') +
+    (s.seo_regressions ? ` · ${s.seo_regressions} SEO regressions` : ''),
   alerts: 'Alerts',
   noAlerts: 'Nothing that needs attention.',
   severity: { high: 'High', medium: 'Medium', low: 'Low', info: 'Info' } as Record<string, string>,
@@ -2098,6 +2100,43 @@ export const MONITORING = {
   pushThreshold: 'Alert when a competitor adds this many pages in a client theme',
   save: 'Save',
   saved: 'Saved.',
+  seoWorse: 'Worse for search engines',
+  schemaAdded: 'Structured data added',
+  ctasAdded: 'New calls to action',
+  signals: 'Rankings and links',
+  signalsIntro:
+    'Compares the search data (Research) and backlink data (Backlinks) this check read with what the previous check read. Nothing is pulled here: pull or import in those modules first.',
+  dummy: 'Dummy data (stand-in)',
+  rankColumns: {
+    website: 'Website',
+    keyword: 'Keyword',
+    move: 'Position',
+    volume: 'Searches/mo',
+    cause: 'Page change seen in the same weeks',
+  },
+  place: (n: number | null) => (n == null ? 'out' : `#${n}`),
+  uncertain: 'list cut: may rank lower',
+  clientAt: (n: number | null) => (n == null ? 'client not ranking' : `client #${n}`),
+  causeHelp:
+    'What a scrape saw change on the page that ranked, in the same weeks. A lead to check, not proof of the cause.',
+  noRankMoves: 'No keyword moved enough to report.',
+  linkRow: (l: { name: string; dr_before: number | null; dr_after: number | null; lost: string[]; lost_strong: string[] }) =>
+    `${l.name}: DR ${l.dr_before ?? '-'} → ${l.dr_after ?? '-'}` +
+    (l.lost.length ? ` · ${l.lost.length} referring domain(s) lost` : '') +
+    (l.lost_strong.length ? ` (strongest: ${l.lost_strong.slice(0, 3).join(', ')})` : ''),
+  checkNotes: 'Notes on this check',
+  coreUrls: 'Pinned core pages',
+  coreUrlsHelp:
+    'One address per line. Pinned pages are checked on every scheduled pass and come first among core pages. Only pages of this project’s websites are accepted.',
+  rankMinVolume: 'Ranking alerts: leave out keywords with fewer monthly searches than',
+  rankMinVolumeHelp: 'Buyer searches (commercial or transactional) are always kept.',
+  digest: 'Email a digest of new alerts',
+  digestLevels: { off: 'Off', high: 'High alerts', medium: 'High and medium alerts' } as Record<string, string>,
+  digestTo: 'Send the digest to',
+  digestToHelp: (current: string[]) =>
+    (current.length ? `Now: ${current.join(', ')}. ` : '') +
+    'Type addresses to replace the list (up to 10); leave empty to keep it. Confidential projects get counts and a link only. Without an email server set up, messages are saved in the outbox folder.',
+  lastDigest: (when: string, note: string) => `Last digest ${when}: ${note}`,
 };
 
 /** Research module: the project's "Research" tab. */

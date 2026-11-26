@@ -44,6 +44,58 @@ export interface PageChange {
   blocks_removed: Record<string, number>;
   /** Meaning of the new version against the old (1 = same topic); null when not scored. */
   meaning?: number | null;
+  schema_added?: string[];
+  schema_removed?: string[];
+  schema_broken?: boolean;
+  noindex?: 'added' | 'removed' | null;
+  canonical_moved?: boolean;
+  ctas_added?: string[];
+  ctas_removed?: string[];
+  strong_ctas_before?: number;
+  /** Images without alt text [before, after]; null when a scrape has no inventory. */
+  images_missing_alt?: [number, number] | null;
+}
+
+export interface RankSignal {
+  website: string;
+  name: string;
+  role: 'client' | 'competitor';
+  keyword: string;
+  before: number | null;
+  after: number | null;
+  volume: number;
+  intent: string | null;
+  theme: string | null;
+  url_before: string | null;
+  url_after: string | null;
+  uncertain: boolean;
+  page_change: string;
+  client_position: number | null;
+}
+
+export interface LinkSignal {
+  website: string;
+  name: string;
+  role: 'client' | 'competitor';
+  dr_before: number | null;
+  dr_after: number | null;
+  refdomains_before: number | null;
+  refdomains_after: number | null;
+  lost: string[];
+  lost_strong: string[];
+  note: string;
+}
+
+export interface SearchSignals {
+  research_before: string | null;
+  research_after: string | null;
+  research_note: string;
+  backlinks_before: string | null;
+  backlinks_after: string | null;
+  backlinks_note: string;
+  dummy: boolean;
+  rankings: RankSignal[];
+  links: LinkSignal[];
 }
 
 export interface TemplateChange {
@@ -103,6 +155,8 @@ export interface MonitorCheck {
   theme_drift: ThemeDrift[];
   alerts: Alert[];
   stats: Record<string, number>;
+  signals?: SearchSignals | null;
+  notes?: string[];
 }
 
 export interface WatchSettings {
@@ -114,12 +168,42 @@ export interface WatchSettings {
   use_sitemaps: boolean;
   core_urls: string[];
   core_limit: number;
+  rank_min_volume?: number;
+  digest_level?: 'off' | 'high' | 'medium';
+  /** Who gets the digest, partly hidden. */
+  digest_to?: string[];
   last_rescrape_at: string | null;
   last_auto_check_at: string | null;
+  last_digest_at?: string | null;
+  last_digest_note?: string;
 }
 
 export type WatchBody = Pick<WatchSettings, 'auto_check' | 'rescrape_every_days' | 'push_threshold'> &
-  Partial<Pick<WatchSettings, 'smart_recrawl' | 'other_every_days' | 'use_sitemaps'>>;
+  Partial<
+    Pick<
+      WatchSettings,
+      'smart_recrawl' | 'other_every_days' | 'use_sitemaps' | 'core_urls' | 'rank_min_volume' | 'digest_level'
+    >
+  > & {
+    /** Full addresses; replaces the list. Left out: the list is kept. */
+    digest_to?: string[];
+  };
+
+/** One web address per line (or separated by spaces), blanks dropped. */
+export function splitLines(text: string | undefined): string[] {
+  return (text ?? '')
+    .split(/\s+/)
+    .map((t) => t.trim())
+    .filter(Boolean);
+}
+
+/** Email addresses separated by lines, spaces, commas or semicolons. */
+export function splitAddresses(text: string | undefined): string[] {
+  return (text ?? '')
+    .split(/[\s,;]+/)
+    .map((t) => t.trim())
+    .filter(Boolean);
+}
 
 export interface PageDecision {
   url: string;

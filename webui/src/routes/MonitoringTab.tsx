@@ -10,6 +10,7 @@ import {
   Card,
   Empty,
   Form,
+  Input,
   InputNumber,
   List,
   Select,
@@ -22,14 +23,19 @@ import {
 } from 'antd';
 import { useEffect } from 'react';
 import {
+  splitAddresses,
+  splitLines,
   useMonitorCheck,
   useRunCheck,
   useSetWatch,
   useWatchSettings,
   type MonitorCheck,
+  type PageChange,
+  type RankSignal,
   type SiteDiff,
   type ThemeDrift,
   type WatchBody,
+  type WatchSettings,
 } from '../api/monitoring';
 import type { Project } from '../api/projects';
 import { DownloadMenu } from '../components/DownloadMenu';
@@ -43,6 +49,18 @@ function counts(map: Record<string, number>): string {
   return Object.entries(map)
     .map(([k, v]) => `${k} ${v}`)
     .join(', ');
+}
+
+/** What got worse for search engines on a page, in plain words (mirrors the server's list). */
+function seoRegressions(c: PageChange): string[] {
+  const out: string[] = [];
+  if (c.noindex === 'added') out.push('now noindex');
+  if (c.canonical_moved) out.push(`canonical now points to ${c.head_changes.canonical?.after ?? 'another page'}`);
+  if (c.schema_broken) out.push('structured data no longer readable');
+  if (c.schema_removed?.length) out.push(`structured data removed: ${c.schema_removed.join(', ')}`);
+  const alt = c.images_missing_alt;
+  if (alt && alt[1] - alt[0] >= 3) out.push(`images without alt text ${alt[0]} → ${alt[1]}`);
+  return out;
 }
 
 function SiteDetail({ site }: { site: SiteDiff }) {
@@ -109,6 +127,21 @@ function SiteDetail({ site }: { site: SiteDiff }) {
                 {Object.keys(c.blocks_added).length + Object.keys(c.blocks_removed).length > 0 ? (
                   <Typography.Text type="warning">{RECRAWL.blocks(c.blocks_added, c.blocks_removed)}</Typography.Text>
                 ) : null}
+                {seoRegressions(c).length > 0 ? (
+                  <Typography.Text type="danger">
+                    {MONITORING.seoWorse}: {seoRegressions(c).join(' · ')}
+                  </Typography.Text>
+                ) : null}
+                {c.schema_added?.length ? (
+                  <Typography.Text type="secondary">
+                    {MONITORING.schemaAdded}: {c.schema_added.join(', ')}
+                  </Typography.Text>
+                ) : null}
+                {c.ctas_added?.length ? (
+                  <Typography.Text type="secondary">
+                    {MONITORING.ctasAdded}: {c.ctas_added.slice(0, 4).map((t) => `“${t}”`).join(' · ')}
+                  </Typography.Text>
+                ) : null}
                 {Object.entries(c.head_changes).map(([field, v]) => (
                   <Typography.Text key={field} type="secondary">
                     {field}: “{v.before}” → “{v.after}”
@@ -166,6 +199,84 @@ function SiteDetail({ site }: { site: SiteDiff }) {
   );
 }
 
+function SignalsCard({ check }: { check: MonitorCheck }) {
+  const s = check.signals;
+  if (!s) return null;
+  const notes = [s.research_note, s.backlinks_note].filter(Boolean);
+  return (
+    <Card
+      size="small"
+      title={
+        <Space wrap>
+          {MONITORING.signals}
+          {s.dummy ? <Tag color="gold">{MONITORING.dummy}</Tag> : null}
+        </Space>
+      }
+    >
+      <Space direction="vertical" size={8} style={{ width: '100%', minWidth: 0 }}>
+        <Typography.Text type="secondary">{MONITORING.signalsIntro}</Typography.Text>
+        {notes.map((n) => (
+          <Typography.Text key={n} type="secondary">
+            · {n}
+          </Typography.Text>
+        ))}
+        {s.rankings.length === 0 ? (
+          <Typography.Text type="secondary">{MONITORING.noRankMoves}</Typography.Text>
+        ) : (
+          <Table<RankSignal>
+            scroll={{ x: true }}
+            rowKey={(r) => `${r.website}|${r.keyword}`}
+            size="small"
+            pagination={{ pageSize: 15, hideOnSinglePage: true }}
+            dataSource={s.rankings}
+            columns={[
+              {
+                title: MONITORING.rankColumns.website,
+                render: (_v, r) => (r.role === 'client' ? <strong>{r.name}</strong> : r.name),
+              },
+              { title: MONITORING.rankColumns.keyword, dataIndex: 'keyword' },
+              {
+                title: MONITORING.rankColumns.move,
+                render: (_v, r) => (
+                  <Space wrap size={4}>
+                    <span>
+                      {MONITORING.place(r.before)} → {MONITORING.place(r.after)}
+                    </span>
+                    {r.uncertain ? <Tag>{MONITORING.uncertain}</Tag> : null}
+                    {r.role === 'competitor' ? (
+                      <Typography.Text type="secondary">{MONITORING.clientAt(r.client_position)}</Typography.Text>
+                    ) : null}
+                  </Space>
+                ),
+              },
+              { title: MONITORING.rankColumns.volume, render: (_v, r) => r.volume.toLocaleString() },
+              {
+                title: (
+                  <Tooltip title={MONITORING.causeHelp}>
+                    <span>{MONITORING.rankColumns.cause}</span>
+                  </Tooltip>
+                ),
+                dataIndex: 'page_change',
+              },
+            ]}
+          />
+        )}
+        {s.links.map((l) => (
+          <Typography.Text key={l.website} type={l.role === 'client' && l.lost.length ? 'warning' : undefined}>
+            {MONITORING.linkRow(l)}
+            {l.note ? ` (${l.note})` : ''}
+          </Typography.Text>
+        ))}
+        {check.notes?.length ? (
+          <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
+            {MONITORING.checkNotes}: {check.notes.join(' · ')}
+          </Typography.Paragraph>
+        ) : null}
+      </Space>
+    </Card>
+  );
+}
+
 function CheckView({ check }: { check: MonitorCheck }) {
   const moved = check.theme_drift.filter(
     (t) =>
@@ -197,6 +308,7 @@ function CheckView({ check }: { check: MonitorCheck }) {
           />
         )}
       </Card>
+      <SignalsCard check={check} />
       <Table<SiteDiff>
         scroll={{ x: true }}
         rowKey="website"
@@ -248,13 +360,42 @@ function CheckView({ check }: { check: MonitorCheck }) {
   );
 }
 
+/** The form's fields: the body, with the two lists typed as text. */
+type WatchForm = Omit<WatchBody, 'core_urls' | 'digest_to'> & { core_urls_text?: string; digest_to_text?: string };
+
+function toForm(w: WatchSettings): WatchForm {
+  return {
+    auto_check: w.auto_check,
+    rescrape_every_days: w.rescrape_every_days,
+    push_threshold: w.push_threshold,
+    smart_recrawl: w.smart_recrawl,
+    other_every_days: w.other_every_days,
+    use_sitemaps: w.use_sitemaps,
+    rank_min_volume: w.rank_min_volume ?? 50,
+    digest_level: w.digest_level ?? 'off',
+    core_urls_text: w.core_urls.join('\n'),
+    digest_to_text: '',
+  };
+}
+
+function toBody(values: WatchForm, current: WatchSettings | undefined): WatchBody {
+  const { core_urls_text, digest_to_text, ...rest } = values;
+  const body: WatchBody = { ...rest };
+  const pinned = splitLines(core_urls_text);
+  // sent only when changed, so saving other settings never re-checks the pinned pages
+  if (pinned.join('\n') !== (current?.core_urls ?? []).join('\n')) body.core_urls = pinned;
+  const addresses = splitAddresses(digest_to_text);
+  if (addresses.length > 0) body.digest_to = addresses;
+  return body;
+}
+
 function WatchCard({ project, token }: { project: Project; token: string | null }) {
   const watch = useWatchSettings(project.project_id);
   const save = useSetWatch(project.project_id);
-  const [form] = Form.useForm<WatchBody>();
+  const [form] = Form.useForm<WatchForm>();
   const { message } = AntApp.useApp();
   useEffect(() => {
-    if (watch.data) form.setFieldsValue(watch.data);
+    if (watch.data) form.setFieldsValue(toForm(watch.data));
   }, [watch.data, form]);
   return (
     <Card size="small" title={MONITORING.watch}>
@@ -266,7 +407,7 @@ function WatchCard({ project, token }: { project: Project; token: string | null 
             disabled={token === null}
             onFinish={(values) =>
               save.mutate(
-                { body: values, token },
+                { body: toBody(values, watch.data), token },
                 { onSuccess: () => void message.success(MONITORING.saved), onError: (e) => void message.error(e.message) },
               )
             }
@@ -297,6 +438,34 @@ function WatchCard({ project, token }: { project: Project; token: string | null 
             <Form.Item name="push_threshold" label={MONITORING.pushThreshold}>
               <InputNumber aria-label={MONITORING.pushThreshold} min={1} max={100} />
             </Form.Item>
+            <Form.Item name="core_urls_text" label={MONITORING.coreUrls} extra={MONITORING.coreUrlsHelp}>
+              <Input.TextArea aria-label={MONITORING.coreUrls} autoSize={{ minRows: 2, maxRows: 8 }} />
+            </Form.Item>
+            <Form.Item name="rank_min_volume" label={MONITORING.rankMinVolume} extra={MONITORING.rankMinVolumeHelp}>
+              <InputNumber aria-label={MONITORING.rankMinVolume} min={0} max={1000000} />
+            </Form.Item>
+            <Form.Item name="digest_level" label={MONITORING.digest}>
+              <Select
+                aria-label={MONITORING.digest}
+                style={{ maxWidth: 260 }}
+                options={Object.entries(MONITORING.digestLevels).map(([value, label]) => ({ value, label }))}
+              />
+            </Form.Item>
+            <Form.Item
+              name="digest_to_text"
+              label={MONITORING.digestTo}
+              extra={MONITORING.digestToHelp(watch.data?.digest_to ?? [])}
+            >
+              <Input.TextArea aria-label={MONITORING.digestTo} autoSize={{ minRows: 1, maxRows: 4 }} />
+            </Form.Item>
+            {watch.data?.last_digest_at ? (
+              <Typography.Paragraph type="secondary">
+                {MONITORING.lastDigest(
+                  new Date(watch.data.last_digest_at).toLocaleString(),
+                  watch.data.last_digest_note ?? '',
+                )}
+              </Typography.Paragraph>
+            ) : null}
             <Button htmlType="submit" loading={save.isPending}>
               {MONITORING.save}
             </Button>
