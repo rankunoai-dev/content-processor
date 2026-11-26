@@ -88,6 +88,7 @@ def build_project_gaps(
         pages=pages,
         backlinks=backlinks_store(projects).latest(project_id),
         analytics=_analytics(projects, access, project_id),
+        previous_research=research_store(projects).previous(project_id) if research else None,
     )
     store = gap_store(projects)
     statuses = store.statuses(project_id)

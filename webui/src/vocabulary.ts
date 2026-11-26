@@ -2373,6 +2373,7 @@ export const GAPS = {
     leaky_page: 'Traffic that does not convert',
     traffic_decay: 'Visits or conversions falling',
     cta_no_conversions: 'Call to action nobody completes',
+    ranking_drop: 'Ranking drop',
   } as Record<string, string>,
   severity: { high: 'High', medium: 'Medium', low: 'Low' } as Record<string, string>,
   severityColor: { high: 'red', medium: 'orange', low: 'blue' } as Record<string, string>,

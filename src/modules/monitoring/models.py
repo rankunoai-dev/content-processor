@@ -53,6 +53,7 @@ AlertKind = Literal[
     "competitor_topic_drift",
     "client_traffic_decay",
     "client_conversion_drop",
+    "client_ranking_drop",
 ]
 
 

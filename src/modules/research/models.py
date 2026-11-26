@@ -142,6 +142,22 @@ class ThemeDemand(StrictModel):
     )
 
 
+class RankingDrop(StrictModel):
+    """A client keyword that left page one, or fell 10+ places from the top 30."""
+
+    website: str
+    keyword: str
+    before: int
+    after: int | None = Field(description="None: not in the newest data")
+    volume: int = 0
+    intent: str | None = None
+    url: str | None = None
+    theme_id: str | None = None
+    certain: bool = Field(
+        default=True, description="False when the keyword is missing from a list cut short"
+    )
+
+
 class Mover(StrictModel):
     """A keyword whose position changed between two snapshots."""
 

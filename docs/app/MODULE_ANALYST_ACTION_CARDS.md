@@ -14,7 +14,7 @@ A packaged senior-SEO-analyst workflow. A person picks a card (for example "Head
 
 A card is data (`library.py`): id, version, module, persona, phases, inputs, required and optional tools, prefetch calls, output format. Adding a card needs no code; every run records the card version it used.
 
-## 2. The card catalog (15 cards)
+## 2. The card catalog (17 cards)
 
 | # | Module | Card | Deliverable | Runs today? |
 |---|---|---|---|---|
@@ -33,6 +33,11 @@ A card is data (`library.py`): id, version, module, persona, phases, inputs, req
 | 13 | Gap Analysis | Head-to-Head Competitor Gap Audit | Feature & Content Comparison | yes |
 | 14 | Gap Analysis | Winning Content Brief Generator | Rank-Ready H1/H2/FAQ Brief | yes (SERP data once Research exists) |
 | 15 | Playground | Executive Competitive Briefing *(added)* | Executive Briefing | yes |
+| 16 | Research | Keyword Cannibalisation & Consolidation Plan *(added 26 Nov)* | Cannibalisation Plan | needs Research or Search Console |
+| 17 | Research | Backlink & Link-Intersect Outreach Plan *(added 26 Nov)* | Link Outreach Plan | needs backlink data (Ahrefs export or pull) |
+
+Since 26 November the content refresh queue and the content brief also read the page report (stuck pages, low-CTR pages, internal links, competing pages), the executive briefing and the head-to-head audit read the backlink data, and four cards read GA4 when the project has it.
+Cards whose parameters include competitors refuse while a competitor has no finished scrape, even when only its search or backlink data is needed (see the offline smoke test in the lane log of 26 November).
 
 The added cards fill gaps in the proposed eleven: GEO readiness (how quotable the site is by AI answer engines), the offering matrix across all competitors (the theming question asked most often), keyword-to-page mapping (the first Research card to build), and a cross-module executive view.
 

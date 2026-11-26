@@ -63,6 +63,7 @@ _BASE: dict[FindingKind, int] = {
     "leaky_page": 45,
     "traffic_decay": 45,
     "cta_no_conversions": 40,
+    "ranking_drop": 40,
 }
 _CONVERTING_THEME = 1.5  # a theme converting 1.5x the site average: its findings rank higher
 _ROI_BONUS = 6
@@ -1065,6 +1066,59 @@ def _roi_weighted(findings: list[Finding], report: AnalyticsReport) -> list[Find
     return out
 
 
+def _drop_findings(
+    previous: ResearchSnapshot,
+    research: ResearchSnapshot,
+    roles: Mapping[str, str],
+    theme_map: ThemeMap,
+) -> list[Finding]:
+    """Client keywords that left page one or fell 10+ places since the snapshot before."""
+    from src.modules.research.build import ranking_drops
+
+    clients = [w.website for w in research.websites if roles.get(w.website, w.role) == "client"]
+    labels = {t.theme_id: t for t in theme_map.themes}
+    out = []
+    for d in ranking_drops(previous, research, clients)[:_MAX_PAGE_FINDINGS]:
+        where = (
+            f"#{d.after}"
+            if d.after is not None
+            else ("out of the top 100" if d.certain else "not in the newest data")
+        )
+        buyer = d.intent in ("commercial", "transactional")
+        out.append(
+            _finding(
+                "ranking_drop",
+                f"{d.website}:{d.keyword.casefold()}",
+                theme=labels.get(d.theme_id) if d.theme_id else None,
+                title=f"“{d.keyword}” fell from #{d.before} to {where} ({d.volume:,} searches a month)",
+                detail=f"{d.website} ranked #{d.before} for it in the snapshot before"
+                + (f" with {d.url}" if d.url else "")
+                + f" and now {'ranks ' + where if d.after is not None else 'is ' + where}."
+                + (" A buyer search." if buyer else "")
+                + (
+                    ""
+                    if d.certain
+                    else " The newest keyword list was cut short, so it may still rank lower: "
+                    "confirm with a full export."
+                ),
+                action="Compare the page with the pages now above it for this search (intent, "
+                "depth, freshness, title); check whether the page changed or lost internal links, "
+                "then refresh it.",
+                demand=d.volume,
+                intent_bonus=(8 if buyer else 0) - (10 if not d.certain else 0),
+                evidence=[
+                    EvidenceItem(
+                        kind="keyword",
+                        label=f"{d.keyword} (#{d.before} -> {where})",
+                        url=d.url,
+                        value=d.volume,
+                    )
+                ],
+            )
+        )
+    return out
+
+
 def build_findings(
     theme_map: ThemeMap,
     roles: Mapping[str, str],
@@ -1078,6 +1132,7 @@ def build_findings(
     pages: PageReport | None = None,
     backlinks: BacklinkSnapshot | None = None,
     analytics: AnalyticsReport | None = None,
+    previous_research: ResearchSnapshot | None = None,
 ) -> list[Finding]:
     """Every finding, highest priority first.
 
@@ -1089,6 +1144,8 @@ def build_findings(
     findings = _theme_findings(theme_map, roles, demand)
     if research is not None:
         findings += _keyword_findings(research, theme_map, roles, settings)
+        if previous_research is not None:
+            findings += _drop_findings(previous_research, research, roles, theme_map)
     if check is not None:
         findings += _momentum_findings(check, theme_map, roles, demand)
     if catalogs:

@@ -51,6 +51,7 @@ FindingKind = Literal[
     "leaky_page",
     "traffic_decay",
     "cta_no_conversions",
+    "ranking_drop",
 ]
 FindingStatus = Literal["open", "accepted", "done", "dismissed"]
 

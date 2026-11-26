@@ -618,6 +618,58 @@ pages' engagement and conversion rates before choosing the page that stays.
 ## Limits of this analysis
 """,
     ),
+    ActionCard(
+        id="backlink-outreach",
+        version=1,
+        title="Backlink & Link-Intersect Outreach Plan",
+        module="research",
+        category="Off-page authority",
+        icon="link",
+        summary="Turns the backlink data into an outreach plan: the authority gap with each "
+        "competitor, the websites that link to competitors but not to the client, which client "
+        "pages deserve those links, and the pitch for each.",
+        deliverable="Link Outreach Plan",
+        parameters=[_PROJECT, _CLIENT],
+        persona="You are a digital PR and link-building lead who only pitches links a site "
+        "editor would accept.",
+        prompt_template="""\
+Build the link outreach plan for {{client}} from the backlink data (get_backlinks, already
+called: Domain Rating, referring domains, top linked pages, link intersect).
+
+Phase 1 - Authority gap: the client's Domain Rating and referring domains against each
+competitor, in one table; say plainly when figures come from an export (no Domain Rating).
+Phase 2 - Prospects: from the link intersect, keep websites that are real publications,
+associations or directories in the client's field (drop spam, scrapers and unrelated sites);
+group them by type. For each, say which competitor pages they link to (get_backlinks with
+that competitor) and why they would link to the client.
+Phase 3 - Linkable assets: match each prospect group with the client page most worth
+linking to (its top linked pages, pillar pages from get_theme_map, pages with proof such as
+data, tools or guides); where the client has no such page, say what to create.
+Phase 4 - Outreach: for the ten best prospects, one short pitch each (two or three sentences,
+specific to the prospect, quoting the client page it offers). No buying links, no link
+exchanges.
+""",
+        required_tools=["get_backlinks"],
+        optional_tools=[
+            "get_theme_map",
+            "get_page",
+            "search_knowledge",
+            "get_page_report",
+            "get_gap_findings",
+        ],
+        prefetch=[Prefetch(tool="get_backlinks", args={"limit": 50})],
+        output_format="""\
+# Link Outreach Plan: {client}
+## Authority gap
+| Website | Domain Rating | Referring domains | Gap to the client |
+## Prospects by type
+| Prospect | Type | Links to | Why they would link to the client |
+## Linkable assets
+| Prospect group | Client page to pitch | Or what to create |
+## Ten pitches
+## Limits of this analysis
+""",
+    ),
     # -- Module 4: Monitoring ---------------------------------------------------------------
     ActionCard(
         id="competitor-strategy-radar",
@@ -666,7 +718,7 @@ Phase 3 - Executive threat assessment: what the competitor is trying to achieve,
     ),
     ActionCard(
         id="content-refresh-queue",
-        version=2,
+        version=3,
         title="Content Decay & Refresh Queue",
         module="monitoring",
         category="Content maintenance",
@@ -688,6 +740,9 @@ by business importance (page type, offering) and staleness.
 Phase 4 - With GA4 (get_analytics, sections decays and leaky): rank first the pages whose
 organic visits or conversions fell against the period before, then pages with search
 traffic that does not convert. Without GA4, say so.
+Phase 5 - With the page report (get_page_report, sections stuck, search_console and links):
+for each page in the queue give the exact title and meta description to rewrite when its
+CTA is low, the on-page problems holding it at 4-20, and the internal links to add.
 """,
         required_tools=["list_pages", "get_page_facts"],
         optional_tools=[
@@ -696,6 +751,7 @@ traffic that does not convert. Without GA4, say so.
             "get_keyword_rankings",
             "get_monitoring_alerts",
             "get_analytics",
+            "get_page_report",
         ],
         prefetch=[Prefetch(tool="list_pages", args={"website": "{{website}}"})],
         output_format="""\
@@ -708,7 +764,7 @@ traffic that does not convert. Without GA4, say so.
     # -- Module 5: Gap analysis -------------------------------------------------------------
     ActionCard(
         id="head-to-head-gap",
-        version=1,
+        version=2,
         title="Head-to-Head Competitor Gap Audit",
         module="gap",
         category="Competitive gap analysis",
@@ -742,9 +798,12 @@ calculator, example and proof point the competitor page gives that the client pa
 Phase 3 - Depth and structure: heading hierarchy, tables, lists, media, interactive elements,
 CTAs, structured data, freshness.
 Phase 4 - Score each gap's impact on ranking and conversion (1-10) and say how to close it.
+Phase 5 - Authority: with backlink data (get_backlinks), compare the two websites' Domain
+Rating and referring domains, and name the websites linking to the competitor but not to
+the client that cover this topic.
 """,
         required_tools=["get_page", "search_knowledge"],
-        optional_tools=["get_page_facts", "get_gap_findings"],
+        optional_tools=["get_page_facts", "get_gap_findings", "get_backlinks"],
         prefetch=[
             Prefetch(tool="get_page", args={"url": "{{client_url}}"}),
             Prefetch(tool="get_page", args={"url": "{{competitor_url}}"}),
@@ -762,7 +821,7 @@ Phase 4 - Score each gap's impact on ranking and conversion (1-10) and say how t
     ),
     ActionCard(
         id="content-brief",
-        version=1,
+        version=2,
         title="Winning Content Brief Generator",
         module="gap",
         category="Content creation",
@@ -791,6 +850,9 @@ Phase 3 - Search data: if get_serp_overview / get_keyword_metrics are available,
 SERP features and related keywords; otherwise write "not available (Research module not
 connected)" and base the brief on competitor coverage only.
 Phase 4 - Synthesise the brief.
+With the page report (get_page_report, sections pages and links), name the client pages
+the new page should link to and receive links from, and any existing page that already
+competes for the keyword (cannibalisation) so the brief differentiates from it.
 """,
         required_tools=["search_knowledge", "get_page"],
         optional_tools=[
@@ -800,6 +862,7 @@ Phase 4 - Synthesise the brief.
             "get_keyword_metrics",
             "get_search_demand",
             "get_gap_findings",
+            "get_page_report",
         ],
         prefetch=[
             Prefetch(
@@ -828,7 +891,7 @@ H2 / H3 with the sub-questions each section answers and the competitor evidence 
     # -- Playground: across modules -------------------------------------------------------------
     ActionCard(
         id="executive-briefing",
-        version=2,
+        version=3,
         title="Executive Competitive Briefing",
         module="playground",
         category="Strategy",
@@ -850,6 +913,9 @@ Phase 4 - The five things that matter most, each with evidence and a recommended
 With GA4 (get_analytics, summary and themes), report real organic sessions, engagement and
 conversions (key events) instead of estimated traffic, and say which themes bring leads
 rather than visits. Without GA4, say the traffic figures are estimates.
+With backlink data (get_backlinks), add the authority gap and the strongest websites that
+link to competitors but not to the client. With the page report (get_page_report, section
+summary), add the pages stuck just below the top and the low-CTR pages.
 """,
         required_tools=["list_websites", "get_offering_catalog", "search_knowledge"],
         optional_tools=[
@@ -862,6 +928,8 @@ rather than visits. Without GA4, say the traffic figures are estimates.
             "get_gap_findings",
             "get_search_demand",
             "get_analytics",
+            "get_backlinks",
+            "get_page_report",
         ],
         prefetch=[Prefetch(tool="list_websites")],
         output_format="""\
