@@ -1,6 +1,6 @@
 # Content Processor: A Plain-Language Guide
 
-Last updated: 26 November 2026 · Code version: main with a Backlinks module (Ahrefs: Domain Rating, referring domains, link intersect and authority gap, by export or a capped pull, with a stand-in), a keyword cannibalisation plan, a page report, keyword intent and Search Console import in Research, a Semrush stand-in (dummy data for trying the Research module), confidential projects closed to Claude Desktop, background warming of search, sign-in that fails closed and a record of sign-ins and downloads, passages handed over with their surrounding section, one search for every scope, relevance checking and better search results (reranking, "not found", dates, diversity), bge-m3 multilingual embeddings, competitor lite scan, in-app verdict reviews, team accounts, and topic drift
+Last updated: 26 November 2026 · Code version: main with Connections (platform accounts saved once and chosen per project), a Backlinks module (Ahrefs: Domain Rating, referring domains, link intersect and authority gap, by export or a capped pull, with a stand-in), a keyword cannibalisation plan, a page report, keyword intent and Search Console import in Research, a Semrush stand-in (dummy data for trying the Research module), confidential projects closed to Claude Desktop, background warming of search, sign-in that fails closed and a record of sign-ins and downloads, passages handed over with their surrounding section, one search for every scope, relevance checking and better search results (reranking, "not found", dates, diversity), bge-m3 multilingual embeddings, competitor lite scan, in-app verdict reviews, team accounts, and topic drift
 
 ## 1. What this is, in one paragraph
 
@@ -544,6 +544,18 @@ Each decision is saved with who made it and when, and earlier decisions are kept
 - **Admins add people** on the Accounts page, with a temporary password. At their first sign-in, each person must choose their own password, which nobody else knows.
 ### Step 24: Reviewing the engine's verdicts in the app
 ### Step 23: Team accounts (sign in from anywhere, each person with a role)
+### Connections: platform accounts saved once and chosen per project
+
+Clients often share one login to a platform: one agency Semrush account, one Ahrefs team plan, one Google service account for analytics. Entering that login again for every project would be slow and risky. The **Connections** page (for administrators, in the account menu) keeps each platform account once.
+
+- Each connection has a name (for example "Agency Semrush"), its platform (Semrush, Ahrefs, Google Search Console or Google Analytics 4) and the name of the server setting that holds its key.
+- The key itself is never typed into the app and is never saved in the app's data. It lives where the server's secrets already live. The page shows only whether each key is set.
+- In every project's Settings tab, the "Accounts for this project" card chooses which connection each platform uses. A project that chooses nothing uses the server's own key, as before.
+- A Semrush or Ahrefs pull uses the chosen account's key. If that account has no key set, the pull stops and says which setting is missing. It never quietly uses another account's key.
+- A connection that a project still uses cannot be removed. The page lists the projects that use it.
+- Search Console and Analytics accounts can be saved and chosen now. Their pulls are not yet connected to the app, so the choice has no effect until those connections are built.
+- The monthly spending cap still applies to the whole server, not to each account.
+
 ### Step 23: Semantic similarity (same content, different words)
 It uses the knowledge base's meaning model (the small CPU model on a workstation, bge-m3 on a model server) and never the words-only stand-in; paragraph vectors are kept in a small cache so a rebuild only reads new text. On the 303-page John Hancock scrape it finds the two podcast pages on ageing at 0.82 by meaning with 14% of words in common, the republished correction as a Copy, 32 identical form pages, one guest's summary pasted on 17 episode pages, and sets 243 recurring fund notices aside in 6 series; it takes about 10 seconds once the vectors are cached. Switch it off with `CP_SEMANTIC_ENABLED=false`.
 On the John Hancock scrape the Review tab opens on four pages out of 306: a PDF that needs a check, the error page, the newsletter page and a placeholder. Images, tracking pixels and pages left out on purpose are hidden until asked for.
@@ -558,6 +570,7 @@ On the John Hancock scrape the Review tab opens on four pages out of 306: a PDF 
 - Polite: robots rules and requested delays are respected; a struggling site is paused, not hammered.
 - Free by default: every run starts at $0. Paid access (Bright Data) needs your explicit approval per website, with caps of $5 per run and $25 per day, a monthly cap and a kill switch.
 - The Claude Desktop connection is read-only and local: it reaches the app only on this computer, cannot scrape, spend or change anything, and no web page can use it.
+- Platform keys: a saved connection stores only the name of its key's setting. A project using a connection with no key stops with a message; it never uses another account's key.
 - Semrush pulls are off until an operator sets a key and a monthly unit cap; each pull is checked against the per-pull and monthly limits before the first request, and every unit is logged. Importing a Semrush export is always free.
 - Ahrefs pulls follow the same rules: off until a key and a monthly unit cap are set, every request priced at its most (at least 50 units) and refused before it is sent if it would go over a limit, every unit logged, and the key sent only to Ahrefs or to the stand-in on this computer. Importing an Ahrefs export is always free.
 - How paid access works: when a website blocks every free method, the engine stops and asks. An operator can approve that one website, for a set amount (for example $5 per run), with one command; nothing else changes. Before every paid request the engine checks the kill switch, the approval and every limit (per run, per day, per month, per website and per page), and refuses rather than overspend. Every paid request is written to a spending log, and one command shows what has been spent and which websites are approved. Prices are counted on the high side, so the log never understates the bill.
@@ -621,6 +634,7 @@ On the John Hancock scrape the Review tab opens on four pages out of 306: a PDF 
 
 | Date | Significant change |
 |---|---|
+| 2026-11-26 | Connections: Semrush, Ahrefs, Search Console and Analytics accounts are saved once (administrators, on the Connections page) and chosen per project in its Settings tab, so clients sharing an account do not re-enter its key. Keys stay in the server's settings and are never stored in the app's data; a project whose account has no key stops with a message rather than using another account's key. The monthly spending cap still applies to the whole server. |
 | 2026-11-26 | Keyword cannibalisation plan: which page should rank for each search (the theme map's main page of its topic), how much of each page's search traffic belongs on it (strong, within tolerance, needs work), competing pages with one of eight fixes, internal link changes and redirects or noindex, from Search Console or the search data; in the Research tab, the page report workbook, the gap analysis, Claude Desktop and a new analyst card that writes the copy. |
 | 2026-11-26 | Backlinks module (Ahrefs): each website's Domain Rating, referring domains and most linked pages; the link intersect (websites linking to competitors but not to the client), the authority gap and lost linking websites; by a free Ahrefs export (UTF-16 files read) or a capped, paced API pull that prices every request before sending it. A card in the Research tab, a workbook, two new gap findings (link intersect, authority gap) and a Claude Desktop tool. A stand-in with dummy data lets it be tried end to end; Ahrefs itself has not been called yet. |
 | 2026-11-26 | Search data follows the theme map: when themes are rebuilt, the latest search data is placed in the new themes and demand per theme is recounted at once (and before every gap analysis), instead of pointing at the old themes. |

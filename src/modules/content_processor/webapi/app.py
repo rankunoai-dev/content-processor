@@ -320,6 +320,13 @@ def create_app(
         register_project_routes(
             app, store=project_store, runner=runner, signer=signer, knowledge=knowledge
         )
+        from src.modules.connections.api import register_connection_routes
+        from src.modules.connections.store import ConnectionStore
+
+        connection_store = ConnectionStore(Path(str(project_store.root)) / "connections")
+        register_connection_routes(
+            app, projects=project_store, connections=connection_store, signer=signer
+        )
         from src.modules.lite_scan.api import register_lite_routes
 
         register_lite_routes(app, projects=project_store, runner=runner, signer=signer)
@@ -338,10 +345,22 @@ def create_app(
             )
             from src.modules.research.api import register_research_routes
 
-            register_research_routes(app, projects=project_store, access=knowledge, signer=signer)
+            register_research_routes(
+                app,
+                projects=project_store,
+                access=knowledge,
+                signer=signer,
+                connections=connection_store,
+            )
             from src.modules.backlinks.api import register_backlinks_routes
 
-            register_backlinks_routes(app, projects=project_store, access=knowledge, signer=signer)
+            register_backlinks_routes(
+                app,
+                projects=project_store,
+                access=knowledge,
+                signer=signer,
+                connections=connection_store,
+            )
             from src.modules.gaps.api import register_gap_routes
 
             register_gap_routes(app, projects=project_store, access=knowledge, signer=signer)

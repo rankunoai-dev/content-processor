@@ -19,6 +19,7 @@ from __future__ import annotations
 import base64
 import binascii
 from collections.abc import Callable
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Annotated, Any
 
@@ -28,6 +29,7 @@ from pydantic import Field
 
 from src.core.schemas import StrictModel
 from src.modules.analyst.playground import Playground
+from src.modules.connections.store import ConnectionStore, SavedConnectionError, bound_key
 from src.modules.content_processor.projects.security import TokenSigner
 from src.modules.content_processor.projects.store import (
     ProjectNotFoundError,
@@ -137,8 +139,12 @@ def register_research_routes(
     access: KnowledgeAccess,
     signer: TokenSigner,
     settings: Callable[[], ResearchSettings] = ResearchSettings.from_env,
+    connections: ConnectionStore | None = None,
 ) -> None:
-    """Add the research routes (before the app's catch-all routes)."""
+    """Add the research routes (before the app's catch-all routes).
+
+    `connections`: when given, a project that chose a Semrush connection pulls with its key.
+    """
     store = research_store(projects)
 
     def project(project_id: str) -> None:
@@ -194,15 +200,20 @@ def register_research_routes(
     def pull(project_id: str, body: PullIn, token: TokenHeader = None) -> ResearchSnapshot:
         unlocked(project_id, token)
         try:
+            base = settings()
+            if connections is not None:
+                key = bound_key(connections, projects.get(project_id).connections, "semrush")
+                if key is not None:
+                    base = replace(base, api_key=key)
             snapshot, _files = pull_project(
                 projects,
                 access,
                 project_id,
-                settings(),
+                base,
                 serp_keywords=body.keywords,
                 refresh=body.refresh,
             )
-        except SemrushError as exc:
+        except (SemrushError, SavedConnectionError) as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from None
         return snapshot
 

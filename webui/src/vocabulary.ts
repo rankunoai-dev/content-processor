@@ -2498,3 +2498,40 @@ export const BACKLINKS = {
   topPagesTitle: "The client's most linked pages",
   unknown: '-',
 };
+
+/** Connections: saved platform accounts, chosen per project (see api/connections.ts). */
+export const CONNECTIONS = {
+  title: 'Connections',
+  intro:
+    'Platform accounts are saved once and chosen per project. The key itself stays in the server’s environment (.env or the host’s variables); this list shows only its name and whether it is set.',
+  adminOnly: 'Only an administrator can add or remove connections.',
+  empty: 'No connections yet. Add one for each platform account the clients use.',
+  add: 'Add connection',
+  platform: 'Platform',
+  label: 'Name',
+  labelHelp: 'For example “Agency Semrush login”',
+  secretEnv: 'Key variable',
+  secretEnvHelp: 'The name of the environment variable holding the key, e.g. SEMRUSH_AGENCY',
+  propertyRef: 'Property or site',
+  propertyHelp: 'GA4 property id or Search Console site, when the platform needs one',
+  keySet: 'Key set',
+  keyMissing: 'Key not set',
+  usedBy: 'Used by',
+  notUsed: 'Not used',
+  remove: 'Remove',
+  removeBlocked: 'Choose another connection in the projects that use this one first',
+  saved: 'Connection saved',
+  removed: 'Connection removed',
+  chooseTitle: 'Accounts for this project',
+  chooseHelp:
+    'Each platform uses the connection chosen here. “Installation key” uses the key set for the whole server.',
+  installationKey: 'Installation key',
+  chooseSaved: 'Accounts saved',
+  unlockFirst: 'Unlock the project to choose its accounts.',
+  platforms: {
+    semrush: 'Semrush',
+    ahrefs: 'Ahrefs',
+    gsc: 'Google Search Console',
+    ga4: 'Google Analytics 4',
+  } as Record<string, string>,
+};

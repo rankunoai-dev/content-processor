@@ -13,6 +13,7 @@ from __future__ import annotations
 import base64
 import binascii
 from collections.abc import Callable
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Annotated, Any, Literal
 
@@ -33,6 +34,7 @@ from src.modules.backlinks.service import (
     pull_project,
     unit_log,
 )
+from src.modules.connections.store import ConnectionStore, SavedConnectionError, bound_key
 from src.modules.content_processor.projects.security import TokenSigner
 from src.modules.content_processor.projects.store import ProjectNotFoundError, ProjectStore
 from src.modules.content_processor.webapi.projects_api import KnowledgeAccess
@@ -69,8 +71,12 @@ def register_backlinks_routes(
     access: KnowledgeAccess,
     signer: TokenSigner,
     settings: Callable[[], BacklinksSettings] = BacklinksSettings.from_env,
+    connections: ConnectionStore | None = None,
 ) -> None:
-    """Add the backlinks routes (before the app's catch-all routes)."""
+    """Add the backlinks routes (before the app's catch-all routes).
+
+    `connections`: when given, a project that chose an Ahrefs connection pulls with its key.
+    """
     store = backlinks_store(projects)
 
     def project(project_id: str) -> None:
@@ -127,8 +133,13 @@ def register_backlinks_routes(
     def pull(project_id: str, token: TokenHeader = None) -> BacklinkSnapshot:
         unlocked(project_id, token)
         try:
-            snapshot, _files = pull_project(projects, access, project_id, settings())
-        except AhrefsError as exc:
+            base = settings()
+            if connections is not None:
+                key = bound_key(connections, projects.get(project_id).connections, "ahrefs")
+                if key is not None:
+                    base = replace(base, api_key=key)
+            snapshot, _files = pull_project(projects, access, project_id, base)
+        except (AhrefsError, SavedConnectionError) as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from None
         return snapshot
 

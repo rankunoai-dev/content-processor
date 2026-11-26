@@ -60,6 +60,8 @@ _ADMIN_PATHS: Final = (
     re.compile(r"^/api/accounts(/.*)?$"),
     re.compile(r"^/api/projects/[^/]+/delete$"),
 )
+# Saving or removing a platform connection is admin work; listing them (GET) is viewer work.
+_ADMIN_WRITES: Final = re.compile(r"^/api/connections(/.*)?$")
 _PUBLIC: Final = {("GET", "/api/auth/me"), ("POST", "/api/auth/login")}
 _SIGNED_IN: Final = {("POST", "/api/auth/logout"), ("POST", "/api/auth/password")}
 
@@ -72,6 +74,8 @@ def required_role(method: str, path: str) -> Need:
     if (verb, path) in _SIGNED_IN:
         return "signed_in"
     if any(p.match(path) for p in _ADMIN_PATHS):
+        return "admin"
+    if verb != "GET" and _ADMIN_WRITES.match(path):
         return "admin"
     if verb == "GET" or path == "/api/mcp/call":
         return "viewer"
