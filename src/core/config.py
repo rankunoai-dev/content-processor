@@ -265,6 +265,9 @@ class Settings(BaseSettings):
     cp_semrush_fresh_days: int = Field(
         default=14, ge=0, le=365, description="Reuse a website's pull younger than this; 0 = never"
     )
+    # Where the API is called. Only the real address or one on this computer (the
+    # stand-in, `research standin serve`) is accepted, so the key never goes elsewhere.
+    cp_semrush_base_url: str = "https://api.semrush.com/"
 
     # -- Content Scraper: the shared scrape queue and its emails ------------
     # One scrape runs at a time on the instance; the others wait in one queue.

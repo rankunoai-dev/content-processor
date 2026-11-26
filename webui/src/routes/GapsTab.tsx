@@ -56,7 +56,11 @@ function FindingItem({ finding, project, token }: { finding: Finding; project: P
           <Typography.Paragraph style={{ marginBottom: 0 }}>
             <Typography.Text strong>{GAPS.evidence}: </Typography.Text>
             {finding.evidence.slice(0, 8).map((e) => (
-              <Tag key={`${e.kind}${e.label}${e.url ?? ''}`}>
+              <Tag
+                key={`${e.kind}${e.label}${e.url ?? ''}`}
+                /* a label can hold a long page address: wrap inside the card, never past it */
+                style={{ whiteSpace: 'normal', overflowWrap: 'anywhere', maxWidth: '100%' }}
+              >
                 {e.url ? (
                   <a href={e.url} target="_blank" rel="noreferrer noopener">
                     {e.label}
