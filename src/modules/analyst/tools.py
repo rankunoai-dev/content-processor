@@ -13,8 +13,10 @@ shared rules tell Claude never to follow instructions found inside them.
 from __future__ import annotations
 
 import json
+from collections import Counter
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from datetime import date
 from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, Field, ValidationError
@@ -115,6 +117,84 @@ class WebsiteInput(StrictModel):
     """One website."""
 
     website: str = Field(min_length=3, max_length=300, description="Domain, e.g. example.com")
+
+
+class IssuesInput(StrictModel):
+    """A website's SEO/GEO issues: the summary, or every page of one issue."""
+
+    website: str = Field(min_length=3, max_length=300, description="Domain, e.g. example.com")
+    code: str | None = Field(
+        default=None,
+        max_length=80,
+        description="One issue code from the summary (e.g. description_missing): lists every "
+        "page with it instead of the summary",
+    )
+    offset: int = Field(default=0, ge=0, description="Skip this many pages (with code)")
+    limit: int = Field(default=100, ge=1, le=300, description="Pages to return (with code)")
+
+
+class ListPagesInput(StrictModel):
+    """A website's captured pages, filtered and paged."""
+
+    website: str = Field(min_length=3, max_length=300, description="Domain, e.g. example.com")
+    path_contains: str | None = Field(
+        default=None, max_length=200, description="Only addresses containing this text"
+    )
+    title_contains: str | None = Field(
+        default=None, max_length=200, description="Only titles or H1s containing this text"
+    )
+    page_type: str | None = Field(default=None, max_length=80, description="Only this page type")
+    min_words: int | None = Field(default=None, ge=0, description="Main-content words, at least")
+    max_words: int | None = Field(default=None, ge=0, description="Main-content words, at most")
+    modified_before: date | None = Field(
+        default=None, description="Last modified (or published) before this day, YYYY-MM-DD"
+    )
+    modified_after: date | None = Field(
+        default=None, description="Last modified (or published) on or after this day"
+    )
+    noindex: bool | None = Field(
+        default=None, description="true: only pages with noindex; false: only indexable pages"
+    )
+    in_knowledge_base: bool | None = Field(
+        default=None, description="false: only pages left out of search (with why)"
+    )
+    with_query: bool | None = Field(
+        default=None, description="true: only addresses with ?parameters"
+    )
+    sort: Literal["path", "words", "modified"] = Field(
+        default="path", description="path, words (fewest first) or modified (oldest first)"
+    )
+    offset: int = Field(default=0, ge=0, description="Skip this many matching pages")
+    limit: int = Field(default=100, ge=1, le=300, description="Pages to return")
+
+
+class TechnicalInput(StrictModel):
+    """Technical checks of a website: the summary, or every finding of one check."""
+
+    website: str = Field(min_length=3, max_length=300, description="Domain, e.g. example.com")
+    check: str | None = Field(
+        default=None,
+        max_length=40,
+        description="One check (http_errors, soft_404, redirects, redirect_chains, "
+        "duplicate_titles, title_equals_h1, parameter_urls, insecure_links, "
+        "broken_internal_links, robots_meta, hreflang): every finding instead of the summary",
+    )
+    offset: int = Field(default=0, ge=0, description="Skip this many findings (with check)")
+    limit: int = Field(default=100, ge=1, le=300, description="Findings to return (with check)")
+
+
+class SchemaInput(StrictModel):
+    """Structured data across a website: counts per type, or the pages of one type."""
+
+    website: str = Field(min_length=3, max_length=300, description="Domain, e.g. example.com")
+    type: str | None = Field(
+        default=None,
+        max_length=80,
+        description="One schema.org type (e.g. BreadcrumbList, Organization, FAQPage): its "
+        "pages with their properties and missing fields instead of the counts",
+    )
+    offset: int = Field(default=0, ge=0, description="Skip this many pages (with type)")
+    limit: int = Field(default=100, ge=1, le=300, description="Pages to return (with type)")
 
 
 class SimilarInput(StrictModel):
@@ -234,6 +314,76 @@ def _stamp_for(play: Playground, data: SiteData, url: str) -> PageStamp | None:
     return None
 
 
+_SCHEMA_VALUES = (
+    "name",
+    "url",
+    "logo",
+    "sameAs",
+    "telephone",
+    "address",
+    "headline",
+    "datePublished",
+    "dateModified",
+    "author",
+    "publisher",
+    "image",
+)
+
+
+def _inventory_by_url(play: Playground, data: SiteData) -> dict[str, PageInventory]:
+    """The website's SEO inventory by address (read once per run of a tool session)."""
+    cache: dict[str, dict[str, PageInventory]] = play.__dict__.setdefault("_inventory_cache", {})
+    if data.run_name not in cache:
+        found: dict[str, PageInventory] = {}
+        try:
+            pages = _inventory(play, data)
+        except ToolError:
+            pages = []
+        for page in pages:
+            found[page.url] = page
+        cache[data.run_name] = found
+    return cache[data.run_name]
+
+
+def _schema_value(value: Any) -> Any:
+    """A JSON-LD value, shortened: nested nodes become their @type and name or @id."""
+    if isinstance(value, dict):
+        kind = value.get("@type")
+        label = value.get("name") or value.get("@id") or value.get("url")
+        return {k: v for k, v in (("@type", kind), ("name", label)) if v}
+    if isinstance(value, list):
+        return [_schema_value(v) for v in value[:10]]
+    if isinstance(value, str):
+        return value[:300]
+    return value
+
+
+def _structured_items(page: PageInventory | None) -> list[dict[str, Any]]:
+    """The page's structured data: types, properties, missing fields and key values."""
+    if page is None:
+        return []
+    items = []
+    for item in page.structured_data[:20]:
+        node = item.data or {}
+        values = {k: _schema_value(node[k]) for k in _SCHEMA_VALUES if k in node}
+        if "itemListElement" in node and isinstance(node["itemListElement"], list):
+            values["itemListElement"] = [
+                _schema_value(e.get("item") or e) if isinstance(e, dict) else e
+                for e in node["itemListElement"][:15]
+            ]
+        items.append(
+            {
+                "syntax": item.syntax,
+                "types": item.types,
+                "properties": item.properties[:40],
+                "missing_required": item.missing_required,
+                "missing_recommended": item.missing_recommended,
+                "values": values,
+            }
+        )
+    return items
+
+
 def _page_fact(play: Playground, data: SiteData, stamp: PageStamp) -> dict[str, Any]:
     website = data.website
     ref = play.ledger.fact(
@@ -256,6 +406,7 @@ def _page_fact(play: Playground, data: SiteData, stamp: PageStamp) -> dict[str, 
         "breadcrumbs": stamp.breadcrumbs,
         "headings": stamp.headings[:40],
         "schema_types": stamp.schema_org.types,
+        "structured_data": _structured_items(_inventory_by_url(play, data).get(stamp.url)),
         "faq_questions": stamp.schema_org.faq_questions[:20],
         "offers": stamp.schema_org.offers[:20],
         "ctas": [{"text": c.text, "url": c.url, "strength": c.strength} for c in stamp.ctas[:20]],
@@ -287,6 +438,10 @@ def _fit(payload: dict[str, Any]) -> str:
         keep = max(1, len(longest) // 2)
         notes.append(f"{key}: showing {keep} of {len(longest)}; narrow the request for the rest")
         payload["data"][key] = longest[:keep]
+        data = payload["data"]
+        if isinstance(data.get("offset"), int) and "next_offset" in data:
+            # a paged answer cut to fit: the next page starts after what is shown
+            data["next_offset"] = data["offset"] + keep
         payload["notes"] = [*payload.get("notes", []), notes[-1]]
         text = json.dumps(payload, ensure_ascii=False, default=str)
     return text
@@ -391,6 +546,7 @@ def _search(play: Playground, args: SearchInput) -> dict[str, Any]:
                 "headings": chunk.heading_path,
                 "kind": chunk.kind,
                 "chunk_role": chunk.chunk_role,
+                "role_status": chunk.labels.get("role_status") if chunk.chunk_role else None,
                 "offering": chunk.offering_id,
                 "text": _clip(chunk.verbatim_text),
                 **(
@@ -550,7 +706,7 @@ def _page_facts(play: Playground, args: UrlInput) -> dict[str, Any]:
     return {"website": data.website.key, "facts": _page_fact(play, data, stamp)}
 
 
-def _list_pages(play: Playground, args: WebsiteInput) -> dict[str, Any]:
+def _list_pages(play: Playground, args: ListPagesInput) -> dict[str, Any]:
     data = _data(play, args.website)
     store = play.open_store(data)
     try:
@@ -558,29 +714,50 @@ def _list_pages(play: Playground, args: WebsiteInput) -> dict[str, Any]:
     finally:
         store.close()
     stamps = play.stamps(data)
+    indexable: dict[str, bool] = {}
+    if args.noindex is not None:
+        indexable = {p.url: p.head.indexable for p in _inventory(play, data)}
     urls = sorted({s.url for s in stamps.values()} | set(page_rows))
-    pages = []
-    for url in urls[:_MAX_PAGES]:
+    rows: list[dict[str, Any]] = []
+    for url in urls:
         stamp = stamps.get(url)
         row = page_rows.get(url)
-        ref = play.ledger.fact(
-            url,
-            kind="page",
-            website=data.website.key,
-            url=url,
-            project=data.copy.project_name,
-            title=(stamp.title if stamp else None) or (row.title if row else None) or url,
-        )
-        pages.append(
+        title = (stamp.title if stamp else None) or (row.title if row else None)
+        h1 = stamp.h1 if stamp else None
+        words = stamp.main_word_count if stamp and not stamp.is_asset else None
+        moment = (stamp.modified_at or stamp.published_at) if stamp else None
+        page_type = row.page_type if row else None
+        if args.path_contains and args.path_contains.casefold() not in url.casefold():
+            continue
+        if args.title_contains and args.title_contains.casefold() not in (
+            f"{title or ''} {h1 or ''}".casefold()
+        ):
+            continue
+        if args.page_type and (page_type or "").casefold() != args.page_type.casefold():
+            continue
+        if args.min_words is not None and (words is None or words < args.min_words):
+            continue
+        if args.max_words is not None and (words is None or words > args.max_words):
+            continue
+        if args.modified_before and (moment is None or moment.date() >= args.modified_before):
+            continue
+        if args.modified_after and (moment is None or moment.date() < args.modified_after):
+            continue
+        if args.noindex is not None and indexable.get(url, True) == args.noindex:
+            continue
+        if args.in_knowledge_base is not None and (row is not None) != args.in_knowledge_base:
+            continue
+        if args.with_query is not None and ("?" in url) != args.with_query:
+            continue
+        rows.append(
             {
-                "ref": ref,
                 "url": url,
-                "title": stamp.title if stamp else (row.title if row else None),
-                "h1": stamp.h1 if stamp else None,
-                "page_type": row.page_type if row else None,
+                "title": title,
+                "h1": h1,
+                "page_type": page_type,
                 "offering": row.offering_id if row else None,
                 "path": "/" + "/".join(stamp.path_segments) if stamp else None,
-                "word_count": stamp.main_word_count if stamp else None,
+                "word_count": words,
                 "published_at": stamp.published_at.isoformat()
                 if stamp and stamp.published_at
                 else None,
@@ -589,10 +766,37 @@ def _list_pages(play: Playground, args: WebsiteInput) -> dict[str, Any]:
                 else None,
                 "in_knowledge_base": row is not None,
                 "excluded_because": stamp.exclusion_reason if stamp else None,
+                "duplicate_of": stamp.duplicate_of if stamp else None,
+                **({"indexable": indexable.get(url, True)} if indexable else {}),
+                "_moment": moment,
             }
         )
-    notes = [f"{len(urls) - _MAX_PAGES} more pages not listed"] if len(urls) > _MAX_PAGES else []
-    return {"website": data.website.key, "total_pages": len(urls), "pages": pages, "notes": notes}
+    if args.sort == "words":
+        rows.sort(key=lambda r: (r["word_count"] is None, r["word_count"] or 0, r["url"]))
+    elif args.sort == "modified":
+        rows.sort(key=lambda r: (r["_moment"] is None, str(r["_moment"] or ""), r["url"]))
+    window = rows[args.offset : args.offset + args.limit]
+    pages = []
+    for r in window:
+        r.pop("_moment")
+        r["ref"] = play.ledger.fact(
+            r["url"],
+            kind="page",
+            website=data.website.key,
+            url=r["url"],
+            project=data.copy.project_name,
+            title=r["title"] or r["url"],
+        )
+        pages.append(r)
+    after = args.offset + len(pages)
+    return {
+        "website": data.website.key,
+        "total_pages": len(urls),
+        "matching": len(rows),
+        "offset": args.offset,
+        "next_offset": after if after < len(rows) else None,
+        "pages": pages,
+    }
 
 
 def _catalog(play: Playground, args: WebsiteInput) -> dict[str, Any]:
@@ -675,9 +879,43 @@ def _inventory(play: Playground, data: SiteData) -> list[PageInventory]:
         return [PageInventory.model_validate_json(line) for line in handle if line.strip()]
 
 
-def _seo_issues(play: Playground, args: WebsiteInput) -> dict[str, Any]:
+def _seo_issues(play: Playground, args: IssuesInput) -> dict[str, Any]:
     data = _data(play, args.website)
     pages = _inventory(play, data)
+    if args.code:
+        hits = [(page, issue) for page in pages for issue in page.issues if issue.code == args.code]
+        if not hits:
+            codes = ", ".join(sorted({i.code for p in pages for i in p.issues}))
+            msg = f"no page of {data.website.name} has issue {args.code!r}; codes: {codes}"
+            raise ToolError(msg)
+        first = hits[0][1]
+        ref = play.ledger.fact(
+            f"{data.website.key}\x1f{args.code}",
+            kind="issue",
+            website=data.website.key,
+            title=f"{args.code}: {first.message}",
+            text=f"{len(hits)} pages",
+        )
+        window = hits[args.offset : args.offset + args.limit]
+        after = args.offset + len(window)
+        return {
+            "website": data.website.key,
+            "code": args.code,
+            "severity": first.severity,
+            "message": first.message,
+            "ref": ref,
+            "pages_with_issue": len(hits),
+            "offset": args.offset,
+            "next_offset": after if after < len(hits) else None,
+            "pages": [
+                {
+                    "url": page.url,
+                    "title": page.head.title,
+                    "items": issue.count,
+                }
+                for page, issue in window
+            ],
+        }
     by_code: dict[str, dict[str, Any]] = {}
     for page in pages:
         for issue in page.issues:
@@ -715,6 +953,149 @@ def _seo_issues(play: Playground, args: WebsiteInput) -> dict[str, Any]:
         "pages_inventoried": len(pages),
         "pages_captured": captured,
         "issues": issues,
+        "notes": ["each issue shows 5 example pages; pass its code for every page with it"],
+    }
+
+
+def _technical(play: Playground, args: TechnicalInput) -> dict[str, Any]:
+    from src.modules.analyst.technical import CHECKS, technical_checks
+
+    data = _data(play, args.website)
+    path = data.file(".records.jsonl")
+    if path is None:
+        msg = f"{data.website.name}'s latest scrape has no records"
+        raise ToolError(msg)
+    report = technical_checks(
+        load_records(path),
+        list({s.url: s for s in play.stamps(data).values()}.values()),
+        _inventory(play, data),
+    )
+    if args.check is not None:
+        if args.check not in CHECKS:
+            msg = f"unknown check {args.check!r}; checks: {', '.join(CHECKS)}"
+            raise ToolError(msg)
+        found = report.findings[args.check]
+        window = found[args.offset : args.offset + args.limit]
+        after = args.offset + len(window)
+        ref = play.ledger.fact(
+            f"{data.website.key}\x1ftechnical\x1f{args.check}",
+            kind="issue",
+            website=data.website.key,
+            title=f"{args.check}: {CHECKS[args.check]}",
+            text=f"{len(found)} findings",
+        )
+        return {
+            "website": data.website.key,
+            "check": args.check,
+            "meaning": CHECKS[args.check],
+            "ref": ref,
+            "findings_total": len(found),
+            "offset": args.offset,
+            "next_offset": after if after < len(found) else None,
+            "findings": [{"url": f.url, "detail": f.detail, **f.extra} for f in window],
+            "notes": report.notes,
+        }
+    checks = []
+    for name, meaning in CHECKS.items():
+        found = report.findings[name]
+        ref = play.ledger.fact(
+            f"{data.website.key}\x1ftechnical\x1f{name}",
+            kind="issue",
+            website=data.website.key,
+            title=f"{name}: {meaning}",
+            text=f"{len(found)} findings",
+        )
+        checks.append(
+            {
+                "check": name,
+                "meaning": meaning,
+                "findings": len(found),
+                "examples": [f"{f.url}: {f.detail}" for f in found[:3]],
+                "ref": ref,
+            }
+        )
+    return {
+        "website": data.website.key,
+        "pages_checked": report.pages,
+        "checks": checks,
+        "notes": [*report.notes, "pass a check name for every finding of it"],
+    }
+
+
+def _structured_data(play: Playground, args: SchemaInput) -> dict[str, Any]:
+    data = _data(play, args.website)
+    pages = [p for p in _inventory(play, data) if p.status == "inventoried"]
+    if args.type:
+        wanted = args.type.casefold()
+        rows = []
+        for page in pages:
+            for item in page.structured_data:
+                if any(t.casefold() == wanted for t in item.types):
+                    node = item.data or {}
+                    rows.append(
+                        {
+                            "url": page.url,
+                            "syntax": item.syntax,
+                            "properties": item.properties[:40],
+                            "missing_required": item.missing_required,
+                            "missing_recommended": item.missing_recommended,
+                            "same_as": [v for v in node.get("sameAs", []) if isinstance(v, str)][
+                                :20
+                            ]
+                            if isinstance(node.get("sameAs"), list)
+                            else ([node["sameAs"]] if isinstance(node.get("sameAs"), str) else []),
+                            "logo": _schema_value(node["logo"]) if "logo" in node else None,
+                        }
+                    )
+        if not rows:
+            msg = f"no page of {data.website.name} declares {args.type!r}"
+            raise ToolError(msg)
+        window = rows[args.offset : args.offset + args.limit]
+        after = args.offset + len(window)
+        return {
+            "website": data.website.key,
+            "type": args.type,
+            "items_total": len(rows),
+            "pages_with_type": len({r["url"] for r in rows}),
+            "offset": args.offset,
+            "next_offset": after if after < len(rows) else None,
+            "items": window,
+        }
+    types: dict[str, dict[str, Any]] = {}
+    for page in pages:
+        seen: set[str] = set()
+        for item in page.structured_data:
+            for kind in item.types:
+                entry = types.setdefault(
+                    kind,
+                    {"type": kind, "pages": 0, "items": 0, "syntax": set(), "missing": Counter()},
+                )
+                entry["items"] += 1
+                entry["syntax"].add(item.syntax)
+                entry["missing"].update(item.missing_required + item.missing_recommended)
+                if kind not in seen:
+                    entry["pages"] += 1
+                    seen.add(kind)
+    rows = []
+    for entry in sorted(types.values(), key=lambda e: -int(e["pages"])):
+        missing: Counter[str] = entry.pop("missing")
+        entry["syntax"] = sorted(entry["syntax"])
+        entry["often_missing"] = [f"{k} ({n})" for k, n in missing.most_common(8)]
+        entry["ref"] = play.ledger.fact(
+            f"{data.website.key}\x1fschema\x1f{entry['type']}",
+            kind="issue",
+            website=data.website.key,
+            title=f"structured data: {entry['type']}",
+            text=f"{entry['pages']} pages",
+        )
+        rows.append(entry)
+    without = sum(1 for p in pages if not p.structured_data)
+    return {
+        "website": data.website.key,
+        "pages_checked": len(pages),
+        "pages_without_structured_data": without,
+        "types": rows,
+        "notes": ["pass a type for its pages, properties and missing fields"],
     }
 
 
@@ -1108,8 +1489,8 @@ def _page_report(play: Playground, args: PageReportInput) -> dict[str, Any]:
     report = page_report(play.store, play.access, play.project_ids[0])
     if report is None:
         msg = (
-            "this project has no search data or Search Console import yet: import a Semrush "
-            "export or a Search Console export in the Research tab first"
+            "this project has no scraped client website and no search data yet: scrape the "
+            "client website, or import a Semrush or Search Console export in the Research tab"
         )
         raise ToolError(msg)
 
@@ -1442,9 +1823,11 @@ TOOLS: dict[str, ToolSpec] = {
         ToolSpec(
             "list_pages",
             "content",
-            "Every captured page of one website: title, H1, page type, offering, path, word "
-            "count and dates (up to 300 pages).",
-            WebsiteInput,
+            "Captured pages of one website: title, H1, page type, offering, path, word count, "
+            "dates and whether it is searchable. Filter by address or title text, page type, "
+            "word count, last-modified date, noindex, left out of search, or ?parameters; sort "
+            "by path, words or date; page through with offset (up to 300 per call).",
+            ListPagesInput,
             _list_pages,
         ),
         ToolSpec(
@@ -1460,9 +1843,31 @@ TOOLS: dict[str, ToolSpec] = {
             "content",
             "Technical SEO/GEO issues of a website's pages, grouped by issue with severity, page "
             "counts and example addresses (titles, descriptions, canonicals, headings, "
-            "structured data, images, links). The first call may take a minute.",
-            WebsiteInput,
+            "structured data, images, links). Pass an issue code for every page with that "
+            "issue (paged with offset). The first call may take a minute.",
+            IssuesInput,
             _seo_issues,
+        ),
+        ToolSpec(
+            "get_technical_checks",
+            "content",
+            "Technical SEO checks from the stored scrape (no new requests): error pages (4xx/5xx, "
+            "failed, blocked), soft 404s, redirects and redirect chains, duplicate titles, H1 "
+            "equal to the title, ?parameter addresses, mixed content (http:// links and "
+            "images), broken internal links, robots meta noindex/nofollow, hreflang and missing "
+            "return links. Summary first; pass a check name for every finding (paged).",
+            TechnicalInput,
+            _technical,
+        ),
+        ToolSpec(
+            "get_structured_data",
+            "content",
+            "Structured data (schema.org) across a website: per type the pages and items, "
+            "syntax and the fields most often missing, and pages with none. Pass a type (e.g. "
+            "Organization, BreadcrumbList, FAQPage) for its pages with properties, missing "
+            "required/recommended fields, sameAs links and logo.",
+            SchemaInput,
+            _structured_data,
         ),
         ToolSpec(
             "find_similar_pages",

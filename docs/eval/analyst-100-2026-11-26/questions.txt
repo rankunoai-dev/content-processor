@@ -1,0 +1,100 @@
+1. Which pages on johnhancock.com are missing meta descriptions?
+2. What does our term life insurance page say about the maximum coverage amount?
+3. Who are our top 5 organic competitors for "long-term care insurance"?
+4. Are there any pages with duplicate title tags?
+5. How many pages have a noindex tag, and should any of them actually be indexed?
+6. Give me a summary of the site's biggest SEO issues for Thursday's client meeting.
+7. What keywords are we ranking 11-20 for that we could push onto page one?
+8. Does the Vitality program get explained consistently across all the pages that mention it?
+9. What does Northwestern Mutual cover on its whole life page that we don't?
+10. Which pages have more than one H1?
+11. Is our canonical setup correct on the paginated insights/blog pages?
+12. What's our current ranking for "universal life insurance"?
+13. How many backlinks does johnhancock.com have compared to Prudential?
+14. Are there any redirect chains or loops on the site?
+15. Which pages are thin content, say under 300 words?
+16. What's the conversion rate on the life insurance quote form?
+17. How does ChatGPT describe John Hancock when someone asks for the best life insurance companies?
+18. Do any of our pages quote different interest rates or guaranteed rates for the same annuity product?
+19. Which images are missing alt text?
+20. What structured data types are we using, and what are we missing compared to competitors?
+21. Are any of our pages cannibalising each other for "life insurance for seniors"?
+22. Write me a content brief for a pillar page on long-term care planning.
+23. What's the average crawl depth of our product pages?
+24. Are there orphan pages with no internal links pointing to them?
+25. Did any competitor change their term life pricing or product lineup recently?
+26. What are our Core Web Vitals like on mobile?
+27. Which keywords trigger AI Overviews where we're not cited?
+28. Is the site's robots.txt blocking anything important?
+29. Do our XML sitemaps include URLs that return 404 or redirect?
+30. Who are the authors on our financial articles, and do they have bios with credentials?
+31. What content gaps do we have versus MassMutual on retirement planning topics?
+32. how's our organic traffic trending this quarter
+33. What does our LTC page say about the elimination period options?
+34. Which pages haven't been updated in over two years?
+35. Are there any broken internal links?
+36. Which top-of-funnel topics are we completely missing?
+37. What anchor text do most of our referring domains use?
+38. Do we have any toxic or spammy backlinks we should disavow?
+39. What's the search volume for "how much life insurance do I need"?
+40. Is our FAQ schema valid on the pages that have FAQs?
+41. What CTAs are on the whole life page, and is there one above the fold?
+42. Does the site rely on JavaScript to render the main product content?
+43. Compare our title tags on product pages to Lincoln Financial's.
+44. What questions are people asking about long-term care that we don't answer anywhere on the site?
+45. Are there any pages returning 5xx errors?
+46. How many pages do we have indexed in Google versus how many are in the sitemap?
+47. What's our share of voice across our tracked keywords versus competitors?
+48. Does any page still reference outdated contribution limits for 401(k)s or IRAs?
+49. Which pages get the most organic entrances but have the highest bounce rate?
+50. Is hreflang needed anywhere, given John Hancock is part of Manulife?
+51. What's the domain rating trend over the last 12 months?
+52. Which product pages are weakest on E-E-A-T signals?
+53. Do we have a local presence for advisors or offices, and is it optimised?
+54. What featured snippets do we own right now?
+55. Are there pages with titles longer than 60 characters that are getting truncated?
+56. What does Pacific Life say about its indexed universal life caps compared to what we say?
+57. Suggest internal links we should add to the term life page.
+58. Which of our pages get cited in Perplexity or Google AI Mode answers?
+59. Are there any mixed content or HTTP pages left?
+60. Which keywords did we lose rankings for in the last month?
+61. What's the word count and heading structure of the top 3 ranking pages for "long term care insurance cost" compared to ours?
+62. Is there any contradictory information about policy eligibility ages across our pages?
+63. Map our pages to funnel stages: awareness, consideration, decision.
+64. What's the page speed on the homepage, and what's slowing it down?
+65. Are there duplicate content issues between the main site and any subdomains?
+66. Which competitor pages earn the most backlinks, and could we build something similar?
+67. Do our disclaimers and disclosures appear on every product page that needs them?
+68. What keywords does Prudential rank top 3 for that we don't rank for at all?
+69. Give me three quick wins we can ship this month.
+70. Is our Organization schema set up with sameAs links and the correct logo?
+71. What's the click-through rate for our top 20 queries in Search Console?
+72. Which pages have the same H1 as their title tag word for word?
+73. How does our "life insurance calculator" page compare to competitors' calculators?
+74. Are there any URLs with parameters creating crawl waste?
+75. Which blog posts should we consolidate or prune?
+76. What does the site say about John Hancock's financial strength ratings, and is it current?
+77. Which pages mention "no medical exam" and are those claims consistent?
+78. Do we rank for any branded misspellings, or are competitors bidding on our brand?
+79. Draft an executive summary of competitor activity over the last 30 days.
+80. What's the mobile usability like on the quote flow?
+81. Which pages have images that are too large or not using next-gen formats?
+82. Are there pages with soft 404s?
+83. What topics should we build a cluster around for retirement income?
+84. What's our visibility for "best long term care insurance companies" listicle-type keywords?
+85. How many pages link to the annuities hub page internally?
+86. Are review or rating claims on the site backed by sources?
+87. Which keywords have high volume but low difficulty in the life insurance space that we're not targeting?
+88. Is the breadcrumb navigation marked up with BreadcrumbList schema?
+89. Which pages drive the most leads from organic search?
+90. How often do competitors publish new content compared to us?
+91. Does our meta robots or X-Robots-Tag setup differ between the PDF documents and HTML pages?
+92. What are the most common reasons someone would land on our site and not find an answer?
+93. Is there anything on the site that might be a compliance risk, like guaranteed-return language?
+94. What sentiment do AI assistants have about John Hancock's customer service?
+95. Which of our pages are best positioned to win People Also Ask boxes?
+96. Do we have a glossary or definitions page, and do competitors?
+97. What changed on our own site since the last crawl?
+98. Which external links on our site point to dead or redirected pages?
+99. What's the one biggest strategic SEO opportunity for John Hancock in 2027?
+100. Can you put together a one-page monthly SEO report with rankings, technical health and content recommendations?

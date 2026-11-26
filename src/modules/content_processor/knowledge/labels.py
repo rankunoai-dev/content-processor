@@ -285,8 +285,14 @@ def text_role(text: str, word_count: int) -> str | None:
     return best
 
 
-def decide_role(votes: Mapping[str, str | None]) -> Decision:
-    """Accept a role two families agree on; conflicting votes go to review."""
+def decide_role(votes: Mapping[str, str | None], *, model_used: bool = True) -> Decision:
+    """Accept a role two families agree on; conflicting votes go to review.
+
+    Without a model (`model_used` False: no local AI model is configured) only two
+    families can vote and they rarely both speak, so a lone vote is kept as the role,
+    with status `single_signal` (weaker than `accepted`); with a model, a lone vote
+    the model did not back stays unlabelled.
+    """
     cast = {family: role for family, role in votes.items() if role}
     if not cast:
         return Decision(None, "unlabelled")
@@ -297,7 +303,7 @@ def decide_role(votes: Mapping[str, str | None]) -> Decision:
         return Decision(role, "accepted", agreeing)
     if len(tally) > 1:
         return Decision(None, "review", sorted(cast))
-    return Decision(None, "single_signal", agreeing)
+    return Decision(None if model_used else role, "single_signal", agreeing)
 
 
 # -- offering signals ------------------------------------------------------------------
@@ -528,7 +534,7 @@ class Labeller:
             labels.append(
                 ChunkLabel(
                     chunk_id=chunk.chunk_id,
-                    role=decide_role(role_votes),
+                    role=decide_role(role_votes, model_used=self._chat is not None),
                     offering=decide_offering(offering_votes, self.parents),
                     role_votes={k: v for k, v in role_votes.items() if v},
                     offering_votes={k: v for k, v in offering_votes.items() if v},

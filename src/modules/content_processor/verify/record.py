@@ -563,8 +563,25 @@ def _freshness(target: Resource, summaries: Mapping[str, Mapping[str, Any]]) -> 
         "previous_run_id": target.previous_run_id,
         "reused_from_run_id": target.reused_from_run_id,
         "followups": refs,
-        "summaries": {k: dict(v) for k, v in summaries.items()},
+        "summaries": {**{k: dict(v) for k, v in summaries.items()}, **_http_summary(target)},
     }
+
+
+def _http_summary(target: Resource) -> dict[str, dict[str, Any]]:
+    """The answer's status, redirect hops and block verdict, kept for technical checks."""
+    if target.http_status is None and not target.redirect_chain and target.block_verdict is None:
+        return {}
+    http: dict[str, Any] = {"status": target.http_status}
+    if target.redirect_chain:
+        http["redirects"] = [
+            {"kind": str(h.kind), "from": h.from_url, "to": h.to_url, "status": h.http_status}
+            for h in target.redirect_chain
+        ]
+    if target.transport_error:
+        http["transport_error"] = target.transport_error
+    if target.block_verdict is not None and target.block_verdict.is_block:
+        http["block"] = str(target.block_verdict.kind)
+    return {"http": http}
 
 
 def excluded_url_record(

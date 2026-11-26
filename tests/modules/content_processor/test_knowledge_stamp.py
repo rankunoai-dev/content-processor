@@ -505,6 +505,50 @@ def test_canonical_pointing_at_another_page_marks_duplicate() -> None:
     assert [s.duplicate_of for s in result.stamps] == [None, "https://example.com/a"]
 
 
+def _titled(url: str, title: str, canonical: str | None = None) -> bytes:
+    return (
+        PAGE.replace("Term life insurance | Example Life", title)
+        .replace("https://example.com/life/term", canonical or url)
+        .encode()
+    )
+
+
+def test_same_text_pages_keep_one_copy_per_page_and_never_lose_all() -> None:
+    """Forms built on one set of instructions are different pages; client/rep copies are one."""
+    shared = [words(3, 200)]
+    pages = {
+        "https://example.com/forms/income-client": "Online form (income made easy client)",
+        "https://example.com/forms/income-rep": "Online form (income made easy rep)",
+        "https://example.com/forms/beneficiary-client": "Online form (change of beneficiary)",
+        "https://example.com/forms/w9": "Online form (IRS form W-9)",
+    }
+    bodies = {url: _titled(url, title) for url, title in pages.items()}
+    records = [_page(url, shared, html=bodies[url]) for url in pages]
+    result = stamp_records(records, _loader(*bodies.values(), RENDERED.encode()).get)
+    by = {s.url.rsplit("/", 1)[-1]: s for s in result.stamps}
+    # the shorter address is the copy kept
+    assert by["income-client"].duplicate_of == "https://example.com/forms/income-rep"
+    assert by["income-client"].exclusion_reason == "duplicate"
+    for kept in ("income-rep", "beneficiary-client", "w9"):
+        assert by[kept].knowledge_eligible, kept  # different forms stay searchable
+    assert "https://example.com/forms/w9" in by["income-rep"].near_duplicates
+    stamps = {s.url: s for s in result.stamps}
+    assert all(stamps[s.duplicate_of].knowledge_eligible for s in result.stamps if s.duplicate_of)
+
+
+def test_canonical_chains_and_loops_keep_one_searchable_copy() -> None:
+    a, b, c = (f"https://example.com/{x}" for x in "abc")
+    chain = {a: _titled(a, "Page", b), b: _titled(b, "Page", c), c: _titled(c, "Page")}
+    records = [_page(u, [words(i, 100)], html=chain[u]) for i, u in enumerate(chain)]
+    result = stamp_records(records, _loader(*chain.values(), RENDERED.encode()).get)
+    by = {s.url: s for s in result.stamps}
+    assert by[c].knowledge_eligible and by[a].duplicate_of == c and by[b].duplicate_of == c
+    loop = {a: _titled(a, "Loop", b), b: _titled(b, "Loop", a)}
+    records = [_page(u, [words(i, 100)], html=loop[u]) for i, u in enumerate(loop)]
+    result = stamp_records(records, _loader(*loop.values(), RENDERED.encode()).get)
+    assert sum(s.knowledge_eligible for s in result.stamps) == 1  # mutual canonicals: one kept
+
+
 def test_stamp_needs_records_and_reading_ease_needs_words() -> None:
     with pytest.raises(ValueError, match="no records"):
         stamp_records([], lambda _sha: None)

@@ -1238,3 +1238,17 @@ git worktree add ../content-processor-lane4 -b lane/L4-verify
 
 - **Branch:** `chore/eval-harness` (from main `d48c8b3`). The 40-question John Hancock benchmark (cases, run script, report tables, the 22 Nov results and report) was untracked in main's folder and made the full gate's format and lint steps fail there; it is now committed, formatted, with a lint exception for `docs/eval/**` in `pyproject.toml` (prints, wide table rows, `dict()` calls, missing docstrings, asserts, open without `with`).
 - **Run it from a worktree:** `PYTHONPATH=<worktree> python docs/eval/john-hancock-2026-11-22/run_eval.py <out.json>` from the main folder, with `CP_APP_DATA_ROOT`, `CP_KNOWLEDGE_ROOT` and `CP_MODEL_CACHE_DIR` set to the main folder's.
+
+## [2026-11-26] Analyst tool fixes from the 100-question test (`feat/analyst-tool-fixes`)
+
+- **Branch / worktree:** `feat/analyst-tool-fixes` at `../content-processor-tools`, from main `de86854`. Input: `docs/eval/analyst-100-2026-11-26/REPORT.md` (3 answered / 32 partial / 65 not on John Hancock).
+- **What landed:**
+  - `knowledge/stamp._mark_duplicates`: canonical and same-text groups by union-find (chains and loops resolve to one kept page: canonical end, most named, shortest address); same text is one page only when titles match (`_same_page`: Jaccard >= 0.75 or one word apart), else both stay searchable as near duplicates. JH re-stamped in memory: dangling duplicates 16 -> 0, form pages searchable 24/33.
+  - `labels.decide_role(model_used=)`: without a model a lone vote is the role (`single_signal`); JH text signals give 264 disclaimer, 58 claim, 21 feature, 18 faq. Search passages show `role_status`.
+  - `research.service.page_report` builds from the scrape alone (cache keyed on the client run too); route and tool messages updated.
+  - `get_seo_issues(code, offset, limit)`; `list_pages` filters (path/title text, page type, words, modified before/after, noindex, in search, ?parameters), sort, paging; `_fit` corrects `next_offset` when it cuts a paged list.
+  - New `analyst/technical.py` + tool `get_technical_checks` (11 checks); new tool `get_structured_data`; `get_page_facts.structured_data` (types, properties, missing fields, key values). No page text in the new outputs (titles/URLs only).
+  - `verify/record._http_summary`: records keep `summaries.http` (status, redirect hops, transport error, block kind) from now on.
+- **Tests:** `tests/modules/analyst/test_tool_coverage.py` (4), 2 new stamp tests, decide_role case; MCP tool counts 21/28; page report API test now 200 without research.
+- **Not done:** existing scrapes keep old stamps/labels until their knowledge space is rebuilt; X-Robots-Tag headers not kept; visible (unmarked) FAQ accordions not listed as FAQ questions.
+- **Open contract requests:** none (record change is inside the free-form `summaries`).

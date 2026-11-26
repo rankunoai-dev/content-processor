@@ -16,12 +16,12 @@ Claude Desktop --stdio--> python -m src.modules.mcp_server --HTTP 127.0.0.1--> w
 - `POST /api/mcp/call` accepts only the app's header, JSON, and **no Origin** (no web page, not even the app's own, can call it). The app binds 127.0.0.1 only.
 - The tools are read-only towards websites and project data: no scrape, no Semrush pull, no status change, no unlock. Some build a missing local result on first use (theme map, gap report, monitoring check, SEO inventory); that runs inside the app, on this computer, at $0. The one tool that writes, `save_deliverable`, only adds a checked answer to the project's analyst run history (below).
 
-## Tools (24 in the full connector)
+## Tools (28 in the full connector)
 
 | Tool | What |
 |---|---|
 | `list_projects` | Projects, client, websites and roles, which results exist with dates. Call first. |
-| 17 analyst tools | `list_websites`, `search_knowledge`, `get_page`, `get_page_facts`, `list_pages`, `get_offering_catalog`, `get_seo_issues`, `find_similar_pages`, `get_changes`, `get_theme_map`, `get_monitoring_alerts`, `get_gap_findings`, `get_keyword_rankings`, `get_serp_overview`, `get_keyword_metrics`, `get_search_demand`, `get_competitor_suggestions`; each takes `project_id`. Results are marked as untrusted website content and capped in size. |
+| 21 analyst tools | `list_websites`, `search_knowledge`, `get_page`, `get_page_facts`, `list_pages`, `get_offering_catalog`, `get_seo_issues`, `get_technical_checks`, `get_structured_data`, `find_similar_pages`, `get_changes`, `get_theme_map`, `get_monitoring_alerts`, `get_gap_findings`, `get_keyword_rankings`, `get_serp_overview`, `get_keyword_metrics`, `get_search_demand`, `get_page_report`, `get_competitor_suggestions`, `get_backlinks`; each takes `project_id`. Results are marked as untrusted website content and capped in size. |
 | `get_theme_pages`, `export_theme_pages_csv` | Every page of one theme, in full, as a list or as CSV text (answered by the stdio server from the app's read-only endpoints). |
 | `get_scrape_queue` | What is running, waiting and ready across all projects, with progress. |
 | `present_answer` | A structured answer laid out by type (below). |
@@ -62,7 +62,7 @@ A connection can be limited to some modules, so a chat that should stay within o
 
 | Module key | Tools |
 |---|---|
-| `content` | list_websites, search_knowledge, get_page, get_page_facts, list_pages, get_seo_issues, find_similar_pages |
+| `content` | list_websites, search_knowledge, get_page, get_page_facts, list_pages, get_seo_issues, get_technical_checks, get_structured_data, find_similar_pages |
 | `themes` | get_offering_catalog, get_theme_map |
 | `monitoring` | get_changes, get_monitoring_alerts |
 | `research` | get_keyword_rankings, get_serp_overview, get_keyword_metrics, get_search_demand |

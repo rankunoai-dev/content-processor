@@ -366,7 +366,8 @@ def test_api_and_cli_page_report(
     )
     client = TestClient(app, base_url="http://127.0.0.1")
     base = f"/api/projects/{themed.project_id}/research"
-    assert client.get(f"{base}/pages").status_code == 404
+    scrape_only = client.get(f"{base}/pages")  # links and on-page health need no search data
+    assert scrape_only.status_code == 200 and scrape_only.json()["research_snapshot_id"] is None
     assert client.get(f"{base}/gsc").status_code == 404
     token, _ = signer.issue(themed.project_id)
     auth = {**WRITE, "X-Project-Token": token}
