@@ -42,8 +42,10 @@ from src.modules.research.competitors import (
     domain_of,
     read_competitors_csv,
 )
+from src.modules.research.gsc import GscError, GscSnapshot
 from src.modules.research.importer import ImportError_
 from src.modules.research.models import Mover, ResearchSnapshot
+from src.modules.research.page_models import PageReport
 from src.modules.research.semrush import SemrushError
 from src.modules.research.service import (
     ResearchSettings,
@@ -52,6 +54,8 @@ from src.modules.research.service import (
     estimate_units,
     import_competitors,
     import_csv,
+    import_gsc,
+    page_report,
     pull_project,
     research_store,
     unit_log,
@@ -78,6 +82,27 @@ class ImportIn(StrictModel):
     website: str = Field(min_length=3, max_length=300)
     file_name: str = Field(max_length=300)
     content_base64: str = Field(max_length=_MAX_FILE * 2)
+
+
+class GscImportIn(StrictModel):
+    """A Search Console Performance export (zip or one of its CSVs) of one website."""
+
+    website: str = Field(min_length=3, max_length=300)
+    file_name: str = Field(max_length=300)
+    content_base64: str = Field(max_length=_MAX_FILE * 2)
+
+
+class GscSummary(StrictModel):
+    """What a Search Console import holds."""
+
+    website: str
+    imported_at: datetime
+    period: str
+    queries: int
+    pages: int
+    pairs: int
+    clicks: int
+    impressions: int
 
 
 class CompetitorsImportIn(StrictModel):
@@ -198,6 +223,62 @@ def register_research_routes(
                 raise HTTPException(status_code=422, detail=detail) from None
             raise HTTPException(status_code=422, detail=str(exc)) from None
         return snapshot
+
+    def gsc_summary(snapshot: GscSnapshot) -> GscSummary:
+        rows = snapshot.pages or snapshot.queries or snapshot.pairs
+        return GscSummary(
+            website=snapshot.website,
+            imported_at=snapshot.imported_at,
+            period=snapshot.period,
+            queries=len(snapshot.queries),
+            pages=len(snapshot.pages),
+            pairs=len(snapshot.pairs),
+            clicks=sum(r.clicks for r in rows),
+            impressions=sum(r.impressions for r in rows),
+        )
+
+    @app.post("/api/projects/{project_id}/research/gsc/import")
+    def import_search_console(
+        project_id: str, body: GscImportIn, token: TokenHeader = None
+    ) -> GscSummary:
+        unlocked(project_id, token)
+        try:
+            snapshot = import_gsc(projects, project_id, body.website, _decode(body.content_base64))
+        except GscError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from None
+        return gsc_summary(snapshot)
+
+    @app.get("/api/projects/{project_id}/research/gsc")
+    def search_console(project_id: str) -> GscSummary:
+        project(project_id)
+        snapshot = store.latest_gsc(project_id)
+        if snapshot is None:
+            raise HTTPException(status_code=404, detail="No Search Console data yet.")
+        return gsc_summary(snapshot)
+
+    @app.get("/api/projects/{project_id}/research/pages")
+    def pages(project_id: str) -> PageReport:
+        project(project_id)
+        report = page_report(projects, access, project_id)
+        if report is None:
+            raise HTTPException(
+                status_code=404,
+                detail="No page report yet: import or pull search data, or a Search Console "
+                "export.",
+            )
+        return report
+
+    @app.get("/api/projects/{project_id}/research/pages/workbook")
+    def pages_workbook(project_id: str) -> FileResponse:
+        pages(project_id)
+        path = store.pages_workbook(project_id)
+        if not path.exists():
+            raise HTTPException(status_code=404, detail="The page report workbook is missing.")
+        return FileResponse(
+            path,
+            filename=f"{project_id}_pages.xlsx",
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
 
     @app.get("/api/projects/{project_id}/research/competitors")
     def competitors(project_id: str) -> CompetitorBook:

@@ -20,6 +20,39 @@ Status: **built 2026-11-02** on `feat/research-gaps` (`src/modules/research/`). 
 No live Semrush call has been made yet. The whole module has run end to end against the
 **stand-in** below (26 Nov 2026, John Hancock sandbox with two competitors).
 
+## Intent, the page report and Search Console ($0, nothing fetched)
+
+- **Intent** (`research/intent.py`): every keyword is tagged informational, navigational,
+  commercial or transactional by rules on its words, while the snapshot is finished (the
+  project's domains and names count as brands; a short head term with no cue is
+  commercial). Demand per theme gives searches per intent and a weighted total
+  (transactional 1.2, commercial 1, informational 0.5, navigational 0.4); keyword gap
+  findings say their mix and rank buyer searches higher.
+- **Search Console** (`research/gsc.py`): `POST .../research/gsc/import` (or
+  `research gsc-import`) reads the Performance export: the zip (`Queries.csv`,
+  `Pages.csv`, `Filters.csv`) or one CSV; a table with both a query and a page column is
+  read as pairs. Kept as `gsc-latest.json` (one per project). **CTR opportunities**: a
+  page-one page or query with 200+ impressions whose CTR is under 60% of the usual for
+  its position (the curve of `build.CTR`, between steps); clicks to gain = impressions x
+  (usual - real). Google sign-in (the API) is not built; the export is.
+- **Page report** (`research/pages.py`, `links.py`, `page_models.py`): for the client's
+  website, per page: keywords, searches, estimated visits, average and best position, top
+  keyword, commercial searches, links from page text and from menus only, internal
+  PageRank (body links, damping 0.85, strongest = 100), words, on-page flags from the
+  inventory, Search Console clicks and impressions. Lists: cannibalisation, pages that rank
+  for nothing, pages with no or one link from page text, pages stuck at 4-20 with
+  problems, link suggestions (same theme, stronger, not linking yet; anchor = the target's
+  keyword), CTR opportunities. Built on demand and saved as `pages-latest.json` with
+  `pages_report.xlsx`; rebuilt when the research snapshot or the Search Console import
+  changes (`GET .../research/pages`, `.../pages/workbook`, `research pages`); the gap
+  analysis builds it and turns it into findings. Claude Desktop: `get_page_report`
+  (section by section). **Links only count between scraped pages**: on a scrape of a URL
+  list (John Hancock: 303 addresses) most pages show no link from page text because the
+  pages linking to them were not scraped; the report and its findings say so.
+- **Importer**: two rows of one keyword with different pages of the same website are kept
+  (the best-placed page is the keyword's page, the others `other_urls`) instead of the
+  second being dropped.
+
 ## Trying it without Semrush: the stand-in (dummy data, $0)
 
 `src/modules/research/standin.py` invents search data for a project's websites in Semrush's
@@ -31,6 +64,9 @@ python -m src.modules.content_processor.cli research-standin make --project <id>
 python -m src.modules.content_processor.cli research-standin serve --out dummy [--port 8790] [--slow-down-every 7]
 ```
 
+- `make` also writes the client's **Search Console export** (`<domain>-search-console.zip`:
+  `Queries.csv`, `Pages.csv`, `Filters.csv`, and `Queries by page.csv` for keywords two
+  pages share) and gives about 15% of the client's keywords a second page (cannibalisation).
 - `make` writes `dataset.json` and, per website, the **Organic Positions** export
   (`<domain>-organic-positions.csv`) and, for the client, the **Organic Competitors** export,
   with Semrush's column names. Keywords: three **brand keywords** from each theme of the
@@ -113,7 +149,7 @@ Semrush **Organic Research → Positions** export (CSV, `,` or `;`, with or with
 ## Where it is used
 
 - **App**: the project's **Research** tab (import a CSV for a chosen website, pull with budget and worst-case estimate when switched on, suggested competitors with add / dismiss and a competitors-export upload, websites with expandable keywords, theme demand, movers, who ranks for looked-up keywords, workbook).
-- **CLI**: `research estimate | pull | import | show | movers | units --project <id> [--keyword ...] [--website ... --file ...]`; `research-standin make | serve` (dummy data, above).
+- **CLI**: `research estimate | pull | import | show | movers | units | pages | gsc-import --project <id> [--keyword ...] [--website ... --file ...]`; `research-standin make | serve` (dummy data, above).
 - **API**: `GET /api/research/status`, `GET /api/projects/{id}/research`, `GET .../research/estimate?keywords=N`, `POST .../research/pull`, `POST .../research/import` (base64 body, 20 MB), `GET .../research/movers`, `GET .../research/workbook`, `GET .../research/competitors`, `POST .../research/competitors/import`, `POST .../research/competitors/{domain}/add|dismiss|restore`.
 - **Action cards**: `get_keyword_rankings`, `get_serp_overview`, `get_keyword_metrics`, `get_search_demand` are built. Cards 8-10 (v2) prefetch the search data, so even their free context packs carry it, and run once the project has research; without it, their check says "needs search data". Other cards that may use search data run without it and say so.
 - **Storage**: `app_data/research/<project>/research-*.json`, `latest.json`, `<snapshot>_research.xlsx` (Websites, Keywords, Theme demand, Movers, Search results, How to read).

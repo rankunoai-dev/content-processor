@@ -66,7 +66,7 @@ def keyword_rows(rows: list[dict[str, str]], *, strict: bool = False) -> list[Ke
             raise ImportError_(msg)
         return []
     out: list[KeywordRow] = []
-    seen: set[str] = set()
+    seen: dict[str, KeywordRow] = {}
     for raw in rows:
 
         def get(field: str, raw: dict[str, str] = raw) -> str:
@@ -75,9 +75,21 @@ def keyword_rows(rows: list[dict[str, str]], *, strict: bool = False) -> list[Ke
 
         keyword = get("keyword")
         position = _number(get("position"))
-        if not keyword or position is None or position < 1 or keyword.casefold() in seen:
+        if not keyword or position is None or position < 1:
             continue
-        seen.add(keyword.casefold())
+        if keyword.casefold() in seen:
+            # another page of the same website for the same keyword (cannibalisation): the
+            # best-placed page stays the keyword's page, the others are kept as other URLs
+            first = seen[keyword.casefold()]
+            url = get("url")
+            if not url or url == first.url or url in first.other_urls:
+                continue
+            if int(position) < first.position and first.url:
+                first.other_urls.append(first.url)
+                first.url, first.position = url, int(position)
+            else:
+                first.other_urls.append(url)
+            continue
         previous = _number(get("previous_position"))
         out.append(
             KeywordRow(
@@ -92,6 +104,7 @@ def keyword_rows(rows: list[dict[str, str]], *, strict: bool = False) -> list[Ke
                 traffic_share=max(0.0, _number(get("traffic_share")) or 0.0),
             )
         )
+        seen[keyword.casefold()] = out[-1]
     return out
 
 

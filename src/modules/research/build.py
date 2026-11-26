@@ -29,6 +29,7 @@ from typing import Literal
 
 from src.modules.analyst.playground import Playground
 from src.modules.research.importer import keyword_rows
+from src.modules.research.intent import brand_terms, intent_of, weighted
 from src.modules.research.models import (
     DomainOverview,
     KeywordMetrics,
@@ -291,11 +292,15 @@ def demand_by_theme(snapshot: ResearchSnapshot, theme_map: ThemeMap | None) -> l
     """Demand and each website's visibility per theme (unplaced keywords grouped last)."""
     labels = {t.theme_id: t.label for t in theme_map.themes} if theme_map else {}
     groups: dict[str | None, dict[str, int]] = {}
+    intents: dict[str | None, dict[str, str]] = {}
     out: dict[str | None, ThemeDemand] = {}
     for site in snapshot.websites:
         for row in site.keywords:
             vols = groups.setdefault(row.theme_id, {})
             vols[row.keyword.casefold()] = max(vols.get(row.keyword.casefold(), 0), row.volume)
+            intents.setdefault(row.theme_id, {})[row.keyword.casefold()] = (
+                row.intent or "informational"
+            )
             entry = out.setdefault(
                 row.theme_id,
                 ThemeDemand(
@@ -314,11 +319,30 @@ def demand_by_theme(snapshot: ResearchSnapshot, theme_map: ThemeMap | None) -> l
     for theme_id, entry in out.items():
         entry.keywords = len(groups[theme_id])
         entry.volume = sum(groups[theme_id].values())
+        by_intent: dict[str, int] = {}
+        for word, volume in groups[theme_id].items():
+            kind = intents[theme_id][word]
+            by_intent[kind] = by_intent.get(kind, 0) + volume
+        entry.by_intent = dict(sorted(by_intent.items(), key=lambda kv: -kv[1]))
+        entry.weighted_volume = weighted(by_intent)
     return sorted(out.values(), key=lambda d: (d.theme_id is None, -d.volume, d.label))
 
 
+def tag_intents(snapshot: ResearchSnapshot) -> None:
+    """Every keyword's intent by rules; the project's own websites count as brands."""
+    brands = brand_terms(
+        [w.website for w in snapshot.websites] + [w.name for w in snapshot.websites]
+    )
+    for site in snapshot.websites:
+        for row in site.keywords:
+            row.intent = intent_of(row.keyword, brands)
+    for metric in snapshot.keywords:
+        metric.intent = intent_of(metric.keyword, brands)
+
+
 def finish_snapshot(snapshot: ResearchSnapshot, theme_map: ThemeMap | None) -> ResearchSnapshot:
-    """Place keywords in themes and compute demand per theme."""
+    """Tag intents, place keywords in themes and compute demand per theme."""
+    tag_intents(snapshot)
     place_keywords(snapshot, theme_map)
     snapshot.demand = demand_by_theme(snapshot, theme_map)
     return snapshot

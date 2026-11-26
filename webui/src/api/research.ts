@@ -17,6 +17,10 @@ export interface KeywordRow {
   url: string | null;
   traffic_share: number;
   theme_id: string | null;
+  /** By rules: informational, navigational, commercial or transactional. */
+  intent?: string | null;
+  /** Other pages of the same website ranking for it (cannibalisation). */
+  other_urls?: string[];
 }
 
 export interface WebsiteResearch {
@@ -48,6 +52,96 @@ export interface ThemeDemand {
   top10: Record<string, number>;
   ranked: Record<string, number>;
   traffic: Record<string, number>;
+  /** Monthly searches per intent. */
+  by_intent?: Record<string, number>;
+  /** Searches weighted by intent (commercial 1, informational 0.5). */
+  weighted_volume?: number;
+}
+
+export interface PageRow {
+  url: string;
+  title: string | null;
+  theme_id: string | null;
+  theme: string | null;
+  keywords: number;
+  volume: number;
+  visits: number;
+  average_position: number | null;
+  best_position: number | null;
+  top_keyword: string | null;
+  commercial_volume: number;
+  inbound_body_links: number;
+  inbound_chrome_links: number;
+  pagerank: number;
+  word_count: number | null;
+  flags: string[];
+  gsc_clicks: number | null;
+  gsc_impressions: number | null;
+  gsc_ctr: number | null;
+  gsc_position: number | null;
+  indexable: boolean;
+}
+
+export interface Cannibalisation {
+  keyword: string;
+  volume: number;
+  intent: string | null;
+  pages: string[];
+  positions: number[];
+  source: 'semrush_rows' | 'url_swap' | 'search_console';
+  note: string;
+}
+
+export interface LinkSuggestion {
+  source_url: string;
+  source_title: string | null;
+  source_pagerank: number;
+  target_url: string;
+  target_title: string | null;
+  anchor: string;
+  keyword_position: number;
+  keyword_volume: number;
+  theme: string | null;
+  reason: string;
+}
+
+export interface CtrOpportunity {
+  kind: 'page' | 'query';
+  label: string;
+  impressions: number;
+  clicks: number;
+  ctr: number;
+  expected_ctr: number;
+  position: number;
+  extra_clicks: number;
+}
+
+export interface PageReport {
+  project_id: string;
+  website: string;
+  built_at: string;
+  research_snapshot_id: string | null;
+  gsc_period: string | null;
+  pages: PageRow[];
+  cannibalisation: Cannibalisation[];
+  zero_traffic: string[];
+  orphans: string[];
+  near_orphans: string[];
+  stuck: string[];
+  link_suggestions: LinkSuggestion[];
+  ctr_opportunities: CtrOpportunity[];
+  notes: string[];
+}
+
+export interface GscSummary {
+  website: string;
+  imported_at: string;
+  period: string;
+  queries: number;
+  pages: number;
+  pairs: number;
+  clicks: number;
+  impressions: number;
 }
 
 export interface Mover {
@@ -175,6 +269,20 @@ export const researchApi = {
       token,
     ),
   workbookUrl: (projectId: string) => `${path(projectId)}/workbook`,
+  pages: (projectId: string, signal?: AbortSignal) =>
+    orNull(moduleRequest<PageReport>(`${path(projectId)}/pages`, { signal }), 'No page report'),
+  pagesWorkbookUrl: (projectId: string) => `${path(projectId)}/pages/workbook`,
+  gsc: (projectId: string, signal?: AbortSignal) =>
+    orNull(moduleRequest<GscSummary>(`${path(projectId)}/gsc`, { signal }), 'No Search Console'),
+  importGsc: async (projectId: string, website: string, file: File, token: string | null) =>
+    moduleRequest<GscSummary>(
+      `${path(projectId)}/gsc/import`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ website, file_name: file.name, content_base64: await fileBase64(file) }),
+      },
+      token,
+    ),
 };
 
 export const researchKeys = {
@@ -182,7 +290,36 @@ export const researchKeys = {
   latest: (projectId: string) => ['research', projectId] as const,
   estimate: (projectId: string, keywords: number) => ['research', projectId, 'estimate', keywords] as const,
   movers: (projectId: string) => ['research', projectId, 'movers'] as const,
+  pages: (projectId: string) => ['research', projectId, 'pages'] as const,
+  gsc: (projectId: string) => ['research', projectId, 'gsc'] as const,
 };
+
+export function usePageReport(projectId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: researchKeys.pages(projectId),
+    queryFn: ({ signal }) => researchApi.pages(projectId, signal),
+    enabled,
+  });
+}
+
+export function useGsc(projectId: string) {
+  return useQuery({
+    queryKey: researchKeys.gsc(projectId),
+    queryFn: ({ signal }) => researchApi.gsc(projectId, signal),
+  });
+}
+
+export function useImportGsc(projectId: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (args: { website: string; file: File; token: string | null }) =>
+      researchApi.importGsc(projectId, args.website, args.file, args.token),
+    onSuccess: (summary: GscSummary) => {
+      client.setQueryData(researchKeys.gsc(projectId), summary);
+      void client.invalidateQueries({ queryKey: researchKeys.pages(projectId) });
+    },
+  });
+}
 
 export function useResearchStatus() {
   return useQuery({ queryKey: researchKeys.status, queryFn: ({ signal }) => researchApi.status(signal) });
@@ -216,6 +353,7 @@ function useSaved(projectId: string) {
   return (snapshot: ResearchSnapshot) => {
     client.setQueryData(researchKeys.latest(projectId), snapshot);
     void client.invalidateQueries({ queryKey: researchKeys.movers(projectId) });
+    void client.invalidateQueries({ queryKey: researchKeys.pages(projectId) });
     void client.invalidateQueries({ queryKey: researchKeys.status });
     void client.invalidateQueries({ queryKey: ['research', projectId, 'competitors'] });
   };

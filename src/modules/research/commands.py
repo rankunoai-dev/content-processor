@@ -8,6 +8,9 @@
     python -m src.modules.content_processor.cli research show --project p1
     python -m src.modules.content_processor.cli research movers --project p1
     python -m src.modules.content_processor.cli research units
+    python -m src.modules.content_processor.cli research gsc-import --project p1 \
+        --website example.com --file "Performance export.zip"
+    python -m src.modules.content_processor.cli research pages --project p1
     python -m src.modules.content_processor.cli research-standin make --project p1 --out dummy
     python -m src.modules.content_processor.cli research-standin serve --out dummy
 
@@ -103,6 +106,8 @@ def cmd_research(args: argparse.Namespace) -> int:  # noqa: PLR0911 - one branch
         sys.stderr.write(f"unknown project: {args.project}\n")
         return 2
     store = research_store(projects)
+    if args.action in ("pages", "gsc-import"):
+        return _pages_actions(args, projects)
     if args.action in ("estimate", "pull", "import"):
         from src.modules.analyst.playground import Playground
         from src.modules.content_processor.webapi.__main__ import knowledge_access
@@ -157,12 +162,72 @@ def cmd_research(args: argparse.Namespace) -> int:  # noqa: PLR0911 - one branch
     return 0
 
 
+def _pages_actions(args: argparse.Namespace, projects: Any) -> int:
+    """`research gsc-import` (a Search Console export) and `research pages` (page report)."""
+    from src.modules.content_processor.webapi.__main__ import knowledge_access
+    from src.modules.research.gsc import GscError
+    from src.modules.research.service import build_project_pages, import_gsc
+
+    if args.action == "gsc-import":
+        if not args.website or not args.file:
+            sys.stderr.write("gsc-import needs --website and --file\n")
+            return 2
+        try:
+            gsc = import_gsc(projects, args.project, args.website, Path(args.file).read_bytes())
+        except (GscError, OSError) as exc:
+            sys.stderr.write(f"{exc}\n")
+            return 2
+        _write(
+            {
+                "website": gsc.website,
+                "period": gsc.period,
+                "queries": len(gsc.queries),
+                "pages": len(gsc.pages),
+                "query_page_pairs": len(gsc.pairs),
+            }
+        )
+        return 0
+    report, files = build_project_pages(projects, knowledge_access(), args.project)
+    _write(
+        {
+            "website": report.website,
+            "pages": len(report.pages),
+            "ranking_pages": sum(1 for r in report.pages if r.keywords),
+            "cannibalisation": len(report.cannibalisation),
+            "stuck_pages": len(report.stuck),
+            "no_links_from_page_text": len(report.orphans),
+            "one_link_from_page_text": len(report.near_orphans),
+            "rank_for_nothing": len(report.zero_traffic),
+            "link_suggestions": len(report.link_suggestions),
+            "ctr_opportunities": len(report.ctr_opportunities),
+            "top_pages": [
+                {
+                    "url": r.url,
+                    "keywords": r.keywords,
+                    "volume": r.volume,
+                    "visits": r.visits,
+                    "average_position": r.average_position,
+                    "pagerank": r.pagerank,
+                    "flags": r.flags,
+                }
+                for r in report.pages[:10]
+            ],
+            "notes": report.notes,
+            "files": files,
+        }
+    )
+    return 0
+
+
 def register(subparsers: Any) -> None:
     """Add `research` to the CLI."""
     parser = subparsers.add_parser(
         "research", help="keyword rankings and demand per theme (Semrush API or export)"
     )
-    parser.add_argument("action", choices=["estimate", "pull", "import", "show", "movers", "units"])
+    parser.add_argument(
+        "action",
+        choices=["estimate", "pull", "import", "show", "movers", "units", "pages", "gsc-import"],
+    )
     parser.add_argument("--project", default=None, help="project id")
     parser.add_argument(
         "--keyword",
@@ -171,7 +236,11 @@ def register(subparsers: Any) -> None:
         help="pull: also get demand and top results of this keyword (repeatable)",
     )
     parser.add_argument("--website", default=None, help="import: the website the export is of")
-    parser.add_argument("--file", default=None, help="import: the Organic Positions CSV")
+    parser.add_argument(
+        "--file",
+        default=None,
+        help="import: the Organic Positions CSV; gsc-import: the Search Console export",
+    )
     parser.add_argument("--app-data", default=None, help="app data folder (CP_APP_DATA_ROOT)")
     parser.set_defaults(func=cmd_research)
 
@@ -245,6 +314,9 @@ def cmd_standin(args: argparse.Namespace) -> int:
             rivals = out / f"{site.domain}-organic-competitors.csv"
             rivals.write_bytes(dataset.competitors_csv(site.domain))
             files[site.domain]["competitors"] = str(rivals)
+            console = out / f"{site.domain}-search-console.zip"
+            console.write_bytes(dataset.search_console_zip(site.domain))
+            files[site.domain]["search_console"] = str(console)
     _write(
         {
             "note": dataset.note,

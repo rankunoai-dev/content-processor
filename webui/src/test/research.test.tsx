@@ -3,7 +3,7 @@ import userEvent, { PointerEventsCheckLevel } from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { GapReport } from '../api/gaps';
 import { useProjectTokens, type Project } from '../api/projects';
-import type { CompetitorBook, CompetitorSuggestion, ResearchSnapshot, ResearchStatus } from '../api/research';
+import type { CompetitorBook, CompetitorSuggestion, PageReport, ResearchSnapshot, ResearchStatus } from '../api/research';
 import { renderApp } from './utils';
 
 const project: Project = {
@@ -394,6 +394,97 @@ describe('gap settings', () => {
       expect(sent[0]?.path).toBe('/api/projects/p1/gaps/settings');
       expect(sent[0]?.body).toEqual({ min_volume: 500, competitor_top: 10 });
       expect(sent[0]?.headers['X-Project-Token']).toBe('tok-1');
+    },
+    TIMEOUT,
+  );
+});
+
+describe('page report', () => {
+  const pageReport: PageReport = {
+    project_id: 'p1',
+    website: 'example.com',
+    built_at: '2026-11-26T10:00:00Z',
+    research_snapshot_id: snapshot.snapshot_id,
+    gsc_period: 'Last 3 months',
+    pages: [
+      {
+        url: 'https://example.com/forms',
+        title: 'Forms',
+        theme_id: 'th-1',
+        theme: 'Term life',
+        keywords: 1,
+        volume: 900,
+        visits: 9,
+        average_position: 14,
+        best_position: 14,
+        top_keyword: 'beneficiary change form',
+        commercial_volume: 0,
+        inbound_body_links: 0,
+        inbound_chrome_links: 3,
+        pagerank: 12.5,
+        word_count: 180,
+        flags: ['no meta description', 'thin: 180 words'],
+        gsc_clicks: 4,
+        gsc_impressions: 2000,
+        gsc_ctr: 0.002,
+        gsc_position: 6.1,
+        indexable: true,
+      },
+    ],
+    cannibalisation: [
+      {
+        keyword: 'beneficiary change form',
+        volume: 900,
+        intent: 'navigational',
+        pages: ['https://example.com/forms', 'https://example.com/help'],
+        positions: [14],
+        source: 'semrush_rows',
+        note: '2 pages rank for it; the best is at 14',
+      },
+    ],
+    zero_traffic: ['https://example.com/old'],
+    orphans: ['https://example.com/forms'],
+    near_orphans: [],
+    stuck: ['https://example.com/forms'],
+    link_suggestions: [],
+    ctr_opportunities: [
+      { kind: 'page', label: 'https://example.com/forms', impressions: 2000, clicks: 4, ctr: 0.002, expected_ctr: 0.04, position: 6.1, extra_clicks: 76 },
+    ],
+    notes: ['Links are counted between the 3 scraped pages of example.com.'],
+  };
+
+  it(
+    'shows the page report tabs and imports a Search Console export once unlocked',
+    async () => {
+      const sent = fakeServer({
+        ...base,
+        'GET /api/research/status': () => [200, offStatus],
+        'GET /api/projects/p1/research': () => [200, snapshot],
+        'GET /api/projects/p1/research/movers': () => [404, { detail: 'Add research again later to compare.' }],
+        'GET /api/projects/p1/research/competitors': () => [200, { ...book, suggestions: [] }],
+        'GET /api/projects/p1/research/gsc': () => [404, { detail: 'No Search Console data yet.' }],
+        'GET /api/projects/p1/research/pages': () => [200, pageReport],
+        'POST /api/projects/p1/research/gsc/import': () => [
+          200,
+          { website: 'example.com', imported_at: '2026-11-26T10:00:00Z', period: 'Last 3 months', queries: 40, pages: 12, pairs: 0, clicks: 300, impressions: 9000 },
+        ],
+      });
+      const user = userEvent.setup({ pointerEventsCheck: PointerEventsCheckLevel.Never });
+      act(() => useProjectTokens.getState().remember('p1', 'tok-1', '2099-01-01T00:00:00Z'));
+      const { container } = renderApp('/projects/p1?tab=research');
+      expect(await screen.findByText('1 pages · 1 rank', {}, FIRST_PAINT)).toBeInTheDocument();
+      expect(screen.getByText('thin: 180 words')).toBeInTheDocument();
+      await user.click(screen.getByRole('tab', { name: 'Competing pages (1)' }));
+      expect(await screen.findByText('https://example.com/help')).toBeInTheDocument();
+      await user.click(screen.getByRole('tab', { name: 'Search Console CTR (1)' }));
+      expect(await screen.findByText('76')).toBeInTheDocument();
+      const inputs = container.querySelectorAll('input[type="file"]');
+      const zip = new File(['PK'], 'Performance.zip', { type: 'application/zip' });
+      fireEvent.change(inputs[1] as HTMLInputElement, { target: { files: [zip] } });
+      expect(await screen.findByText('Imported 40 queries and 12 pages from Search Console.')).toBeInTheDocument();
+      const posted = sent.find((s) => s.path.endsWith('/gsc/import'));
+      expect(posted?.headers['X-Project-Token']).toBe('tok-1');
+      expect((posted?.body as { website: string }).website).toBe('example.com');
     },
     TIMEOUT,
   );

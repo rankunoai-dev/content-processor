@@ -15,7 +15,7 @@ from __future__ import annotations
 import json
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, Field, ValidationError
 
@@ -157,6 +157,28 @@ class GapInput(StrictModel):
     )
     limit: int = Field(default=40, ge=1, le=200)
     rebuild: bool = Field(default=False, description="Build the gap analysis again first")
+
+
+class PageReportInput(StrictModel):
+    """One section of the client website's page report."""
+
+    section: Literal[
+        "summary",
+        "pages",
+        "cannibalisation",
+        "stuck",
+        "links",
+        "search_console",
+        "unlinked",
+        "zero_traffic",
+    ] = Field(
+        default="summary",
+        description="summary (counts and the top pages), pages (per-page rankings, links, "
+        "health), cannibalisation, stuck (ranking 4-20 with on-page problems), links "
+        "(internal link suggestions), search_console (CTR opportunities), unlinked (pages "
+        "with no links from page text), zero_traffic (scraped pages that rank for nothing)",
+    )
+    limit: int = Field(default=25, ge=1, le=200)
 
 
 class RankingsInput(StrictModel):
@@ -1065,6 +1087,105 @@ def _demand(play: Playground, _args: NoInput) -> dict[str, Any]:
     }
 
 
+def _page_report(play: Playground, args: PageReportInput) -> dict[str, Any]:
+    from src.modules.research.service import page_report
+
+    report = page_report(play.store, play.access, play.project_ids[0])
+    if report is None:
+        msg = (
+            "this project has no search data or Search Console import yet: import a Semrush "
+            "export or a Search Console export in the Research tab first"
+        )
+        raise ToolError(msg)
+
+    def ref(key: str, title: str, text: str, url: str | None = None) -> str:
+        return play.ledger.fact(
+            f"pages\x1f{report.built_at.isoformat()}\x1f{args.section}\x1f{key}",
+            kind="page_report",
+            website=report.website,
+            title=title,
+            url=url,
+            text=text,
+        )
+
+    def page(r: Any) -> dict[str, Any]:
+        text = (
+            f"{r.keywords} keywords, {r.volume} searches/month, best position {r.best_position}, "
+            f"{r.inbound_body_links} links from page text, flags: {', '.join(r.flags) or 'none'}"
+        )
+        return {"ref": ref(r.url, f"page: {r.url}", text, r.url), **r.model_dump()}
+
+    by_url = {r.url: r for r in report.pages}
+    out: dict[str, Any] = {
+        "website": report.website,
+        "built_at": report.built_at,
+        "research_snapshot": report.research_snapshot_id,
+        "search_console_period": report.gsc_period,
+        "notes": report.notes,
+    }
+    n = args.limit
+    if args.section == "summary":
+        out["counts"] = {
+            "pages": len(report.pages),
+            "ranking_pages": sum(1 for r in report.pages if r.keywords),
+            "cannibalised_keywords": len(report.cannibalisation),
+            "stuck_pages": len(report.stuck),
+            "no_links_from_page_text": len(report.orphans),
+            "one_link_from_page_text": len(report.near_orphans),
+            "rank_for_nothing": len(report.zero_traffic),
+            "link_suggestions": len(report.link_suggestions),
+            "ctr_opportunities": len(report.ctr_opportunities),
+        }
+        out["top_pages"] = [page(r) for r in report.pages[: min(n, 10)]]
+    elif args.section == "pages":
+        out["pages"] = [page(r) for r in report.pages[:n]]
+    elif args.section == "cannibalisation":
+        out["cannibalisation"] = [
+            {
+                "ref": ref(c.keyword, f"cannibalisation: {c.keyword}", c.note),
+                **c.model_dump(),
+            }
+            for c in report.cannibalisation[:n]
+        ]
+    elif args.section == "stuck":
+        out["stuck"] = [page(by_url[u]) for u in report.stuck[:n] if u in by_url]
+    elif args.section == "links":
+        out["link_suggestions"] = [
+            {
+                "ref": ref(
+                    f"{s.source_url}>{s.target_url}",
+                    f"link: {s.anchor}",
+                    s.reason,
+                    s.target_url,
+                ),
+                **s.model_dump(),
+            }
+            for s in report.link_suggestions[:n]
+        ]
+    elif args.section == "search_console":
+        out["ctr_opportunities"] = [
+            {
+                "ref": ref(
+                    f"{o.kind}:{o.label}",
+                    f"CTR: {o.label}",
+                    f"CTR {o.ctr} vs usual {o.expected_ctr} at {o.position}, "
+                    f"{o.impressions} impressions",
+                    o.label if o.kind == "page" else None,
+                ),
+                **o.model_dump(),
+            }
+            for o in report.ctr_opportunities[:n]
+        ]
+    elif args.section == "unlinked":
+        out["no_links_from_page_text"] = [
+            page(by_url[u]) if u in by_url else {"url": u} for u in report.orphans[:n]
+        ]
+        out["one_link_from_page_text"] = report.near_orphans[:n]
+    else:
+        out["rank_for_nothing"] = report.zero_traffic[:n]
+    return out
+
+
 def _competitors(play: Playground, _args: NoInput) -> dict[str, Any]:
     from src.modules.research.competitors import SOURCE_LABELS
     from src.modules.research.service import competitor_book
@@ -1287,6 +1408,18 @@ TOOLS: dict[str, ToolSpec] = {
             "website's keywords in the top 10 and estimated visits.",
             NoInput,
             _demand,
+        ),
+        ToolSpec(
+            "get_page_report",
+            "research",
+            "The client website's page report: per page the keywords it ranks for, monthly "
+            "searches, estimated visits, average position, links from other pages' text, "
+            "internal PageRank, word count and on-page problems; plus cannibalisation (pages "
+            "competing for one keyword), pages stuck at 4-20 with on-page problems, internal "
+            "link suggestions, Search Console CTR opportunities, pages with no links from page "
+            "text and pages that rank for nothing. Ask one section at a time.",
+            PageReportInput,
+            _page_report,
         ),
         ToolSpec(
             "get_competitor_suggestions",
