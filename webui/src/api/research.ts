@@ -116,6 +116,65 @@ export interface CtrOpportunity {
   extra_clicks: number;
 }
 
+export interface SearchLine {
+  query: string;
+  page: string;
+  weight: number;
+  clicks: number | null;
+  position: number | null;
+  funnel: 'tofu' | 'mofu' | 'bofu';
+  topic: string | null;
+  owner: string | null;
+  status: 'aligned' | 'also_aligned' | 'misaligned' | 'no_page' | 'unplaced';
+  why: string;
+}
+
+export interface PageAlignment {
+  url: string;
+  page_class: 'business' | 'article' | 'utility';
+  weight: number;
+  aligned: number;
+  share: number;
+  status: 'strong' | 'within_tolerance' | 'needs_work' | 'too_little_data';
+  misaligned_to: Record<string, number>;
+}
+
+export interface ConsolidationPair {
+  group: number;
+  page: string;
+  owner: string;
+  topic: string | null;
+  pattern: string;
+  fix: string;
+  weight: number;
+  priority: 'High' | 'Medium' | 'Low';
+  searches: SearchLine[];
+  shared_paragraphs: number;
+}
+
+export interface PlanLinkChange {
+  kind: 'repoint' | 'fix_anchor' | 'add_link';
+  group: number | null;
+  source: string;
+  destination: string;
+  new_destination: string | null;
+  anchor: string;
+  suggested_anchor: string;
+  reason: string;
+}
+
+export interface ConsolidationPlan {
+  source: 'search_console' | 'search_data' | 'none';
+  scored_pages: number;
+  tolerance: number;
+  alignment: PageAlignment[];
+  pairs: ConsolidationPair[];
+  links: PlanLinkChange[];
+  technical: { kind: string; group: number | null; url: string; target: string | null; reason: string }[];
+  template_paragraphs: number;
+  set_aside: Record<string, number>;
+}
+
 export interface PageReport {
   project_id: string;
   website: string;
@@ -130,6 +189,8 @@ export interface PageReport {
   stuck: string[];
   link_suggestions: LinkSuggestion[];
   ctr_opportunities: CtrOpportunity[];
+  /** The keyword cannibalisation plan (absent without search data or Search Console). */
+  plan?: ConsolidationPlan | null;
   notes: string[];
 }
 

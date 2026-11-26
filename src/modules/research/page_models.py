@@ -13,6 +13,12 @@ from src.modules.research.gsc import CtrOpportunity
 __all__ = [
     "PAGE_REPORT_VERSION",
     "Cannibalisation",
+    "ConsolidationPair",
+    "ConsolidationPlan",
+    "LinkChange",
+    "PageAlignment",
+    "SearchLine",
+    "TechnicalChange",
     "LinkSuggestion",
     "PageReport",
     "PageRow",
@@ -78,6 +84,107 @@ class LinkSuggestion(StrictModel):
     reason: str
 
 
+Funnel = Literal["tofu", "mofu", "bofu"]
+Pattern = Literal[
+    "hand_off_to_child",
+    "point_up_to_parent",
+    "separate_by_intent",
+    "answer_then_link",
+    "differentiate_siblings",
+    "localise",
+    "merge_and_redirect",
+    "remove_from_index",
+]
+SearchStatus = Literal["aligned", "also_aligned", "misaligned", "no_page", "unplaced"]
+
+
+class SearchLine(StrictModel):
+    """One search landing on one page of the client's website."""
+
+    query: str
+    page: str
+    weight: float = Field(description="Impressions (Search Console) or estimated visits")
+    clicks: int | None = None
+    position: float | None = None
+    funnel: Funnel
+    topic: str | None = Field(default=None, description="The theme the search belongs to")
+    owner: str | None = Field(default=None, description="The page that should rank for it")
+    status: SearchStatus
+    why: str = ""
+
+
+class PageAlignment(StrictModel):
+    """How much of a page's search weight comes from searches that belong on it."""
+
+    url: str
+    page_class: Literal["business", "article", "utility"]
+    weight: float
+    aligned: float
+    share: float = Field(ge=0.0, le=1.0)
+    status: Literal["strong", "within_tolerance", "needs_work", "too_little_data"]
+    misaligned_to: dict[str, float] = Field(
+        default_factory=dict, description="Owner page -> weight of its searches landing here"
+    )
+
+
+class ConsolidationPair(StrictModel):
+    """A page taking searches that belong to another page, and how to resolve it."""
+
+    group: int = Field(ge=1)
+    page: str = Field(description="The page that ranks but should not")
+    owner: str = Field(description="The page that should rank")
+    topic: str | None = None
+    pattern: Pattern
+    fix: str
+    weight: float
+    priority: Literal["High", "Medium", "Low"]
+    searches: list[SearchLine] = Field(default_factory=list)
+    shared_paragraphs: int = 0
+
+
+class LinkChange(StrictModel):
+    """One internal link change, from links in page text only."""
+
+    kind: Literal["repoint", "fix_anchor", "add_link"]
+    group: int | None = None
+    source: str
+    destination: str = Field(description="Where the link points now (or should, for add_link)")
+    new_destination: str | None = None
+    anchor: str = ""
+    suggested_anchor: str = ""
+    reason: str
+
+
+class TechnicalChange(StrictModel):
+    """Redirects, noindex and sitemap changes the plan needs."""
+
+    kind: Literal["redirect_301", "noindex_follow", "remove_from_sitemap"]
+    group: int | None = None
+    url: str
+    target: str | None = None
+    reason: str
+
+
+class ConsolidationPlan(StrictModel):
+    """The keyword-cannibalisation plan of the client's website (PLAYBOOK v1.0 rules)."""
+
+    source: Literal["search_console", "search_data", "none"]
+    scored_pages: int = 0
+    tolerance: float = 0.10
+    alignment: list[PageAlignment] = Field(default_factory=list)
+    pairs: list[ConsolidationPair] = Field(default_factory=list)
+    links: list[LinkChange] = Field(default_factory=list)
+    technical: list[TechnicalChange] = Field(default_factory=list)
+    searches: list[SearchLine] = Field(default_factory=list)
+    template_paragraphs: int = Field(
+        default=0, ge=0, description="Text found on 5+ pages: fix once in the template"
+    )
+    set_aside: dict[str, float] = Field(
+        default_factory=dict,
+        description="Weight left out: branded, likely automated, beyond position 20",
+    )
+
+
 class PageReport(StrictModel):
     """Everything per page for one website, from the latest research and its scrape."""
 
@@ -101,4 +208,5 @@ class PageReport(StrictModel):
     )
     link_suggestions: list[LinkSuggestion] = Field(default_factory=list)
     ctr_opportunities: list[CtrOpportunity] = Field(default_factory=list)
+    plan: ConsolidationPlan | None = None
     notes: list[str] = Field(default_factory=list)

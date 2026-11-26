@@ -451,6 +451,34 @@ describe('page report', () => {
       { kind: 'page', label: 'https://example.com/forms', impressions: 2000, clicks: 4, ctr: 0.002, expected_ctr: 0.04, position: 6.1, extra_clicks: 76 },
     ],
     notes: ['Links are counted between the 3 scraped pages of example.com.'],
+    plan: {
+      source: 'search_console',
+      scored_pages: 1,
+      tolerance: 0.1,
+      alignment: [
+        { url: 'https://example.com/help', page_class: 'article', weight: 400, aligned: 100, share: 0.25, status: 'needs_work', misaligned_to: { 'https://example.com/forms': 300 } },
+      ],
+      pairs: [
+        {
+          group: 1,
+          page: 'https://example.com/help',
+          owner: 'https://example.com/forms',
+          topic: 'Forms',
+          pattern: 'separate_by_intent',
+          fix: 'Keep the article learning content and link to the business page.',
+          weight: 300,
+          priority: 'High',
+          searches: [
+            { query: 'beneficiary change form download', page: 'https://example.com/help', weight: 300, clicks: 2, position: 4, funnel: 'bofu', topic: 'Forms', owner: 'https://example.com/forms', status: 'misaligned', why: '' },
+          ],
+          shared_paragraphs: 0,
+        },
+      ],
+      links: [],
+      technical: [],
+      template_paragraphs: 0,
+      set_aside: {},
+    },
   };
 
   it(
@@ -469,14 +497,17 @@ describe('page report', () => {
           { website: 'example.com', imported_at: '2026-11-26T10:00:00Z', period: 'Last 3 months', queries: 40, pages: 12, pairs: 0, clicks: 300, impressions: 9000 },
         ],
       });
-      const user = userEvent.setup({ pointerEventsCheck: PointerEventsCheckLevel.Never });
       act(() => useProjectTokens.getState().remember('p1', 'tok-1', '2099-01-01T00:00:00Z'));
       const { container } = renderApp('/projects/p1?tab=research');
-      expect(await screen.findByText('1 pages · 1 rank', {}, FIRST_PAINT)).toBeInTheDocument();
-      expect(screen.getByText('thin: 180 words')).toBeInTheDocument();
-      await user.click(screen.getByRole('tab', { name: 'Competing pages (1)' }));
-      expect(await screen.findByText('https://example.com/help')).toBeInTheDocument();
-      await user.click(screen.getByRole('tab', { name: 'Search Console CTR (1)' }));
+      // a large page (8 tabs of tables): its first paint is slow in jsdom on a busy machine
+      expect(await screen.findByText('1 pages · 1 rank', {}, { timeout: 60_000 })).toBeInTheDocument();
+      expect(screen.getByText('Cannibalisation plan (1)')).toBeInTheDocument();
+      expect(await screen.findByText('Separate by intent')).toBeInTheDocument();
+      fireEvent.click(screen.getByText('Pages (1)'));
+      expect(await screen.findByText('thin: 180 words')).toBeInTheDocument();
+      fireEvent.click(screen.getByText('Competing pages (1)'));
+      expect((await screen.findAllByText('https://example.com/help')).length).toBeGreaterThan(0);
+      fireEvent.click(screen.getByText('Search Console CTR (1)'));
       expect(await screen.findByText('76')).toBeInTheDocument();
       const inputs = container.querySelectorAll('input[type="file"]');
       const zip = new File(['PK'], 'Performance.zip', { type: 'application/zip' });

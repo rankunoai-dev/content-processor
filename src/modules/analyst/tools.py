@@ -171,12 +171,15 @@ class PageReportInput(StrictModel):
         "search_console",
         "unlinked",
         "zero_traffic",
+        "consolidation",
     ] = Field(
         default="summary",
         description="summary (counts and the top pages), pages (per-page rankings, links, "
         "health), cannibalisation, stuck (ranking 4-20 with on-page problems), links "
         "(internal link suggestions), search_console (CTR opportunities), unlinked (pages "
-        "with no links from page text), zero_traffic (scraped pages that rank for nothing)",
+        "with no links from page text), zero_traffic (scraped pages that rank for nothing), "
+        "consolidation (the cannibalisation plan: page alignment, competing pairs with their "
+        "consolidation pattern and fix, link and technical changes)",
     )
     limit: int = Field(default=25, ge=1, le=200)
 
@@ -1181,6 +1184,34 @@ def _page_report(play: Playground, args: PageReportInput) -> dict[str, Any]:
             page(by_url[u]) if u in by_url else {"url": u} for u in report.orphans[:n]
         ]
         out["one_link_from_page_text"] = report.near_orphans[:n]
+    elif args.section == "consolidation":
+        plan = report.plan
+        if plan is None:
+            out["consolidation"] = None
+            out["notes"] = [*report.notes, "no search data or Search Console pairs to plan from"]
+            return out
+        out["consolidation"] = {
+            "source": plan.source,
+            "set_aside": plan.set_aside,
+            "template_paragraphs": plan.template_paragraphs,
+            "pages_needing_work": [
+                a.model_dump() for a in plan.alignment if a.status == "needs_work"
+            ][:n],
+            "pairs": [
+                {
+                    "ref": ref(
+                        f"pair:{p.group}",
+                        f"pair {p.group}: {p.pattern}",
+                        f"{p.page} takes searches of {p.owner}: {p.fix}",
+                        p.page,
+                    ),
+                    **p.model_dump(),
+                }
+                for p in plan.pairs[:n]
+            ],
+            "links": [x.model_dump() for x in plan.links[: n * 3]],
+            "technical": [x.model_dump() for x in plan.technical],
+        }
     else:
         out["rank_for_nothing"] = report.zero_traffic[:n]
     return out

@@ -53,6 +53,56 @@ No live Semrush call has been made yet. The whole module has run end to end agai
   (the best-placed page is the keyword's page, the others `other_urls`) instead of the
   second being dropped.
 
+## Keyword cannibalisation plan ($0, `research/cannibal.py`)
+
+The rules of the keyword-cannibalisation playbook (v1.0, first proven on a 200-URL B2B
+site), applied to data the app already holds instead of Screaming Frog exports and a
+hand-written topic map. Built with the page report (`PageReport.plan`).
+
+| Playbook input | Here |
+|---|---|
+| Topic map and owner pages | The theme map: a search's topic is the theme sharing most of its words; the owner is the client's pillar page of that theme |
+| Page types | The page classifier and the theme map (business, article, utility; `/author/`, `/tag/`, sitemap, search and paged listings are utility) |
+| Search Console page x query | `Queries by page` pairs of the Search Console import; when they cover under half the queries, the Semrush rows (estimated visits as weight, `other_urls` as second pages) |
+| Screaming Frog inlinks | The scrape inventory's links in page text (`ui_region` not menu, header, footer, breadcrumb, cookie banner or menu panel), with anchors and image alt |
+| Stored HTML paragraphs | The knowledge chunks of the run (`.chunks.jsonl`), lines of 8+ words |
+
+- **Cleaning:** branded searches (the project's domains and names), searches beyond
+  position 20, and likely automated searches (0 clicks, 200+ impressions, 4+ pages of the
+  site) are set aside and counted.
+- **Funnel:** a question first word or learning wording is TOFU; a model number or buying
+  wording BOFU; comparison or a short head term MOFU.
+- **Status per search:** aligned (owner), also aligned (TOFU or MOFU on an article of the
+  same theme; a page of the theme deeper than the owner), misaligned, no page yet (theme
+  without a client page), unplaced (no theme). A model number's owner is the page whose
+  address carries it.
+- **Page alignment:** aligned weight / top-20 weight; strong 95%+, within tolerance 90-95%,
+  needs work under 90%; scored from 50 impressions (or visits).
+- **Competing pairs** (misaligned searches on needs-work pages, per page and owner), each
+  with one pattern: remove from index, merge and redirect (articles sharing 4+ and half
+  their paragraphs), localise, point up to parent, hand off to child (owner under the page,
+  or a model search on its series page), separate by intent, answer then link,
+  differentiate siblings. Priority High from 25% of the page's weight or 500, Medium from
+  10%.
+- **Links:** repoint (anchor holds the words of one of the pair's searches but points to the
+  competing page), fix anchor (generic text or image without alt to a page of a pair,
+  unless the page has a descriptive link there), add link (competing page to owner, only
+  when its text holds a search's words; 3 per page at most).
+- **Template text:** paragraphs on 5+ pages are left out of shared-content and mention
+  checks, and counted.
+- **Outputs:** gap findings (one `cannibalisation` finding per pair with its pattern and
+  changes), the page report workbook (Plan summary, Consolidation, Link changes, Technical,
+  Page alignment, Search detail before the page sheets), `get_page_report` section
+  `consolidation`, the Research tab (Cannibalisation plan and Page alignment tabs), and
+  the action card `keyword-cannibalisation`, where Claude checks owners and writes the
+  copy under the playbook's rules (quote real text, final copy, titles 60 characters or
+  fewer, descriptions 145-155 on two lines, change tags only when they pull another page's
+  searches, 3 links per page, template text once, no technical hygiene).
+- **Not taken from the playbook:** the weekly and last-year Search Console windows, the rank
+  tracker file (its keywords look like cannibalisation without it), the near-duplicate
+  export (paragraph overlap replaces it), and the written-copy JSON files (the action card
+  writes copy instead).
+
 ## Trying it without Semrush: the stand-in (dummy data, $0)
 
 `src/modules/research/standin.py` invents search data for a project's websites in Semrush's

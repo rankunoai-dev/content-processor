@@ -443,8 +443,142 @@ def page_tables(report: PageReport) -> list[Table]:
     ]
 
 
+_PATTERN_NAMES: dict[str, str] = {
+    "hand_off_to_child": "Hand off to child page",
+    "point_up_to_parent": "Point up to parent",
+    "separate_by_intent": "Separate by intent",
+    "answer_then_link": "Answer, then link",
+    "differentiate_siblings": "Differentiate siblings",
+    "localise": "Localise",
+    "merge_and_redirect": "Merge and redirect",
+    "remove_from_index": "Remove from index",
+}
+
+
+def plan_tables(report: PageReport) -> list[Table]:
+    """The cannibalisation plan's sheets (empty list when there is no plan)."""
+    plan = report.plan
+    if plan is None:
+        return []
+    pairs: list[dict[str, Cell]] = [
+        {
+            "Group": p.group,
+            "Priority": p.priority,
+            "Pattern": _PATTERN_NAMES[p.pattern],
+            "Page that ranks": p.page,
+            "Page that should rank": p.owner,
+            "Topic": p.topic or "",
+            "Weight": p.weight,
+            "Searches": "; ".join(s.query for s in p.searches),
+            "Shared paragraphs": p.shared_paragraphs,
+            "Fix": p.fix,
+        }
+        for p in plan.pairs
+    ]
+    alignment: list[dict[str, Cell]] = [
+        {
+            "Page": a.url,
+            "Page type": a.page_class,
+            "Weight": a.weight,
+            "Aligned": a.aligned,
+            "Aligned share": a.share,
+            "Status": a.status.replace("_", " "),
+            "Searches that belong elsewhere": "; ".join(
+                f"{u} ({w:,.0f})" for u, w in sorted(a.misaligned_to.items(), key=lambda kv: -kv[1])
+            ),
+        }
+        for a in plan.alignment
+    ]
+    links: list[dict[str, Cell]] = [
+        {
+            "Group": x.group,
+            "Change": x.kind.replace("_", " "),
+            "On page": x.source,
+            "Link now points to": x.destination if x.kind != "add_link" else "",
+            "Should point to": x.new_destination or (x.destination if x.kind == "add_link" else ""),
+            "Anchor now": x.anchor,
+            "Suggested anchor": x.suggested_anchor,
+            "Why": x.reason,
+        }
+        for x in plan.links
+    ]
+    technical: list[dict[str, Cell]] = [
+        {
+            "Group": t.group,
+            "Change": t.kind.replace("_", " "),
+            "URL": t.url,
+            "Target": t.target or "",
+            "Why": t.reason,
+        }
+        for t in plan.technical
+    ]
+    searches: list[dict[str, Cell]] = [
+        {
+            "Search": s.query,
+            "Lands on": s.page,
+            "Weight": s.weight,
+            "Clicks": s.clicks,
+            "Position": s.position,
+            "Funnel": s.funnel.upper(),
+            "Topic": s.topic or "",
+            "Should land on": s.owner or "",
+            "Status": s.status.replace("_", " "),
+            "Why": s.why,
+        }
+        for s in plan.searches
+    ]
+    aside = "; ".join(f"{k}: {v:,.0f}" for k, v in plan.set_aside.items()) or "nothing"
+    summary: list[dict[str, Cell]] = [
+        {"Item": "Searches from", "Value": plan.source.replace("_", " ")},
+        {"Item": "Set aside", "Value": aside},
+        {"Item": "Pages scored (50+ weight in the top 20)", "Value": plan.scored_pages},
+        {
+            "Item": "Target",
+            "Value": f"at least {1 - plan.tolerance:.0%} of a page's weight from searches "
+            "that belong on it",
+        },
+        {"Item": "Competing pairs", "Value": len(plan.pairs)},
+        {"Item": "Link changes", "Value": len(plan.links)},
+        {"Item": "Technical changes", "Value": len(plan.technical)},
+        {"Item": "Template paragraphs (on 5+ pages, fix once)", "Value": plan.template_paragraphs},
+    ]
+    return [
+        Table("Plan summary", ["Item", "Value"], summary, widths={"Item": 45, "Value": 80}),
+        Table(
+            "Consolidation",
+            list(pairs[0]) if pairs else ["Group"],
+            pairs,
+            widths={"Page that ranks": 50, "Page that should rank": 50, "Fix": 70},
+        ),
+        Table(
+            "Link changes",
+            list(links[0]) if links else ["Group"],
+            links,
+            widths={"On page": 50, "Why": 60},
+        ),
+        Table(
+            "Technical",
+            ["Group", "Change", "URL", "Target", "Why"],
+            technical,
+            widths={"URL": 60, "Target": 60},
+        ),
+        Table(
+            "Page alignment",
+            list(alignment[0]) if alignment else ["Page"],
+            alignment,
+            widths={"Page": 60},
+        ),
+        Table(
+            "Search detail",
+            list(searches[0]) if searches else ["Search"],
+            searches,
+            widths={"Lands on": 60, "Should land on": 60},
+        ),
+    ]
+
+
 def write_page_workbook(report: PageReport, path: Path) -> Path:
     """The page report's workbook."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    write_xlsx(path, page_tables(report))
+    write_xlsx(path, [*plan_tables(report), *page_tables(report)])
     return path

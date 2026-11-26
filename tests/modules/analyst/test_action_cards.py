@@ -64,7 +64,7 @@ def call(play: Playground, name: str, args: dict[str, Any] | None = None) -> dic
 
 
 def test_every_card_is_consistent() -> None:
-    assert len({c.id for c in CARDS}) == len(CARDS) == 15
+    assert len({c.id for c in CARDS}) == len(CARDS) == 16
     for c in CARDS:
         names = {p.name for p in c.parameters} | {"item"}
         tools = set(c.required_tools) | set(c.optional_tools)
@@ -77,7 +77,7 @@ def test_every_card_is_consistent() -> None:
         assert c.output_format.startswith("# ") and "Limits of this analysis" in c.output_format
         render(c.prompt_template, dict.fromkeys(names, "x"))
     research = [c.id for c in CARDS if c.module == "research"]
-    assert len(research) == 3
+    assert len(research) == 4
     assert all(TOOLS[t].built for c in CARDS for t in c.required_tools)
     with pytest.raises(KeyError, match="known:"):
         card("nope")
@@ -598,7 +598,7 @@ WRITE = {"X-Requested-With": "content-processor"}
 def test_api_lists_preflights_and_runs_cards(api: tuple[TestClient, TokenSigner, World]) -> None:
     client, signer, world = api
     cards = client.get("/api/analyst/cards").json()
-    assert len(cards) == 15 and all(c["available"] for c in cards)
+    assert len(cards) == 16 and all(c["available"] for c in cards)
     assert client.get("/api/analyst/cards/eeat-trust-audit").json()["version"] == 1
     assert client.get("/api/analyst/cards/nope").status_code == 404
     base = f"/api/projects/{world.project_id}/analyst"
@@ -662,7 +662,7 @@ def test_cli_analyze(
     monkeypatch.setattr(analyst_commands, "_runner", lambda args: world.runner(enabled=False))
     base = ["--app-data", str(world.root)]
     assert cli.main(["analyze", "cards", "--module", "research"]) == 0
-    assert len(json.loads(capsys.readouterr().out)) == 3
+    assert len(json.loads(capsys.readouterr().out)) == 4
     assert cli.main(["analyze", "show", "content-brief"]) == 0
     assert json.loads(capsys.readouterr().out)["id"] == "content-brief"
     assert cli.main(["analyze", "show", "nope"]) == 2

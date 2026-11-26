@@ -26,6 +26,7 @@ from typing import Final
 from src.modules.content_processor.knowledge.inventory_models import PageInventory
 from src.modules.content_processor.knowledge.models import PageStamp
 from src.modules.research.build import estimated_visits
+from src.modules.research.cannibal import build_plan
 from src.modules.research.gsc import GscSnapshot, ctr_opportunities
 from src.modules.research.links import LinkGraph, build_graph, page_key
 from src.modules.research.models import KeywordRow, ResearchSnapshot, WebsiteResearch
@@ -192,6 +193,8 @@ def build_page_report(
     gsc: GscSnapshot | None = None,
     now: datetime,
     run_id: str | None = None,
+    paragraphs: Mapping[str, Sequence[str]] | None = None,
+    brands: Sequence[str] = (),
 ) -> PageReport:
     """The report for one website (the client's); every input may be missing."""
     report = PageReport(
@@ -290,6 +293,17 @@ def build_page_report(
         and any(f != "not in the scrape" for f in r.flags)
     ]
     report.link_suggestions = _suggestions(rows, graph, best_close)
+    if site is not None or gsc is not None:
+        report.plan = build_plan(
+            website,
+            site=site,
+            gsc=gsc,
+            theme_map=theme_map,
+            inventory=inventory,
+            paragraphs=paragraphs or {},
+            brands=brands,
+            top_keyword={k: r.top_keyword for k, r in rows.items() if r.top_keyword},
+        )
 
     if inventory:
         report.notes.append(
