@@ -13,7 +13,9 @@ import {
   useImportGsc,
   usePageReport,
   type Cannibalisation,
+  type ConsolidationPair,
   type CtrOpportunity,
+  type PageAlignment,
   type LinkSuggestion,
   type PageReport,
   type PageRow,
@@ -153,9 +155,95 @@ function ReportTabs({ report }: { report: PageReport }) {
   const stuck = report.stuck.map((u) => byUrl.get(u)).filter((p): p is PageRow => p !== undefined);
   const ranking = report.pages.filter((p) => p.keywords > 0);
   const tab = (label: string, n: number) => `${label} (${n})`;
+  const plan = report.plan ?? null;
+  const P = RESEARCH.planColumns;
   return (
     <Tabs
       items={[
+        ...(plan && plan.source !== 'none'
+          ? [
+              {
+                key: 'plan',
+                label: tab(RESEARCH.planTab, plan.pairs.length),
+                children: (
+                  <Space direction="vertical" style={{ width: '100%' }}>
+                    <Typography.Text type="secondary">
+                      {RESEARCH.planHelp(
+                        RESEARCH.planSource[plan.source] ?? plan.source,
+                        plan.scored_pages,
+                        plan.alignment.filter((a) => a.status === 'needs_work').length,
+                      )}
+                    </Typography.Text>
+                    <Table<ConsolidationPair>
+                      rowKey="group"
+                      size="small"
+                      pagination={{ pageSize: 10, hideOnSinglePage: true }}
+                      dataSource={plan.pairs}
+                      expandable={{
+                        expandedRowRender: (p) => (
+                          <Space direction="vertical" size={2}>
+                            {p.searches.map((s) => (
+                              <Typography.Text key={`${s.query}${s.page}`}>
+                                {s.query} <Tag>{s.funnel.toUpperCase()}</Tag>
+                                <Typography.Text type="secondary">{Math.round(s.weight).toLocaleString()}</Typography.Text>
+                              </Typography.Text>
+                            ))}
+                            {plan.links
+                              .filter((x) => x.group === p.group)
+                              .map((x) => (
+                                <Typography.Text key={`${x.kind}${x.source}${x.destination}`} type="secondary">
+                                  {`${x.kind.replace('_', ' ')}: ${x.source} → ${x.new_destination ?? x.destination}`}
+                                  {x.suggested_anchor ? ` (“${x.suggested_anchor}”)` : ''}
+                                </Typography.Text>
+                              ))}
+                          </Space>
+                        ),
+                      }}
+                      columns={[
+                        { title: P.group, dataIndex: 'group', width: 50 },
+                        {
+                          title: P.pattern,
+                          render: (_v, p) => (
+                            <Space direction="vertical" size={0}>
+                              <Tag color={p.priority === 'High' ? 'red' : p.priority === 'Medium' ? 'orange' : 'blue'}>
+                                {RESEARCH.pattern[p.pattern] ?? p.pattern}
+                              </Tag>
+                            </Space>
+                          ),
+                        },
+                        { title: P.ranks, render: (_v, p) => <Url url={p.page} /> },
+                        { title: P.owner, render: (_v, p) => <Url url={p.owner} /> },
+                        { title: P.fix, dataIndex: 'fix' },
+                      ]}
+                    />
+                  </Space>
+                ),
+              },
+              {
+                key: 'alignment',
+                label: tab(RESEARCH.alignmentTab, plan.alignment.length),
+                children: (
+                  <Table<PageAlignment>
+                    rowKey="url"
+                    size="small"
+                    pagination={{ pageSize: 15, hideOnSinglePage: true }}
+                    dataSource={plan.alignment}
+                    columns={[
+                      { title: C.page, render: (_v, a) => <Url url={a.url} /> },
+                      { title: P.share, render: (_v, a) => pct(a.share), sorter: (x, y) => x.share - y.share },
+                      {
+                        title: P.status,
+                        render: (_v, a) => (
+                          <Tag color={RESEARCH.alignmentColor[a.status]}>{RESEARCH.alignmentStatus[a.status] ?? a.status}</Tag>
+                        ),
+                      },
+                      { title: C.volume, render: (_v, a) => Math.round(a.weight).toLocaleString() },
+                    ]}
+                  />
+                ),
+              },
+            ]
+          : []),
         {
           key: 'pages',
           label: tab(RESEARCH.pagesTabs.pages, ranking.length),

@@ -33,7 +33,7 @@ import math
 import re
 import threading
 import zipfile
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -427,8 +427,8 @@ class Dataset:
         """Search Console's Performance export (zip) for a website: real-looking clicks.
 
         Holds `Queries.csv`, `Pages.csv` and `Filters.csv` as Search Console writes them,
-        plus `Queries by page.csv` (query and page together, as an API or Looker Studio
-        export gives) for keywords two pages share. Impressions follow volume and
+        plus `Queries by page.csv` (every query with each page it showed, as an API or
+        Looker Studio export gives). Impressions follow volume and
         position; each CTR is the usual one for its position times 0.3-1.4, so some
         pages and queries fall well below it.
         """
@@ -473,11 +473,8 @@ class Dataset:
             [u, str(int(c)), str(int(i)), f"{100 * c / i:.2f}%", f"{w / i:.1f}"]
             for u, (c, i, w) in sorted(pages.items(), key=lambda kv: -kv[1][0])
         ]
-        shared = {q for q, n in _count(p[0] for p in pairs).items() if n > 1}
-        pair_rows = [
-            [q, u, c, i, f"{100 * int(c) / int(i):.2f}%", pos]
-            for q, u, c, i, pos in pairs
-            if q in shared
+        pair_rows = [  # every query on every page, as an API or Looker Studio export gives
+            [q, u, c, i, f"{100 * int(c) / int(i):.2f}%", pos] for q, u, c, i, pos in pairs
         ]
         buffer = io.BytesIO()
         with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
@@ -520,13 +517,6 @@ class Dataset:
             k["also"] = {d: [tuple(x) for x in v] for d, v in k.get("also", {}).items()}
             keywords.append(DummyKeyword(**k))
         return cls(websites=websites, keywords=keywords, **data)
-
-
-def _count(items: Iterable[str]) -> dict[str, int]:
-    out: dict[str, int] = {}
-    for item in items:
-        out[item] = out.get(item, 0) + 1
-    return out
 
 
 def _domain(text: str) -> str:
@@ -612,7 +602,8 @@ def make_dataset(
             if draw.unit() > 0.35 + 0.6 * site.strength:
                 continue  # does not rank in the top 100
             best = 1 + (1 - site.strength) * 25
-            k.positions[site.domain] = max(1, min(100, round(draw.between(best, best * 3.2))))
+            low, high = (best * 0.3, best * 2.0) if site is client else (best, best * 3.2)
+            k.positions[site.domain] = max(1, min(100, round(draw.between(low, high))))
             if site is client and real_pages:  # the client ranks with a page it really has
                 k.urls[site.domain] = real_pages[draw.integer(0, len(real_pages) - 1)]
             else:

@@ -33,6 +33,7 @@ from src.modules.research.competitors import (
 )
 from src.modules.research.gsc import GscSnapshot
 from src.modules.research.importer import read_positions_csv
+from src.modules.research.intent import brand_terms
 from src.modules.research.models import ResearchSnapshot, WebsiteResearch
 from src.modules.research.page_models import PageReport
 from src.modules.research.semrush import (
@@ -426,6 +427,22 @@ def import_gsc(projects: ProjectStore, project_id: str, website: str, data: byte
     return snapshot
 
 
+def _paragraphs(path: Path) -> dict[str, list[str]]:
+    """Body paragraphs per page from a run's knowledge chunks (one line, one paragraph)."""
+    import json
+
+    out: dict[str, list[str]] = {}
+    with path.open(encoding="utf-8") as handle:
+        for line in handle:
+            if not line.strip():
+                continue
+            chunk = json.loads(line)
+            url, text = chunk.get("url"), chunk.get("text") or ""
+            if url:
+                out.setdefault(url, []).extend(t.strip() for t in text.splitlines() if t.strip())
+    return out
+
+
 def build_project_pages(
     projects: ProjectStore, access: KnowledgeAccess, project_id: str
 ) -> tuple[PageReport, dict[str, str]]:
@@ -447,6 +464,7 @@ def build_project_pages(
     )
     data = play.site_data(client) if client else None
     inventory: list[PageInventory] = []
+    paragraphs: dict[str, list[str]] = {}
     stamps = {}
     if data is not None:
         path = data.file(".inventory.jsonl")
@@ -454,6 +472,9 @@ def build_project_pages(
             with path.open(encoding="utf-8") as handle:
                 inventory = [PageInventory.model_validate_json(x) for x in handle if x.strip()]
         stamps = play.stamps(data)
+        chunks = data.file(".chunks.jsonl")
+        if chunks is not None:
+            paragraphs = _paragraphs(chunks)
     gsc = store.latest_gsc(project_id)
     report = build_page_report(
         project_id,
@@ -466,6 +487,8 @@ def build_project_pages(
         gsc=gsc if gsc is not None and gsc.website == website else None,
         now=datetime.now(UTC),
         run_id=data.run_name if data else None,
+        paragraphs=paragraphs,
+        brands=brand_terms([w.key for w in play.websites()] + [w.name for w in play.websites()]),
     )
     path = store.save_pages(report)
     workbook = write_page_workbook(report, store.pages_workbook(project_id))

@@ -31,7 +31,7 @@ from src.modules.gaps.models import EvidenceItem, Finding, FindingKind, GapSetti
 from src.modules.monitoring.models import MonitorCheck
 from src.modules.research.competitors import CompetitorSuggestion, is_client_domain
 from src.modules.research.models import ResearchSnapshot, WebsiteResearch
-from src.modules.research.page_models import LinkSuggestion, PageReport
+from src.modules.research.page_models import ConsolidationPlan, LinkSuggestion, PageReport
 from src.modules.theming.models import Theme, ThemeMap
 
 __all__ = ["build_findings", "finding_id", "priority"]
@@ -658,11 +658,85 @@ def _unwatched_findings(
     ]
 
 
+PATTERN_NAMES: dict[str, str] = {
+    "hand_off_to_child": "Hand off to the child page",
+    "point_up_to_parent": "Point up to the parent page",
+    "separate_by_intent": "Separate by intent",
+    "answer_then_link": "Answer, then link",
+    "differentiate_siblings": "Differentiate the sibling pages",
+    "localise": "Localise",
+    "merge_and_redirect": "Merge and redirect",
+    "remove_from_index": "Remove from the index",
+}
+
+
+def _plan_findings(plan: ConsolidationPlan) -> list[Finding]:
+    """One finding per competing pair of the cannibalisation plan, its pattern and fix."""
+    out = []
+    unit = "impressions" if plan.source == "search_console" else "estimated visits"
+    for pair in plan.pairs[:_MAX_PAGE_FINDINGS]:
+        links = [x for x in plan.links if x.group == pair.group]
+        technical = [t for t in plan.technical if t.group == pair.group]
+        top = pair.searches[0].query if pair.searches else pair.topic or ""
+        buyer = sum(s.weight for s in pair.searches if s.funnel != "tofu")
+        changes = (f" Link changes: {len(links)}." if links else "") + (
+            f" Technical: {', '.join(t.kind.replace('_', ' ') for t in technical)}."
+            if technical
+            else ""
+        )
+        out.append(
+            _finding(
+                "cannibalisation",
+                f"plan:{pair.page}>{pair.owner}",
+                title=f"{PATTERN_NAMES[pair.pattern]}: {pair.page} takes “{top}” from {pair.owner}",
+                detail=f"{len(pair.searches)} search(es) of {pair.topic or 'this topic'} land on "
+                f"the wrong page ({round(pair.weight):,} {unit}, priority {pair.priority})."
+                + (
+                    f" The two pages share {pair.shared_paragraphs} paragraphs."
+                    if pair.shared_paragraphs
+                    else ""
+                ),
+                action=pair.fix + changes,
+                demand=round(pair.weight),
+                intent_bonus=8 if buyer >= pair.weight / 2 else 0,
+                evidence=[
+                    EvidenceItem(
+                        kind="keyword",
+                        label=f"{s.query} ({s.funnel.upper()}, {round(s.weight):,} {unit})",
+                        url=s.page,
+                        value=s.weight,
+                    )
+                    for s in pair.searches
+                ]
+                + [
+                    EvidenceItem(
+                        kind="link",
+                        label=f"{x.kind.replace('_', ' ')}: {x.source} -> "
+                        f"{x.new_destination or x.destination}"
+                        + (
+                            f" (anchor “{x.suggested_anchor or x.anchor}”)"
+                            if x.suggested_anchor or x.anchor
+                            else ""
+                        ),
+                        url=x.source,
+                    )
+                    for x in links
+                ],
+            )
+        )
+    return out
+
+
 def _page_findings(report: PageReport) -> list[Finding]:
     """Findings from the client's page report: cannibalisation, stuck pages, links, CTR."""
     out: list[Finding] = []
     by_url = {r.url: r for r in report.pages}
-    for c in report.cannibalisation[:_MAX_PAGE_FINDINGS]:
+    plan = report.plan
+    if plan is not None and plan.pairs:
+        out += _plan_findings(plan)
+    for c in ([] if plan is not None and plan.pairs else report.cannibalisation)[
+        :_MAX_PAGE_FINDINGS
+    ]:
         found = {
             "semrush_rows": "the search data lists several of its pages",
             "url_swap": "the ranking page changed since the last snapshot",

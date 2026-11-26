@@ -224,4 +224,5 @@ def test_search_console_export_and_second_pages_read_back() -> None:
         now=datetime.now(UTC),
     )
     assert snap.period == "Last 3 months" and snap.queries and snap.pages and snap.pairs
-    assert {p.query for p in snap.pairs} <= {k.keyword for k in split}
+    assert {k.keyword for k in split} <= {p.query for p in snap.pairs}
+    assert len({p.query for p in snap.pairs}) == len(snap.queries), "every query with its pages"

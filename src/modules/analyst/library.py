@@ -532,6 +532,77 @@ same keyword.
 ## Limits of this analysis
 """,
     ),
+    ActionCard(
+        id="keyword-cannibalisation",
+        version=1,
+        title="Keyword Cannibalisation & Consolidation Plan",
+        module="research",
+        category="Keyword research",
+        icon="merge",
+        summary="Makes each search land on the one page that should rank for it: competing "
+        "pages, the consolidation pattern for each, and the exact link, text, title and "
+        "redirect changes, written out in full.",
+        deliverable="Cannibalisation Plan",
+        parameters=[_PROJECT, _WEBSITE],
+        persona="You are a senior technical SEO who fixes keyword cannibalisation for clients "
+        "and writes every change as final copy.",
+        prompt_template="""\
+Build the keyword cannibalisation plan for {{website}}. The engine has already decided, by code,
+which page owns each topic, how aligned each page is, the competing pairs, the consolidation
+pattern of each pair and the link and technical changes (get_page_report section
+"consolidation", already called). Your job is to check the decisions and write the copy.
+
+Phase 1 - Check the pairs. For the two pages with the most weight on the wrong page, read both
+pages (get_page) and confirm the owner page against the content. A search that names a model
+goes to that model's page, never to its series page. Ready-to-buy (BOFU) searches belong on
+business pages; learning and comparison (TOFU, MOFU) searches may stay on a relevant article.
+Say plainly if an owner looks wrong; do not write copy for a pair you believe is wrong.
+
+Phase 2 - Write the changes, pair by pair, in the order of the plan:
+- Link changes: one natural sentence per new link, quoting the existing sentence it goes into
+  or after. At most 3 new links per page. Skip a link, with the reason, when the page is not
+  about the target's topic.
+- Body text: quote the exact current text from get_page, then the final replacement text.
+  Never write directions such as "make it more specific"; write the text itself. Put
+  [square brackets] around facts only the client can supply (local facts, prices, specs).
+- Titles and meta descriptions: change them only when the current tag pulls another page's
+  searches. Titles 60 characters or fewer. Descriptions 145 to 155 characters, on two lines:
+  what the visitor gets, then the call to action. Give the character count.
+- Headings: change an H1 or H2 only when it pulls another page's searches.
+- Merges, redirects, noindex: list the text to move and where it goes, then the redirect.
+
+Phase 3 - Template text. Text that appears on 5 or more pages is template text: fix it once,
+at template level, instead of on every page.
+
+Stay in scope: heading hierarchy, schema, general meta optimisation and other technical
+hygiene are separate work; do not include them.
+""",
+        required_tools=["get_page_report", "get_page"],
+        optional_tools=["get_keyword_rankings", "get_page_facts", "search_knowledge"],
+        prefetch=[
+            Prefetch(tool="get_page_report", args={"section": "consolidation", "limit": 40}),
+        ],
+        output_format="""\
+# Keyword Cannibalisation Plan: {website}
+## Summary
+(searches used, what was set aside, pages needing work, pairs, changes)
+## Page actions
+| Group | Page | Pattern | Changes (links, text, meta, headings, technical) | Priority |
+## Link changes
+| Group | Page | Existing sentence | Suggested sentence with [anchor] | Destination |
+## Content
+| Group | Page | Current text (quoted) | Final new text | Why |
+## Meta tags
+| Group | Page | Current | New | Characters | Why |
+## H tags
+| Group | Page | Level | Current | New | Why |
+## Technical
+| Group | URL | Change | Target |
+## Template text (fix once)
+## Owners to confirm
+## Limits of this analysis
+""",
+    ),
     # -- Module 4: Monitoring ---------------------------------------------------------------
     ActionCard(
         id="competitor-strategy-radar",
