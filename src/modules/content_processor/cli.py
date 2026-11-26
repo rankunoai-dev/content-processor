@@ -129,6 +129,7 @@ from src.modules.content_processor.workers.render_worker import RenderWorker
 from src.modules.gaps.commands import register as register_gap_commands
 from src.modules.monitoring.commands import register as register_monitoring_commands
 from src.modules.research.commands import register as register_research_commands
+from src.modules.research.commands import register_standin
 from src.modules.theming.commands import register as register_theming_commands
 
 __all__ = ["main"]
@@ -1061,6 +1062,7 @@ def main(argv: list[str] | None = None) -> int:
     register_theming_commands(sub)
     register_monitoring_commands(sub)
     register_research_commands(sub)
+    register_standin(sub)
     register_gap_commands(sub)
     register_account_commands(sub)
 

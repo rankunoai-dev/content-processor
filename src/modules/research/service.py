@@ -74,6 +74,7 @@ class ResearchSettings:
     keyword_limit: int = 200
     min_interval_ms: int = 500
     fresh_days: int = 14
+    base_url: str = "https://api.semrush.com/"
 
     @classmethod
     def from_env(cls) -> ResearchSettings:
@@ -90,7 +91,28 @@ class ResearchSettings:
             keyword_limit=s.cp_semrush_keyword_limit,
             min_interval_ms=s.cp_semrush_min_interval_ms,
             fresh_days=s.cp_semrush_fresh_days,
+            base_url=s.cp_semrush_base_url,
         )
+
+
+def address_refusal(base_url: str) -> str | None:
+    """Why the API may not be called at this address (None when it may).
+
+    The key travels with every call, so it goes only to Semrush itself (https) or to a
+    server on this computer: the stand-in that serves dummy data for trying the module.
+    """
+    from urllib.parse import urlsplit
+
+    parts = urlsplit(base_url)
+    host = (parts.hostname or "").casefold()
+    if parts.scheme == "https" and host == "api.semrush.com":
+        return None
+    if parts.scheme in ("http", "https") and host in ("127.0.0.1", "localhost", "::1"):
+        return None
+    return (
+        f"CP_SEMRUSH_BASE_URL {base_url!r} is refused: the API key is sent only to "
+        "https://api.semrush.com/ or to the stand-in on this computer (http://127.0.0.1:...)"
+    )
 
 
 def research_store(projects: ProjectStore) -> ResearchStore:
@@ -287,7 +309,7 @@ def pull_project(
         monthly_units=settings.monthly_units,
         pull_units=settings.pull_units,
     )
-    refusal = budget.refusal()
+    refusal = budget.refusal() or address_refusal(settings.base_url)
     if refusal or not settings.api_key:
         raise SemrushError(refusal or "SEMRUSH_API_KEY is not set in .env")
     play = Playground(projects, access, [project_id])
@@ -310,7 +332,13 @@ def pull_project(
     pace = pacer or SHARED_PACER
     pace.interval_s = settings.min_interval_ms / 1000
     client = SemrushClient(
-        settings.api_key, budget, log, project_id, client=http() if http else None, pacer=pace
+        settings.api_key,
+        budget,
+        log,
+        project_id,
+        client=http() if http else None,
+        base_url=settings.base_url,
+        pacer=pace,
     )
     try:
         snapshot = pull_snapshot(
@@ -327,6 +355,13 @@ def pull_project(
             snapshot = snapshot.model_copy(update={"notes": [*snapshot.notes, note]})
         else:
             snapshot = _pull_competitors(projects, project_id, client, settings, snapshot)
+        if (
+            address_refusal(settings.base_url) is None
+            and "api.semrush.com" not in settings.base_url
+        ):
+            from src.modules.research.standin import DUMMY_NOTE
+
+            snapshot = snapshot.model_copy(update={"notes": [DUMMY_NOTE, *snapshot.notes]})
         if client.retries:
             note = (
                 f"Semrush asked to slow down {client.retries} time(s); the pull waited and went on"

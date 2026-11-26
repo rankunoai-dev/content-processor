@@ -15,8 +15,73 @@ Status: **built 2026-11-02** on `feat/research-gaps` (`src/modules/research/`). 
 | Logged | Every call is written to `app_data/research/units.jsonl` with the units actually charged (lines returned x units per line: domain_ranks 10, domain_organic 10, phrase_this 10, phrase_organic 10, phrase_kdi 50; unknown reports 50). |
 | Unlock | Pulling or importing needs the project's unlock token. |
 | Client data | Only website addresses and keywords are sent to Semrush; no page content. |
+| Where the key goes | `CP_SEMRUSH_BASE_URL` (default `https://api.semrush.com/`) accepts only that address or one on this computer (the stand-in); anything else refuses the pull before a call (`service.address_refusal`). A pull from the stand-in carries a "DUMMY DATA" note in its snapshot, the tab and the workbook. |
 
-No live Semrush call has been made yet: the client is tested against a simulated Semrush server.
+No live Semrush call has been made yet. The whole module has run end to end against the
+**stand-in** below (26 Nov 2026, John Hancock sandbox with two competitors).
+
+## Trying it without Semrush: the stand-in (dummy data, $0)
+
+`src/modules/research/standin.py` invents search data for a project's websites in Semrush's
+own formats, so every part of the module can be seen working before a subscription is
+connected. Nothing it makes is real; every snapshot pulled from it says so.
+
+```
+python -m src.modules.content_processor.cli research-standin make --project <id> --out dummy [--market insurance|procurement|generic] [--period 1]
+python -m src.modules.content_processor.cli research-standin serve --out dummy [--port 8790] [--slow-down-every 7]
+```
+
+- `make` writes `dataset.json` and, per website, the **Organic Positions** export
+  (`<domain>-organic-positions.csv`) and, for the client, the **Organic Competitors** export,
+  with Semrush's column names. Keywords: three **brand keywords** from each theme of the
+  project's theme map, ranking on that theme's real pages, and a **market list** where the
+  competitors are made stronger (so gaps appear); the client ranks with its real pages only.
+  Volumes use Semrush's volume steps. `--period 1` is a later month (about half the
+  positions move), for movers. Deterministic: the same project gives the same numbers.
+- `serve` answers the five API reports the module calls (`domain_ranks`, `domain_organic`,
+  `phrase_this`, `phrase_organic`, `domain_organic_organic`) on 127.0.0.1 only, as the API
+  does: `;`-separated text, header names from `export_columns`, `display_limit`,
+  `ERROR 120 :: WRONG KEY - ID PAIR` without a key, `ERROR 50 :: NOTHING FOUND` for an
+  unknown domain. `--slow-down-every n` answers every n-th call with HTTP 429.
+- Route A (exports): import the CSV files in the Research tab or with `research import`.
+  Route B (API): set `CP_SEMRUSH_ENABLED=true`, any `SEMRUSH_API_KEY`, a monthly cap and
+  `CP_SEMRUSH_BASE_URL=http://127.0.0.1:8790/`, then pull. Use a copy of the project's data
+  (or a test project) so dummy numbers never sit in a real project's research.
+
+What the trial showed (John Hancock sandbox, MetLife and Prudential added, no competitor
+scrapes): both routes fill the Research tab, demand per theme, movers, the workbook, the
+gap analysis (keyword gaps, page-two keywords, unwatched competitors), the keyword cards'
+checks and packs, and the four Claude Desktop search-data tools. The API route adds domain
+overviews, the top 10 of chosen keywords and the competitor report in one go; the worst case
+(7,160 units) was above the 5,000-unit pull cap, so the fair split asked 128 / 172 / 200
+keywords and the pull spent 2,090 units; two HTTP 429 answers were waited out. An API pull
+counts as cut short whenever Semrush says the website ranks for more keywords than were
+pulled, so its keyword gaps are **probable**, while an imported export counts as complete
+(**complete deficit**). The keyword-value-matrix card refuses until every competitor in the
+project has a scrape.
+
+## Connecting the real Semrush API
+
+1. **Plan and key.** API access needs a plan that includes it and API units (to our
+   knowledge the Business plan, with units bought separately; confirm with Semrush). The
+   key is shown in Semrush's subscription settings, next to the API units balance.
+2. **`.env`** (never in chat or in a file that is committed):
+   `SEMRUSH_API_KEY=...`, `CP_SEMRUSH_ENABLED=true`, `CP_SEMRUSH_MONTHLY_UNITS=` the units
+   you allow per month, `CP_SEMRUSH_PULL_UNITS=` the most one pull may use,
+   `CP_SEMRUSH_DATABASE=us` (or the country), `CP_SEMRUSH_KEYWORD_LIMIT=` keywords per
+   website. Leave `CP_SEMRUSH_BASE_URL` unset (the real address is the default).
+3. **Restart the app**, then `research units`: `enabled` and `api_key_set` should be true
+   (the key itself is never shown).
+4. **First pull small**: `CP_SEMRUSH_PULL_UNITS=1000`, `CP_SEMRUSH_KEYWORD_LIMIT=50`;
+   `research estimate --project <id>` shows the worst case; pull from the Research tab
+   (needs the project's unlock). Compare `research units` with the balance Semrush shows,
+   and check `UNITS_PER_LINE` in `semrush.py` against your plan's prices.
+5. **The client's full keyword list**: export its Organic Positions from the Semrush
+   website and import it (free, counts as complete); use the API for competitors, chosen
+   keywords' top 10 and monthly refreshes (reused for 14 days).
+
+The Semrush connector in Claude (claude.ai) is a different path: it lets Claude read
+Semrush directly in a chat. The app does not use it; the app needs the Analytics API key.
 
 ## What a snapshot holds
 
@@ -48,7 +113,7 @@ Semrush **Organic Research → Positions** export (CSV, `,` or `;`, with or with
 ## Where it is used
 
 - **App**: the project's **Research** tab (import a CSV for a chosen website, pull with budget and worst-case estimate when switched on, suggested competitors with add / dismiss and a competitors-export upload, websites with expandable keywords, theme demand, movers, who ranks for looked-up keywords, workbook).
-- **CLI**: `research estimate | pull | import | show | movers | units --project <id> [--keyword ...] [--website ... --file ...]`.
+- **CLI**: `research estimate | pull | import | show | movers | units --project <id> [--keyword ...] [--website ... --file ...]`; `research-standin make | serve` (dummy data, above).
 - **API**: `GET /api/research/status`, `GET /api/projects/{id}/research`, `GET .../research/estimate?keywords=N`, `POST .../research/pull`, `POST .../research/import` (base64 body, 20 MB), `GET .../research/movers`, `GET .../research/workbook`, `GET .../research/competitors`, `POST .../research/competitors/import`, `POST .../research/competitors/{domain}/add|dismiss|restore`.
 - **Action cards**: `get_keyword_rankings`, `get_serp_overview`, `get_keyword_metrics`, `get_search_demand` are built. Cards 8-10 (v2) prefetch the search data, so even their free context packs carry it, and run once the project has research; without it, their check says "needs search data". Other cards that may use search data run without it and say so.
 - **Storage**: `app_data/research/<project>/research-*.json`, `latest.json`, `<snapshot>_research.xlsx` (Websites, Keywords, Theme demand, Movers, Search results, How to read).
