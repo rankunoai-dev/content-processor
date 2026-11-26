@@ -167,7 +167,7 @@ class ConnectionStore:
                 cid, n = f"{base}-{n}", n + 1
             item = Connection(
                 connection_id=cid,
-                platform=platform,  # type: ignore[arg-type]
+                platform=platform,
                 label=label.strip(),
                 secret_env=secret_env,
                 property_ref=property_ref.strip(),
