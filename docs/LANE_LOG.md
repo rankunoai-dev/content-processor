@@ -1189,3 +1189,10 @@ git worktree add ../content-processor-lane4 -b lane/L4-verify
 - **Measured:** warming the two local SQLite stores of 1,308 passages takes 36-39 ms each. The GEP stores on this machine are empty until the running GEP scrape builds its knowledge space, so the 35,000-passage case was not re-measured. Generation time: **not measured** — Ollama refused connections at both `localhost:11434` and `100.75.85.16:11434` (23 Nov); the benchmark is ready for when it is back.
 - **Tests:** `tests/modules/mcp_server/test_confidential.py` rewritten (7: every project tool refused and not listed, data policy file, a confidential project's scrape closes the project that reads it, unreadable counts as confidential, stdio tools refuse and hide, nothing answered when the app cannot say); `test_save_deliverable.py` (confidential cannot save); `test_vector_warm.py` 6; runner hook test in `test_projects.py`; `tests/test_bench_answers.py` 2 (fake model server).
 - **Railway logs:** already in the entry above (`AUDIT_LOG_PATH=/data/logs/audit.jsonl`, `app_data/audit/user_actions.jsonl`).
+
+## [2026-11-26] Theme map and research stay in sync
+
+- **Branch:** `feat/theme-research-sync` (from main `e219b6f`; the change was left uncommitted in main's working tree by an earlier session and is committed here at the user's request).
+- **Why:** research snapshots computed demand per theme against the theme map of the day they were made; after a theme rebuild their `theme_map_id` and theme ids pointed at the old map.
+- **What landed:** `research/service.py` `refresh_research_themes` (re-runs `finish_snapshot` with the new map, saves the snapshot, rewrites its workbook with movers); `theming/service.py` `build_project_themes` calls it after saving a map (a failure is logged as a warning, never hidden, and never loses the map); `gaps/service.py` refreshes a stale snapshot before building findings.
+- **Tests:** `test_theme_map_freshness.py::test_rebuilt_theme_map_refreshes_research_snapshot` (import, new scrape, rebuild: snapshot `theme_map_id` and demand follow). Research, theming and gaps suites pass.

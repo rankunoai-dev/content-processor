@@ -52,6 +52,7 @@ __all__ = [
     "import_competitors",
     "import_csv",
     "pull_project",
+    "refresh_research_themes",
     "research_store",
     "theme_map_for",
     "theme_map_stale",
@@ -198,6 +199,22 @@ def _save(
     workbook = write_research_workbook(snapshot, store.workbook(snapshot), moves)
     files = {"snapshot": path, "workbook": workbook}
     return snapshot, {k: str(v).removeprefix(_LONG_PREFIX) for k, v in files.items()}
+
+
+def refresh_research_themes(
+    projects: ProjectStore, project_id: str, theme_map: ThemeMap
+) -> ResearchSnapshot | None:
+    """Re-sync the latest research snapshot with a freshly built theme map."""
+    store = research_store(projects)
+    snapshot = store.latest(project_id)
+    if snapshot is None:
+        return None
+    updated = finish_snapshot(snapshot, theme_map)
+    store.save(updated)
+    previous = store.previous(project_id)
+    moves = movers(previous, updated) if previous else []
+    write_research_workbook(updated, store.workbook(updated), moves)
+    return updated
 
 
 def _pull_competitors(

@@ -4,12 +4,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from src.core.logger import get_logger
 from src.modules.analyst.playground import Playground
 from src.modules.content_processor.projects.store import ProjectStore
 from src.modules.content_processor.webapi.projects_api import KnowledgeAccess
 from src.modules.theming.build import build_theme_map
 from src.modules.theming.models import ThemeMap
 from src.modules.theming.store import ThemeStore, carry_ids, write_theme_workbook
+
+_logger = get_logger("theming.service")
 
 __all__ = ["build_project_themes", "theme_store", "workbook_path"]
 
@@ -43,6 +46,19 @@ def build_project_themes(
     theme_map = add_inferred(theme_map, lite_store(projects).project(project_id).values())
     path = store.save(theme_map)
     workbook = write_theme_workbook(theme_map, workbook_path(store, theme_map))
+    # Keep the research snapshot on the new map's themes (keyword placement and demand);
+    # a failure here must not lose the map, but it is logged rather than hidden.
+    from src.modules.research.service import refresh_research_themes
+
+    try:
+        refresh_research_themes(projects, project_id, theme_map)
+    except Exception:  # noqa: BLE001 - the theme map is saved either way
+        _logger.warning(
+            "research snapshot of %s not refreshed with theme map %s",
+            project_id,
+            theme_map.map_id,
+            exc_info=True,
+        )
     files = {"map": path, "workbook": workbook}
     long_prefix = "\\\\?\\"  # Windows extended-length path prefix, not shown to people
     return theme_map, {k: str(v).removeprefix(long_prefix) for k, v in files.items()}

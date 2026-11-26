@@ -47,6 +47,12 @@ def build_project_gaps(
     roles = {w.key: play.role_in_run(w) for w in play.websites()}
     theme_map, _rebuilt = theme_map_for(projects, access, project_id)
     research = research_store(projects).latest(project_id)
+    if research is not None and theme_map is not None and research.theme_map_id != theme_map.map_id:
+        from src.modules.research.service import refresh_research_themes
+
+        refreshed = refresh_research_themes(projects, project_id, theme_map)
+        if refreshed is not None:
+            research = refreshed
     check = monitor_store(projects).latest(project_id)
     missing = []
     if research is None:

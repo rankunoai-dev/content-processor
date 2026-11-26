@@ -75,3 +75,22 @@ def test_the_card_tool_and_the_gap_report_read_a_fresh_map(themed: World) -> Non
     _finished_scrape(themed, "run-r11", datetime.now(UTC))
     report, _ = build_project_gaps(store, access, pid)
     assert report.theme_map_id != newest
+
+
+def test_rebuilt_theme_map_refreshes_research_snapshot(themed: World) -> None:
+    from src.modules.research.service import import_csv, research_store
+    from tests.modules.research.test_research import CLIENT_EXPORT
+
+    store, access, pid = themed.store, themed.access, themed.project_id
+    snap, _ = import_csv(store, access, pid, "example.com", CLIENT_EXPORT.encode())
+    initial_map_id = snap.theme_map_id
+    assert initial_map_id is not None
+    # a scrape finishes, causing theme map to rebuild
+    _finished_scrape(themed, "run-r9", datetime.now(UTC))
+    fresh_map, rebuilt = theme_map_for(store, access, pid)
+    assert rebuilt and fresh_map.map_id != initial_map_id
+    # research snapshot in store was automatically refreshed with fresh_map.map_id
+    latest_snap = research_store(store).latest(pid)
+    assert latest_snap is not None
+    assert latest_snap.theme_map_id == fresh_map.map_id
+    assert latest_snap.demand
