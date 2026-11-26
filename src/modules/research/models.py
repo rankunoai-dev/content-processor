@@ -15,6 +15,7 @@ from typing import Final, Literal
 from pydantic import Field
 
 from src.core.schemas import StrictModel
+from src.modules.research.intent import Intent
 
 __all__ = [
     "SNAPSHOT_VERSION",
@@ -47,6 +48,11 @@ class KeywordRow(StrictModel):
     url: str | None = None
     traffic_share: float = Field(default=0.0, ge=0.0, description="Share of the site's traffic, %")
     theme_id: str | None = None
+    intent: Intent | None = Field(default=None, description="By rules (research/intent.py)")
+    other_urls: list[str] = Field(
+        default_factory=list,
+        description="Other pages of the same website ranking for it (cannibalisation)",
+    )
 
 
 class DomainOverview(StrictModel):
@@ -113,6 +119,7 @@ class KeywordMetrics(StrictModel):
     results: int | None = None
     serp: list[SerpRow] = Field(default_factory=list)
     theme_id: str | None = None
+    intent: Intent | None = None
 
 
 class ThemeDemand(StrictModel):
@@ -126,6 +133,12 @@ class ThemeDemand(StrictModel):
     ranked: dict[str, int] = Field(default_factory=dict, description="Website -> keywords ranked")
     traffic: dict[str, float] = Field(
         default_factory=dict, description="Website -> estimated visits (volume x CTR by position)"
+    )
+    by_intent: dict[str, int] = Field(
+        default_factory=dict, description="Monthly searches per intent (distinct keywords)"
+    )
+    weighted_volume: int = Field(
+        default=0, ge=0, description="Searches weighted by intent (commercial 1, what-is 0.5)"
     )
 
 

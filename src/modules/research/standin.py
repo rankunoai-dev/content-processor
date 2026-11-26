@@ -32,7 +32,8 @@ import json
 import math
 import re
 import threading
-from collections.abc import Mapping, Sequence
+import zipfile
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -224,6 +225,8 @@ class DummyKeyword:
     previous: dict[str, int] = field(default_factory=dict)  # domain -> previous position
     urls: dict[str, str] = field(default_factory=dict)  # domain -> ranking page
     serp: list[tuple[str, str]] = field(default_factory=list)  # top 10 (domain, url)
+    # domain -> other pages of that website ranking for it, with their positions
+    also: dict[str, list[tuple[str, int]]] = field(default_factory=dict)
 
 
 @dataclass
@@ -285,21 +288,25 @@ class Dataset:
         key = _domain(domain)
         traffic = self._traffic(domain)
         total = sum(t for _k, t in traffic) or 1.0
-        return [
-            {
-                "Ph": k.keyword,
-                "Po": str(k.positions[key]),
-                "Pp": str(k.previous.get(key, 0)),
-                "Nq": str(k.volume),
-                "Cp": f"{k.cpc:.2f}",
-                "Ur": k.urls[key],
-                "Tr": f"{100 * t / total:.2f}",
-                "Co": f"{k.competition:.2f}",
-                "Kd": str(k.difficulty),
-                "Nr": str(k.results),
-            }
-            for k, t in traffic
-        ]
+        rows = []
+        for k, t in traffic:
+            pages = [(k.urls[key], k.positions[key]), *k.also.get(key, [])]
+            for url, position in pages:  # a second page of the site is a row of its own
+                rows.append(
+                    {
+                        "Ph": k.keyword,
+                        "Po": str(position),
+                        "Pp": str(k.previous.get(key, 0)),
+                        "Nq": str(k.volume),
+                        "Cp": f"{k.cpc:.2f}",
+                        "Ur": url,
+                        "Tr": f"{100 * t / total:.2f}" if url == k.urls[key] else "0.00",
+                        "Co": f"{k.competition:.2f}",
+                        "Kd": str(k.difficulty),
+                        "Nr": str(k.results),
+                    }
+                )
+        return rows
 
     def competitors(self, domain: str) -> list[dict[str, str]]:
         """Websites sharing its keywords, the project's and others, by overlap."""
@@ -416,6 +423,85 @@ class Dataset:
             writer.writerow([row["Dn"], row["Cr"], row["Np"], row["Or"], row["Ot"], "0", "0"])
         return out.getvalue().encode("utf-8-sig")
 
+    def search_console_zip(self, domain: str, months: int = 3) -> bytes:
+        """Search Console's Performance export (zip) for a website: real-looking clicks.
+
+        Holds `Queries.csv`, `Pages.csv` and `Filters.csv` as Search Console writes them,
+        plus `Queries by page.csv` (query and page together, as an API or Looker Studio
+        export gives) for keywords two pages share. Impressions follow volume and
+        position; each CTR is the usual one for its position times 0.3-1.4, so some
+        pages and queries fall well below it.
+        """
+        key = _domain(domain)
+        queries: list[list[str]] = []
+        pairs: list[list[str]] = []
+        pages: dict[str, list[float]] = {}
+        for k in self.ranked(key):
+            for url, position in [(k.urls[key], k.positions[key]), *k.also.get(key, [])]:
+                draw = _Draw("gsc", k.keyword, url)
+                seen = 0.95 if position <= 10 else 0.45 if position <= 20 else 0.08
+                impressions = round(k.volume * months * seen * draw.between(0.7, 1.2))
+                avg = max(1.0, position + draw.between(-1.5, 1.5))
+                ctr = _ctr(round(avg)) * draw.between(0.3, 1.4)
+                clicks = round(impressions * ctr)
+                if impressions < 1:
+                    continue
+                pairs.append([k.keyword, url, str(clicks), str(impressions), f"{avg:.1f}"])
+                agg = pages.setdefault(url, [0.0, 0.0, 0.0])
+                agg[0] += clicks
+                agg[1] += impressions
+                agg[2] += avg * impressions
+        by_query: dict[str, list[float]] = {}
+        for q, _u, c_text, i_text, pos in pairs:
+            agg = by_query.setdefault(q, [0.0, 0.0, 0.0])
+            agg[0] += int(c_text)
+            agg[1] += int(i_text)
+            agg[2] += float(pos) * int(i_text)
+        for q, (cl, im, w) in sorted(by_query.items(), key=lambda kv: -kv[1][0]):
+            queries.append(
+                [q, str(int(cl)), str(int(im)), f"{100 * cl / im:.2f}%", f"{w / im:.1f}"]
+            )
+
+        def table(header: list[str], rows: list[list[str]]) -> str:
+            out = io.StringIO()
+            writer = csv.writer(out, lineterminator="\n")
+            writer.writerow(header)
+            writer.writerows(rows)
+            return out.getvalue()
+
+        page_rows = [
+            [u, str(int(c)), str(int(i)), f"{100 * c / i:.2f}%", f"{w / i:.1f}"]
+            for u, (c, i, w) in sorted(pages.items(), key=lambda kv: -kv[1][0])
+        ]
+        shared = {q for q, n in _count(p[0] for p in pairs).items() if n > 1}
+        pair_rows = [
+            [q, u, c, i, f"{100 * int(c) / int(i):.2f}%", pos]
+            for q, u, c, i, pos in pairs
+            if q in shared
+        ]
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr(
+                "Queries.csv",
+                table(["Top queries", "Clicks", "Impressions", "CTR", "Position"], queries),
+            )
+            archive.writestr(
+                "Pages.csv",
+                table(["Top pages", "Clicks", "Impressions", "CTR", "Position"], page_rows),
+            )
+            archive.writestr(
+                "Filters.csv",
+                table(
+                    ["Filter", "Value"], [["Search type", "Web"], ["Date", f"Last {months} months"]]
+                ),
+            )
+            if pair_rows:
+                archive.writestr(
+                    "Queries by page.csv",
+                    table(["Query", "Page", "Clicks", "Impressions", "CTR", "Position"], pair_rows),
+                )
+        return buffer.getvalue()
+
     # -- saving --------------------------------------------------------------------
 
     def save(self, path: Path) -> None:
@@ -431,8 +517,16 @@ class Dataset:
         keywords = []
         for k in data.pop("keywords"):
             k["serp"] = [tuple(pair) for pair in k["serp"]]
+            k["also"] = {d: [tuple(x) for x in v] for d, v in k.get("also", {}).items()}
             keywords.append(DummyKeyword(**k))
         return cls(websites=websites, keywords=keywords, **data)
+
+
+def _count(items: Iterable[str]) -> dict[str, int]:
+    out: dict[str, int] = {}
+    for item in items:
+        out[item] = out.get(item, 0) + 1
+    return out
 
 
 def _domain(text: str) -> str:
@@ -539,6 +633,14 @@ def make_dataset(
         websites=sites,
         keywords=list(keywords.values()),
     )
+    if client is not None and len(real_pages) > 1:  # some keywords split over two pages
+        for k in dataset.keywords:
+            draw = _Draw("also", k.keyword)
+            if client.domain in k.positions and draw.unit() < 0.15:
+                other = real_pages[draw.integer(0, len(real_pages) - 1)]
+                if other != k.urls[client.domain]:
+                    worse = min(100, k.positions[client.domain] + draw.integer(3, 25))
+                    k.also[client.domain] = [(other, worse)]
     for n in range(1, period + 1):  # later months: some positions move
         for k in dataset.keywords:
             for domain, old in list(k.positions.items()):

@@ -36,6 +36,7 @@ import {
 import { DownloadMenu } from '../components/DownloadMenu';
 import { QueryState } from '../components/QueryState';
 import { RESEARCH } from '../vocabulary';
+import { GscCard, PageReportCard } from './PageReport';
 import { SuggestedCompetitors } from './SuggestedCompetitors';
 
 function websitesOf(project: Project) {
@@ -170,6 +171,11 @@ function KeywordTable({ site }: { site: WebsiteResearch }) {
       dataSource={site.keywords}
       columns={[
         { title: RESEARCH.columns.keyword, dataIndex: 'keyword' },
+        {
+          title: RESEARCH.intentColumn,
+          render: (_v, k) =>
+            k.intent ? <Tag color={RESEARCH.intentColor[k.intent]}>{RESEARCH.intent[k.intent] ?? k.intent}</Tag> : '-',
+        },
         { title: RESEARCH.columns.position, dataIndex: 'position', sorter: (a, b) => a.position - b.position },
         { title: RESEARCH.columns.previous, render: (_v, k) => k.previous_position ?? '-' },
         {
@@ -247,6 +253,11 @@ function SnapshotView({ snapshot, project }: { snapshot: ResearchSnapshot; proje
                 sorter: (a, b) => a.volume - b.volume,
                 render: (v: number) => v.toLocaleString(),
               },
+              {
+                title: <span title={RESEARCH.buyerHelp}>{RESEARCH.buyerColumn}</span>,
+                render: (_v, d) =>
+                  ((d.by_intent?.commercial ?? 0) + (d.by_intent?.transactional ?? 0)).toLocaleString(),
+              },
               { title: RESEARCH.columns.ranked, render: (_v, d) => counts(d.top10) },
             ]}
           />
@@ -308,7 +319,9 @@ export function ResearchTab({ project, token }: { project: Project; token: strin
       {token === null ? <Typography.Text type="secondary">{RESEARCH.needsUnlock}</Typography.Text> : null}
       <ImportCard project={project} token={token} />
       <PullCard project={project} token={token} />
+      <GscCard project={project} token={token} />
       <SuggestedCompetitors projectId={project.project_id} token={token} />
+      <PageReportCard projectId={project.project_id} />
       <QueryState query={research} rows={6}>
         {(snap) =>
           snap === null ? (

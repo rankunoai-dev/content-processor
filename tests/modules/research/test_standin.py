@@ -207,3 +207,21 @@ def test_the_make_command_writes_the_dataset_and_the_exports(
     assert (out / "example-life.com-organic-positions.csv").is_file()
     assert (out / "example-life.com-organic-competitors.csv").is_file()
     assert (out / "rival.example-organic-positions.csv").is_file()
+
+
+def test_search_console_export_and_second_pages_read_back() -> None:
+    from src.modules.research.gsc import read_gsc_export
+
+    data = _dataset()
+    split = [k for k in data.keywords if k.also.get("johnhancock.com")]
+    assert split, "some keywords rank with two client pages"
+    rows = {r.keyword: r for r in read_positions_csv(data.positions_csv("johnhancock.com"))}
+    assert rows[split[0].keyword].other_urls, "the second page comes back as an other URL"
+    snap = read_gsc_export(
+        data.search_console_zip("johnhancock.com"),
+        project_id="p1",
+        website="johnhancock.com",
+        now=datetime.now(UTC),
+    )
+    assert snap.period == "Last 3 months" and snap.queries and snap.pages and snap.pairs
+    assert {p.query for p in snap.pairs} <= {k.keyword for k in split}

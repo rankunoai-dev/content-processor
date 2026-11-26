@@ -31,8 +31,10 @@ from src.modules.research.competitors import (
     read_competitors_csv,
     with_project_status,
 )
+from src.modules.research.gsc import GscSnapshot
 from src.modules.research.importer import read_positions_csv
 from src.modules.research.models import ResearchSnapshot, WebsiteResearch
+from src.modules.research.page_models import PageReport
 from src.modules.research.semrush import (
     UNITS_PER_LINE,
     Pacer,
@@ -396,3 +398,81 @@ def import_csv(
     previous = research_store(projects).latest(project_id)
     snapshot = import_website(play, website, rows, previous, database=database)
     return _save(projects, finish_snapshot(snapshot, _theme_map(projects, access, project_id)))
+
+
+def import_gsc(projects: ProjectStore, project_id: str, website: str, data: bytes) -> GscSnapshot:
+    """Keep a Search Console Performance export (zip or CSV) of one website ($0)."""
+    from src.modules.research.gsc import read_gsc_export
+
+    snapshot = read_gsc_export(data, project_id=project_id, website=website, now=datetime.now(UTC))
+    research_store(projects).save_gsc(snapshot)
+    return snapshot
+
+
+def build_project_pages(
+    projects: ProjectStore, access: KnowledgeAccess, project_id: str
+) -> tuple[PageReport, dict[str, str]]:
+    """The client website's page report from what the app holds; saved with its workbook."""
+    from src.modules.content_processor.knowledge.inventory_models import PageInventory
+    from src.modules.research.pages import build_page_report
+    from src.modules.research.store import write_page_workbook
+
+    play = Playground(projects, access, [project_id])
+    store = research_store(projects)
+    snapshot = store.latest(project_id)
+    client = next((w for w in play.websites() if play.role_in_run(w) == "client"), None)
+    website = (
+        client.key
+        if client
+        else next(
+            (w.website for w in (snapshot.websites if snapshot else []) if w.role == "client"), ""
+        )
+    )
+    data = play.site_data(client) if client else None
+    inventory: list[PageInventory] = []
+    stamps = {}
+    if data is not None:
+        path = data.file(".inventory.jsonl")
+        if path is not None:
+            with path.open(encoding="utf-8") as handle:
+                inventory = [PageInventory.model_validate_json(x) for x in handle if x.strip()]
+        stamps = play.stamps(data)
+    gsc = store.latest_gsc(project_id)
+    report = build_page_report(
+        project_id,
+        website,
+        snapshot=snapshot,
+        previous=store.previous(project_id),
+        inventory=inventory,
+        stamps=stamps,
+        theme_map=theme_store(projects).latest(project_id),
+        gsc=gsc if gsc is not None and gsc.website == website else None,
+        now=datetime.now(UTC),
+        run_id=data.run_name if data else None,
+    )
+    path = store.save_pages(report)
+    workbook = write_page_workbook(report, store.pages_workbook(project_id))
+    return report, {"report": str(path), "workbook": str(workbook)}
+
+
+def page_report(
+    projects: ProjectStore, access: KnowledgeAccess, project_id: str
+) -> PageReport | None:
+    """The saved page report, rebuilt first when research or Search Console is newer.
+
+    None when the project has neither research nor Search Console data.
+    """
+    store = research_store(projects)
+    snapshot = store.latest(project_id)
+    gsc = store.latest_gsc(project_id)
+    if snapshot is None and gsc is None:
+        return None
+    saved = store.latest_pages(project_id)
+    if (
+        saved is not None
+        and saved.research_snapshot_id == (snapshot.snapshot_id if snapshot else None)
+        and saved.gsc_imported_at == (gsc.imported_at if gsc else None)
+    ):
+        return saved
+    report, _files = build_project_pages(projects, access, project_id)
+    return report

@@ -31,6 +31,7 @@ from src.modules.gaps.models import EvidenceItem, Finding, FindingKind, GapSetti
 from src.modules.monitoring.models import MonitorCheck
 from src.modules.research.competitors import CompetitorSuggestion, is_client_domain
 from src.modules.research.models import ResearchSnapshot, WebsiteResearch
+from src.modules.research.page_models import LinkSuggestion, PageReport
 from src.modules.theming.models import Theme, ThemeMap
 
 __all__ = ["build_findings", "finding_id", "priority"]
@@ -47,7 +48,16 @@ _BASE: dict[FindingKind, int] = {
     "keyword_unverified": 30,
     "pillar_gap": 25,
     "funnel_gap": 15,
+    "ctr_opportunity": 40,
+    "cannibalisation": 35,
+    "stuck_page": 35,
+    "link_opportunity": 30,
+    "unlinked_pages": 25,
+    "zero_traffic": 15,
 }
+_COMMERCIAL_SHARE = 0.5  # buyer intent is the bigger part: priority up
+_INFORMATIONAL_SHARE = 0.2  # buyer intent is a small part: priority down
+_MAX_PAGE_FINDINGS = 10
 _WORD = re.compile(r"[a-z0-9]+")
 _STOP = {"and", "for", "the", "of", "with", "our", "your", "services", "service", "solutions"}
 _MAX_EVIDENCE = 15
@@ -68,10 +78,30 @@ def finding_id(kind: str, key: str) -> str:
     return "gap-" + hashlib.sha1(f"{kind}\x1f{key}".encode()).hexdigest()[:12]  # noqa: S324
 
 
-def priority(kind: FindingKind, *, competitor_pages: int = 0, demand: int = 0) -> int:
-    """Base by kind, plus competitor coverage and search demand (log scale), capped at 100."""
+def priority(
+    kind: FindingKind, *, competitor_pages: int = 0, demand: int = 0, intent_bonus: int = 0
+) -> int:
+    """Base by kind, plus competitor coverage, search demand (log scale) and intent, 0-100."""
     score = _BASE[kind] + min(20, 4 * competitor_pages) + (min(30, int(6 * math.log10(demand + 1))))
-    return min(100, score)
+    return max(0, min(100, score + intent_bonus))
+
+
+def _intent_mix(rows: Sequence[_Row]) -> tuple[str, int]:
+    """' Intent: 62% commercial or transactional (...)' and the priority adjustment."""
+    total = sum(r.volume for r in rows)
+    if not total or not any(r.intent for r in rows):
+        return "", 0
+    buyer = sum(r.volume for r in rows if r.intent in ("commercial", "transactional"))
+    share = buyer / total
+    line = (
+        f" Intent: {share:.0%} of these searches are commercial or transactional "
+        f"({buyer:,} a month), {1 - share:.0%} informational or navigational."
+    )
+    if share >= _COMMERCIAL_SHARE:
+        return line + " Buyer searches: ranked higher.", 8
+    if share < _INFORMATIONAL_SHARE:
+        return line + " Mostly research searches: ranked lower.", -5
+    return line, 0
 
 
 def _severity(score: int) -> str:
@@ -90,8 +120,11 @@ def _finding(
     competitor_pages: int = 0,
     demand: int = 0,
     evidence: Sequence[EvidenceItem] = (),
+    intent_bonus: int = 0,
 ) -> Finding:
-    score = priority(kind, competitor_pages=competitor_pages, demand=demand)
+    score = priority(
+        kind, competitor_pages=competitor_pages, demand=demand, intent_bonus=intent_bonus
+    )
     return Finding(
         finding_id=finding_id(kind, key),
         kind=kind,
@@ -260,6 +293,7 @@ class _Row:
     url: str | None
     client_position: int | None = None
     client_url: str | None = None
+    intent: str | None = None
 
 
 def _best_rows(rows: list[_Row]) -> list[_Row]:
@@ -343,6 +377,7 @@ def _keyword_findings(
                     r.url,
                     found[0] if found else None,
                     found[1] if found else None,
+                    r.intent,
                 )  # fmt: skip
             )
     near: dict[str | None, list[tuple[str, int, int, str | None]]] = defaultdict(list)
@@ -367,6 +402,7 @@ def _keyword_findings(
         )
         if missing and complete:
             volume = sum(r.volume for r in missing)
+            mix, bonus = _intent_mix(missing)
             out.append(
                 _finding(
                     "keyword_gap",
@@ -375,17 +411,21 @@ def _keyword_findings(
                     title=f"Complete deficit in {name}: {len(missing)} keyword(s), "
                     f"{volume:,} searches a month",
                     detail=f"{_by_competitor(missing, rows)}. The client does not rank in the "
-                    f"top 100 for any of them (its search data holds {coverage})." + quick_line,
+                    f"top 100 for any of them (its search data holds {coverage})."
+                    + mix
+                    + quick_line,
                     action="Plan new pages for these: start with the highest-volume keywords "
                     "and study the competitor pages that rank for them.",
                     competitors=[r.website for r in missing],
                     competitor_pages=len({r.url for r in missing if r.url}),
                     demand=volume,
                     evidence=_evidence(missing, lambda _r: "client not in the top 100"),
+                    intent_bonus=bonus,
                 )
             )
         elif missing:
             volume = sum(r.volume for r in missing)
+            mix, bonus = _intent_mix(missing)
             why = (
                 f"the client's search data holds only {coverage}"
                 if client_sites
@@ -400,6 +440,7 @@ def _keyword_findings(
                     f"{volume:,} searches a month",
                     detail=f"{_by_competitor(missing, rows)}. They are not in the client's "
                     f"rankings, but {why}, so the client may still rank lower for some."
+                    + mix
                     + quick_line,
                     action="Confirm with the client's full Semrush export or a pull with a "
                     "higher keyword limit, then plan pages for the real gaps.",
@@ -407,10 +448,12 @@ def _keyword_findings(
                     competitor_pages=len({r.url for r in missing if r.url}),
                     demand=volume,
                     evidence=_evidence(missing, lambda _r: "client not in the data pulled"),
+                    intent_bonus=bonus,
                 )
             )
         if behind:
             volume = sum(r.volume for r in behind)
+            mix, bonus = _intent_mix(behind)
             out.append(
                 _finding(
                     "keyword_behind",
@@ -419,7 +462,7 @@ def _keyword_findings(
                     title=f"{len(behind)} keyword(s) where the client is far behind in {name}",
                     detail=f"{_by_competitor(behind, rows)}. The client ranks between 21 and "
                     f"100 for them, so it has pages to improve rather than pages to write. "
-                    f"About {volume:,} searches a month together." + quick_line,
+                    f"About {volume:,} searches a month together." + mix + quick_line,
                     action="Optimize the client's ranking page for each keyword: answer the "
                     "query directly, cover what the competitor page covers, add internal links "
                     "from the pillar.",
@@ -430,6 +473,7 @@ def _keyword_findings(
                         behind,
                         lambda r: f"client #{r.client_position} {r.client_url or ''}".strip(),
                     ),
+                    intent_bonus=bonus,
                 )
             )
     for theme_id, near_rows in near.items():
@@ -614,6 +658,140 @@ def _unwatched_findings(
     ]
 
 
+def _page_findings(report: PageReport) -> list[Finding]:
+    """Findings from the client's page report: cannibalisation, stuck pages, links, CTR."""
+    out: list[Finding] = []
+    by_url = {r.url: r for r in report.pages}
+    for c in report.cannibalisation[:_MAX_PAGE_FINDINGS]:
+        found = {
+            "semrush_rows": "the search data lists several of its pages",
+            "url_swap": "the ranking page changed since the last snapshot",
+            "search_console": "Search Console shows several pages sharing its impressions",
+        }[c.source]
+        out.append(
+            _finding(
+                "cannibalisation",
+                c.keyword.casefold(),
+                title=f"{len(c.pages)} pages compete for “{c.keyword}”",
+                detail=f"{c.note}: {found}. Two pages of one site splitting a keyword usually "
+                "both rank lower than one clear page would.",
+                action="Choose the page that should rank; merge or differentiate the others, "
+                "point their internal links (and a canonical, if they are near copies) to it.",
+                demand=c.volume,
+                intent_bonus=8 if c.intent in ("commercial", "transactional") else 0,
+                evidence=[EvidenceItem(kind="page", label=p, url=p) for p in c.pages],
+            )
+        )
+    for url in report.stuck[:_MAX_PAGE_FINDINGS]:
+        row = by_url.get(url)
+        if row is None:
+            continue
+        flags = [f for f in row.flags if f != "not in the scrape"]
+        out.append(
+            _finding(
+                "stuck_page",
+                url,
+                title=f"Ranks {row.best_position} for “{row.top_keyword}” with on-page problems",
+                detail=f"{url} ranks for {row.keywords} keyword(s), {row.volume:,} searches a "
+                f"month, best at {row.best_position}; the scrape found: {', '.join(flags)}.",
+                action="Fix the on-page problems first (title, meta description, one H1, heading "
+                "order, more depth where the text is thin), then recheck the rankings.",
+                demand=row.volume,
+                evidence=[EvidenceItem(kind="page", label=row.title or url, url=url)],
+            )
+        )
+    targets: dict[str, list[LinkSuggestion]] = defaultdict(list)
+    for s in report.link_suggestions:
+        targets[s.target_url].append(s)
+    for target, suggestions in list(targets.items())[:_MAX_PAGE_FINDINGS]:
+        first = suggestions[0]
+        out.append(
+            _finding(
+                "link_opportunity",
+                target,
+                title=f"Link to the page for “{first.anchor}” from {len(suggestions)} stronger "
+                "page(s)",
+                detail=f"{target} {first.reason}.",
+                action=f"Add a link with the anchor text “{first.anchor}” in the body of each "
+                "page listed.",
+                demand=first.keyword_volume,
+                evidence=[
+                    EvidenceItem(
+                        kind="link",
+                        label=f"from {s.source_title or s.source_url} (PageRank {s.source_pagerank})",
+                        url=s.source_url,
+                        value=s.source_pagerank,
+                    )
+                    for s in suggestions
+                ],
+            )
+        )
+    for o in report.ctr_opportunities[:_MAX_PAGE_FINDINGS]:
+        what = "page" if o.kind == "page" else "query"
+        out.append(
+            _finding(
+                "ctr_opportunity",
+                f"{o.kind}:{o.label}",
+                title=f"CTR {o.ctr:.1%} at position {o.position} for the {what} “{o.label}”: "
+                f"about {o.extra_clicks:,} more clicks possible",
+                detail=f"Search Console ({report.gsc_period or 'the export period'}): "
+                f"{o.impressions:,} impressions, {o.clicks:,} clicks. Position {o.position} "
+                f"usually gets about {o.expected_ctr:.1%}.",
+                action="Rewrite the title and meta description to match what searchers want "
+                "and stand out in the results; no new content or links needed.",
+                demand=o.impressions,
+                evidence=[
+                    EvidenceItem(
+                        kind="page" if o.kind == "page" else "keyword",
+                        label=o.label,
+                        url=o.label if o.kind == "page" else None,
+                        value=o.extra_clicks,
+                    )
+                ],
+            )
+        )
+    ranking_unlinked = [
+        u for u in report.orphans if (r := by_url.get(u)) is not None and r.keywords
+    ]
+    if ranking_unlinked:
+        volume = sum(by_url[u].volume for u in ranking_unlinked)
+        out.append(
+            _finding(
+                "unlinked_pages",
+                "unlinked",
+                title=f"{len(ranking_unlinked)} ranking page(s) with no links from page text",
+                detail=f"They rank for keywords worth {volume:,} searches a month, yet no "
+                "scraped page links to them from its content (menus and footers aside). "
+                + (report.notes[0] if report.notes else ""),
+                action="Link to them from related articles and the theme's pillar page.",
+                demand=volume,
+                evidence=[
+                    EvidenceItem(kind="page", label=by_url[u].top_keyword or u, url=u)
+                    for u in ranking_unlinked
+                ],
+            )
+        )
+    if report.zero_traffic:
+        out.append(
+            _finding(
+                "zero_traffic",
+                "zero",
+                title=f"{len(report.zero_traffic)} scraped page(s) rank for no keyword",
+                detail="Indexable pages of the scrape that are not in the client's rankings: "
+                "candidates to improve, merge into a stronger page, or drop."
+                + (
+                    " The client's keyword list is cut short, so some may rank beyond it."
+                    if any("cut short" in n for n in report.notes)
+                    else ""
+                ),
+                action="Check which of them should rank; improve or merge those, and leave "
+                "out of the sitemap the ones that should not.",
+                evidence=[EvidenceItem(kind="page", label=u, url=u) for u in report.zero_traffic],
+            )
+        )
+    return out
+
+
 def build_findings(
     theme_map: ThemeMap,
     roles: Mapping[str, str],
@@ -624,6 +802,7 @@ def build_findings(
     suggested: Sequence[CompetitorSuggestion] = (),
     settings: GapSettings | None = None,
     client_domains: Sequence[str] = (),
+    pages: PageReport | None = None,
 ) -> list[Finding]:
     """Every finding, highest priority first.
 
@@ -640,6 +819,8 @@ def build_findings(
     if catalogs:
         findings += _offering_findings(catalogs, roles)
     findings += _unwatched_findings(suggested, client_domains)
+    if pages is not None:
+        findings += _page_findings(pages)
     findings = [_with_basis(f, theme_map) for f in findings]
     return sorted(findings, key=lambda f: (-f.priority, f.kind, f.title))
 

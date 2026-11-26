@@ -53,6 +53,11 @@ def build_project_gaps(
         missing.append("research: no keyword data yet, so keyword and demand findings are left out")
     if check is None:
         missing.append("monitoring: no check yet, so competitor momentum is left out")
+    pages = None
+    if research is not None:
+        from src.modules.research.service import build_project_pages
+
+        pages, _files = build_project_pages(projects, access, project_id)
     findings = build_findings(
         theme_map,
         roles,
@@ -62,6 +67,7 @@ def build_project_gaps(
         suggested=competitor_book(projects, project_id).suggestions,
         settings=gap_store(projects).settings(project_id),
         client_domains=client_domains_everywhere(projects.projects()),
+        pages=pages,
     )
     store = gap_store(projects)
     statuses = store.statuses(project_id)
