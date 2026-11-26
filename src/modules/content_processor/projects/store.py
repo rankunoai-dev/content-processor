@@ -427,6 +427,20 @@ class ProjectStore:
             self._save(record)
             return record
 
+    def set_connections(self, project_id: str, connections: dict[str, str]) -> ProjectRecord:
+        """Choose the connection a project uses per platform (an empty value clears one)."""
+        with self._lock:
+            record = self.get(project_id)
+            kept = {k: v for k, v in connections.items() if v}
+            changes: dict[str, object] = {"updated_at": _now(), "connections": kept}
+            record = ProjectRecord.model_validate(record.model_dump() | changes)
+            self._save(record)
+            return record
+
+    def projects_using(self, connection_id: str) -> list[str]:
+        """Names of the projects that choose this connection for any platform."""
+        return [p.name for p in self.projects() if connection_id in p.connections.values()]
+
     def delete(self, project_id: str) -> None:
         """Remove the project and everything in it, including the other modules' data.
 

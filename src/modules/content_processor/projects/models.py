@@ -82,6 +82,11 @@ class ProjectRecord(StrictModel):
         description="page text from this project is never sent to Claude or shown to Claude "
         "Desktop; only counts and names",
     )
+    connections: dict[str, str] = Field(
+        default_factory=dict,
+        description="platform -> the connection id this project uses for it (see "
+        "src/modules/connections); a platform not listed uses the installation's own key",
+    )
 
     def main_site(self) -> SiteRecord | None:
         """The client's main website: the first client website."""

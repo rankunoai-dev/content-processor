@@ -6,6 +6,7 @@ import { createQueryClient } from './api/queries';
 import { AppLayout } from './components/AppLayout';
 import { AuthGate } from './components/AuthGate';
 import { AccountsPage } from './routes/AccountsPage';
+import { ConnectionsPage } from './routes/ConnectionsPage';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { usePreferences } from './state/preferences';
 
@@ -63,6 +64,7 @@ export function AppRoutes() {
         <Route path="projects/:projectId" element={<ProjectPage />} />
         <Route path="queue" element={<QueuePage />} />
         <Route path="accounts" element={<AccountsPage />} />
+        <Route path="connections" element={<ConnectionsPage />} />
         <Route path="runs/:runId" element={<OverviewPage />} />
         <Route path="runs/:runId/pages" element={<PagesPage />} />
         <Route path="runs/:runId/pages/:pageKey" element={<PageDetailPage />} />

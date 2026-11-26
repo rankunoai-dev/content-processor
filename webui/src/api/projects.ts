@@ -105,6 +105,8 @@ export interface Project {
   last_run: RunState | null;
   /** Page text from this project is never sent to Claude or shown to Claude Desktop. */
   confidential: boolean;
+  /** Platform -> the saved connection this project uses for it (none = installation key). */
+  connections?: Record<string, string>;
 }
 
 /** Changes to the project itself; fields left out stay as they are. */

@@ -68,6 +68,7 @@ import {
 import { QueryState } from '../components/QueryState';
 import { AnalystTab } from './AnalystTab';
 import { ConfidentialCard } from './ConfidentialCard';
+import { ConnectionsCard } from './ConnectionsCard';
 import { DownloadsTab } from './DownloadsTab';
 import { ThemesTab } from './ThemesTab';
 import { StartDialog } from './StartDialog';
@@ -1210,6 +1211,7 @@ function SettingsTab({ project, token }: { project: Project; token: string | nul
         </Descriptions>
       </Card>
       <ConfidentialCard project={project} token={token} />
+      <ConnectionsCard project={project} token={token} />
       <Card title={PROJECTS.deleteTitle}>
         <Typography.Paragraph type="secondary">{PROJECTS.deleteText}</Typography.Paragraph>
         <Form form={form} layout="inline" onFinish={(v) => void submit(v)}>

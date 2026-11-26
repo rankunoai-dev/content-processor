@@ -143,6 +143,10 @@ class ProjectOut(StrictModel):
         description="page text from this project is never sent to Claude or shown to Claude "
         "Desktop; only counts and names",
     )
+    connections: dict[str, str] = Field(
+        default_factory=dict,
+        description="platform -> the saved connection this project uses for it",
+    )
 
 
 class SiteIn(StrictModel):
@@ -561,6 +565,7 @@ def register_project_routes(
             sites=sites,
             last_run=runs[0] if runs else None,
             confidential=record.confidential,
+            connections=dict(record.connections),
         )
 
     def project_password(given: str | None) -> str:
