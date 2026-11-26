@@ -601,6 +601,9 @@ def test_decisions_need_two_agreeing_signals() -> None:
     assert decide_role({"structure": "faq", "text": "faq", "model": None}).status == "accepted"
     single = decide_role({"structure": None, "text": "pricing"})
     assert single.value is None and single.status == "single_signal"
+    alone = decide_role({"structure": None, "text": "pricing"}, model_used=False)
+    assert alone.value == "pricing" and alone.status == "single_signal"  # no model to agree
+    assert decide_role({"structure": "faq", "text": "disclaimer"}, model_used=False).value is None
     conflict = decide_role({"structure": "faq", "text": "disclaimer"})
     assert conflict.status == "review" and conflict.value is None
     assert decide_role({"structure": None}).status == "unlabelled"

@@ -62,7 +62,7 @@ def test_catalog_lists_every_built_tool_read_only_with_a_project() -> None:
         "check_deliverable",
         "save_deliverable",
     ]
-    assert len(built) == 20
+    assert len(built) == 22
     for d in defs[1:]:
         if d.name == "get_scrape_queue":  # the one tool that takes no project
             continue
@@ -146,7 +146,7 @@ def test_mcp_protocol_end_to_end(themed: World, tmp_path: Path) -> None:
         return [t.name for t in tools.tools], json.loads(text), wrong_text, bool(wrong.is_error)
 
     names, theme, wrong_text, wrong_error = anyio.run(scenario)
-    assert names[0] == "list_projects" and "check_deliverable" in names and len(names) == 27
+    assert names[0] == "list_projects" and "check_deliverable" in names and len(names) == 29
     assert {"get_theme_pages", "export_theme_pages_csv", "get_scrape_queue"} <= set(names)
     assert theme["tool"] == "get_theme_map" and theme["data"]
     assert wrong_error and "unknown tool" in wrong_text

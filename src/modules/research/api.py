@@ -274,8 +274,8 @@ def register_research_routes(
         if report is None:
             raise HTTPException(
                 status_code=404,
-                detail="No page report yet: import or pull search data, or a Search Console "
-                "export.",
+                detail="No page report yet: scrape the client website, or import search data "
+                "or a Search Console export.",
             )
         return report
 

@@ -402,12 +402,16 @@ def write_label_review(
                 [
                     {"Column": k, "Meaning": v}
                     for k, v in (
-                        ("Role", "What the passage does; set only when two signals agree."),
+                        (
+                            "Role",
+                            "What the passage does; set when two signals agree, or when "
+                            "only one signal spoke and no AI model was used.",
+                        ),
                         (
                             "Role status",
-                            "accepted: two signals agree. single_signal: only one signal, "
-                            "not used. review: signals disagree, a person decides. "
-                            "unlabelled: no signal.",
+                            "accepted: two signals agree. single_signal: only one signal "
+                            "(kept as the role when no AI model ran, else not used). "
+                            "review: signals disagree, a person decides. unlabelled: no signal.",
                         ),
                         (
                             "Role signals",

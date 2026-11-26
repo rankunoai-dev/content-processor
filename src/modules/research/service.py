@@ -507,17 +507,30 @@ def build_project_pages(
     return report, {"report": str(path), "workbook": str(workbook)}
 
 
+def _client_run_name(
+    projects: ProjectStore, access: KnowledgeAccess, project_id: str
+) -> str | None:
+    """The run the page report reads for the client website, or None (not scraped yet)."""
+    play = Playground(projects, access, [project_id])
+    client = next((w for w in play.websites() if play.role_in_run(w) == "client"), None)
+    data = play.site_data(client) if client else None
+    return data.run_name if data else None
+
+
 def page_report(
     projects: ProjectStore, access: KnowledgeAccess, project_id: str
 ) -> PageReport | None:
-    """The saved page report, rebuilt first when research or Search Console is newer.
+    """The saved page report, rebuilt first when research, Search Console or the scrape is newer.
 
-    None when the project has neither research nor Search Console data.
+    The scrape alone is enough: internal links, PageRank, unlinked pages and on-page
+    problems need no search data (the ranking columns are then empty). None when the
+    project has no scraped client website and no research or Search Console data.
     """
     store = research_store(projects)
     snapshot = store.latest(project_id)
     gsc = store.latest_gsc(project_id)
-    if snapshot is None and gsc is None:
+    run_name = _client_run_name(projects, access, project_id)
+    if snapshot is None and gsc is None and run_name is None:
         return None
     saved = store.latest_pages(project_id)
     from src.modules.analytics.service import analytics_store
@@ -528,6 +541,7 @@ def page_report(
         and saved.research_snapshot_id == (snapshot.snapshot_id if snapshot else None)
         and saved.gsc_imported_at == (gsc.imported_at if gsc else None)
         and saved.ga4_snapshot_id == (ga4.snapshot_id if ga4 else None)
+        and saved.run_id == run_name
     ):
         return saved
     report, _files = build_project_pages(projects, access, project_id)

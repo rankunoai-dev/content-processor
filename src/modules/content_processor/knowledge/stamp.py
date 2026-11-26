@@ -355,41 +355,125 @@ def _load_page(record: UrlRecord, load_payload: PayloadLoader) -> _Page:
     return _Page(record, url, _parse_html(body, url, views), "stored_html")
 
 
+SAME_PAGE_JACCARD = 0.75
+"""Two pages with the same text are one page only when their H1s (or titles) share this
+much of their words: the client and adviser copies of one form are one page, two different
+forms built on the same instructions are two. The title is compared (templates often share
+one H1, a chat widget's or a generic "Online submission form"); the H1 when there is none."""
+_IDENTITY_WORD = re.compile(r"[a-z0-9]+")
+_MAX_TITLE_GROUPS = 500
+_MAX_NOTED = 20
+"""Distinct titles compared within one group of identical pages (bounds the work)."""
+
+
+def _identity(page: _Page) -> set[str]:
+    stamp = page.stamp
+    text = (stamp.title or stamp.h1 or "") if stamp is not None else ""
+    return {w for w in _IDENTITY_WORD.findall(text.casefold()) if len(w) > 1}
+
+
+def _same_page(a: _Page, b: _Page) -> bool:
+    """True when two same-text pages are one page under two addresses (see SAME_PAGE_JACCARD)."""
+    ia, ib = _identity(a), _identity(b)
+    if not ia or not ib:
+        return True
+    shared = len(ia & ib)
+    # short titles: one word apart on each side ("... client" / "... rep") is one page
+    return shared / len(ia | ib) >= SAME_PAGE_JACCARD or (shared >= 3 and len(ia ^ ib) <= 2)
+
+
 def _mark_duplicates(pages: list[_Page]) -> None:
-    """Canonical and identical-text duplicates leave the knowledge base; near ones are noted."""
-    by_url = {p.url.rstrip("/"): p for p in pages}
-    for page in pages:
+    """Copies of one page leave the knowledge base, one copy always stays; near ones are noted.
+
+    A page whose canonical names another captured page, and pages with the same text and
+    the same title (`_same_page`), are grouped (groups chain: A=B and B=C is one
+    group). Each group keeps one page searchable: one whose canonical names no other page
+    (the end of a canonical chain), the most named, else the shortest address, and every other page points to it with `duplicate_of`.
+    Same-text pages that are different pages (two forms with shared instructions) stay
+    searchable and are noted as near duplicates.
+    """
+    eligible = [p for p in pages if p.stamp is not None and p.stamp.knowledge_eligible]
+    by_url = {p.url.rstrip("/"): p for p in eligible}
+    parent: dict[int, int] = {id(p): id(p) for p in eligible}
+
+    def root(key: int) -> int:
+        while parent[key] != key:
+            parent[key] = parent[parent[key]]
+            key = parent[key]
+        return key
+
+    def join(a: _Page, b: _Page) -> None:
+        ra, rb = root(id(a)), root(id(b))
+        if ra != rb:
+            parent[rb] = ra
+
+    named: Counter[int] = Counter()
+    points: set[int] = set()  # pages whose canonical names another captured page
+    for page in eligible:
         stamp = page.stamp
-        if stamp is None or not stamp.knowledge_eligible or not stamp.canonical:
+        if stamp is None or not stamp.canonical:
             continue
         target = by_url.get(stamp.canonical.split("#", 1)[0].rstrip("/"))
-        if (
-            target is not None
-            and target is not page
-            and target.stamp is not None
-            and target.stamp.knowledge_eligible
-        ):
-            stamp.duplicate_of = target.url
-    eligible = [p for p in pages if p.stamp is not None and p.stamp.knowledge_eligible]
+        if target is not None and target is not page:
+            named[id(target)] += 1
+            points.add(id(page))
+            join(target, page)
     by_record = {p.record.requested_url: p for p in eligible}
     result = find_overlaps(
         [p.record for p in eligible], OverlapConfig(threshold=NEAR_DUPLICATE_JACCARD)
     )
+    # same text: pairs name only one member of a group of identical pages, so the
+    # group is built first and its members compared with each other by title
+    text_parent: dict[int, int] = {id(p): id(p) for p in eligible}
+
+    def text_root(key: int) -> int:
+        while text_parent[key] != key:
+            text_parent[key] = text_parent[text_parent[key]]
+            key = text_parent[key]
+        return key
+
     for pair in result.pairs:
         a, b = by_record.get(pair.a.url), by_record.get(pair.b.url)
         if a is None or b is None or a.stamp is None or b.stamp is None:
             continue
         if pair.basis == "exact_duplicate" or pair.jaccard >= 1.0:
-            keep, drop = sorted((a, b), key=lambda p: (len(p.url), p.url))
-            if drop.stamp is not None and drop.stamp.duplicate_of is None:
-                drop.stamp.duplicate_of = keep.url
+            ra, rb = text_root(id(a)), text_root(id(b))
+            if ra != rb:
+                text_parent[rb] = ra
         else:
             a.stamp.near_duplicates.append(b.url)
             b.stamp.near_duplicates.append(a.url)
-    for page in pages:
-        if page.stamp is not None and page.stamp.duplicate_of:
-            page.stamp.knowledge_eligible = False
-            page.stamp.exclusion_reason = "duplicate"
+    same_text: dict[int, list[_Page]] = {}
+    for page in eligible:
+        same_text.setdefault(text_root(id(page)), []).append(page)
+    for members in same_text.values():
+        if len(members) < 2:
+            continue
+        reps: list[_Page] = []  # one page per distinct title so far
+        for page in sorted(members, key=lambda p: (len(p.url), p.url)):
+            if len(reps) >= _MAX_TITLE_GROUPS:  # very many titles: kept apart, not compared
+                break
+            twin = next((r for r in reps if _same_page(r, page)), None)
+            if twin is not None:
+                join(twin, page)
+            else:
+                reps.append(page)
+        for page in members:  # same text, different page: noted, both stay searchable
+            if page.stamp is not None:
+                others = [m.url for m in members if root(id(m)) != root(id(page))]
+                page.stamp.near_duplicates.extend(others[:_MAX_NOTED])
+    groups: dict[int, list[_Page]] = {}
+    for page in eligible:
+        groups.setdefault(root(id(page)), []).append(page)
+    for members in groups.values():
+        if len(members) < 2:
+            continue
+        keep = min(members, key=lambda p: (id(p) in points, -named[id(p)], len(p.url), p.url))
+        for page in members:
+            if page is not keep and page.stamp is not None:
+                page.stamp.duplicate_of = keep.url
+                page.stamp.knowledge_eligible = False
+                page.stamp.exclusion_reason = "duplicate"
 
 
 def _site_name(pages: Sequence[_Page], fallback: str) -> tuple[str, str | None]:
