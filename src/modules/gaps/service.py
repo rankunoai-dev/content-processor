@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from src.modules.analyst.playground import Playground
+from src.modules.backlinks.service import backlinks_store
 from src.modules.content_processor.knowledge.catalog_models import Catalog
 from src.modules.content_processor.projects.store import ProjectStore
 from src.modules.content_processor.webapi.projects_api import KnowledgeAccess
@@ -74,6 +75,7 @@ def build_project_gaps(
         settings=gap_store(projects).settings(project_id),
         client_domains=client_domains_everywhere(projects.projects()),
         pages=pages,
+        backlinks=backlinks_store(projects).latest(project_id),
     )
     store = gap_store(projects)
     statuses = store.statuses(project_id)

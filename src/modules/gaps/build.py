@@ -12,7 +12,9 @@ Inputs (each optional except the theme map, which is built when missing):
 - **monitoring check** (Monitoring): themes where competitors added pages since the
   previous scrape and the client did not;
 - **offering catalogs** (Content Extractor): competitor offerings with no client
-  offering of a similar name.
+  offering of a similar name;
+- **backlink snapshot** (Backlinks, Ahrefs): websites linking to competitors and not to
+  the client (link intersect), and competitors with much stronger links (authority gap).
 
 Priority (0-100) grows with competitor coverage and search demand; each finding
 lists its evidence (pages, pillars, keywords, counts) and a recommended next step.
@@ -27,6 +29,7 @@ from collections import Counter, defaultdict
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 
+from src.modules.backlinks.models import BacklinkSnapshot
 from src.modules.gaps.models import EvidenceItem, Finding, FindingKind, GapSettings
 from src.modules.monitoring.models import MonitorCheck
 from src.modules.research.competitors import CompetitorSuggestion, is_client_domain
@@ -54,6 +57,8 @@ _BASE: dict[FindingKind, int] = {
     "link_opportunity": 30,
     "unlinked_pages": 25,
     "zero_traffic": 15,
+    "link_intersect": 35,
+    "authority_gap": 30,
 }
 _COMMERCIAL_SHARE = 0.5  # buyer intent is the bigger part: priority up
 _INFORMATIONAL_SHARE = 0.2  # buyer intent is a small part: priority down
@@ -792,6 +797,99 @@ def _page_findings(report: PageReport) -> list[Finding]:
     return out
 
 
+_DR_GAP = 10.0  # Domain Rating points behind a competitor that make a finding
+_REFDOMAIN_RATIO = 2.0  # or a competitor with this many times the referring domains
+
+
+def _backlink_findings(snapshot: BacklinkSnapshot) -> list[Finding]:
+    """Findings from the backlink snapshot: the link intersect and the authority gap."""
+    out: list[Finding] = []
+    insights = snapshot.insights
+    rows = insights.link_intersect
+    if rows and insights.client:
+        rivals = sorted({c for r in rows for c in r.competitors})
+        need = insights.min_competitors
+        names = ", ".join(
+            r.domain + (f" (DR {r.domain_rating:g})" if r.domain_rating is not None else "")
+            for r in rows[:5]
+        )
+        out.append(
+            _finding(
+                "link_intersect",
+                "link-intersect",
+                title=f"{len(rows)} website(s) link to "
+                + ("2 or more competitors" if need > 1 else "the competitor")
+                + " but not to the client",
+                detail=f"The strongest are {names}. They already link to pages like the "
+                f"client's on {', '.join(rivals)}, so they are the likeliest to link to it "
+                "too.",
+                action="Open what these websites link to on the competitors' sites (guides, "
+                "tools, research, listings, partner pages), make or improve the client's page "
+                "on the same subject, and ask them for a link, strongest first.",
+                competitors=rivals,
+                competitor_pages=len(rows),
+                evidence=[
+                    EvidenceItem(
+                        kind="link",
+                        label=r.domain
+                        + (f" (DR {r.domain_rating:g})" if r.domain_rating is not None else "")
+                        + f": links to {', '.join(r.competitors)}",
+                        website=r.domain,
+                        url=f"https://{r.domain}/",
+                        value=r.domain_rating,
+                    )
+                    for r in rows
+                ],
+            )
+        )
+    for gap in insights.authority:
+        if gap.metric == "domain_rating":
+            if gap.gap < _DR_GAP:
+                continue
+            title = (
+                f"{gap.competitor} has Domain Rating {gap.competitor_value:g} against the "
+                f"client's {gap.client:g}"
+            )
+            points = int(gap.gap // 10)
+        else:
+            if gap.competitor_value < _REFDOMAIN_RATIO * max(1.0, gap.client):
+                continue
+            title = (
+                f"{gap.competitor} has {gap.competitor_value:,.0f} referring domains against "
+                f"the client's {gap.client:,.0f}"
+            )
+            points = min(5, int(gap.competitor_value // max(1.0, gap.client)))
+        out.append(
+            _finding(
+                "authority_gap",
+                gap.competitor,
+                title=title,
+                detail=f"Stronger links let {gap.competitor} rank higher for the same content. "
+                f"Referring domains: client {gap.client_refdomains:,}, {gap.competitor} "
+                f"{gap.competitor_refdomains:,}.",
+                action="Earn links to the client's strongest pages first: start with the link "
+                "intersect list, then pages worth citing (research, tools, guides). Track the "
+                "gap with a new pull or export each month.",
+                competitors=[gap.competitor],
+                competitor_pages=points,
+                evidence=[
+                    EvidenceItem(
+                        kind="count",
+                        label=(
+                            "Domain Rating"
+                            if gap.metric == "domain_rating"
+                            else "Referring domains"
+                        )
+                        + f": client {gap.client:g}, {gap.competitor} {gap.competitor_value:g}",
+                        website=gap.competitor,
+                        value=gap.gap,
+                    )
+                ],
+            )
+        )
+    return out
+
+
 def build_findings(
     theme_map: ThemeMap,
     roles: Mapping[str, str],
@@ -803,6 +901,7 @@ def build_findings(
     settings: GapSettings | None = None,
     client_domains: Sequence[str] = (),
     pages: PageReport | None = None,
+    backlinks: BacklinkSnapshot | None = None,
 ) -> list[Finding]:
     """Every finding, highest priority first.
 
@@ -821,6 +920,8 @@ def build_findings(
     findings += _unwatched_findings(suggested, client_domains)
     if pages is not None:
         findings += _page_findings(pages)
+    if backlinks is not None:
+        findings += _backlink_findings(backlinks)
     findings = [_with_basis(f, theme_map) for f in findings]
     return sorted(findings, key=lambda f: (-f.priority, f.kind, f.title))
 

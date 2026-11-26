@@ -157,5 +157,5 @@ Semrush **Organic Research → Positions** export (CSV, `,` or `;`, with or with
 ## Not done yet
 
 - A live Semrush pull (waits for a key and a monthly cap).
-- Backlinks, SERP features and keyword difficulty by API (phrase_kdi is priced but not called).
+- SERP features and keyword difficulty by API (phrase_kdi is priced but not called). Backlinks come from Ahrefs instead: see `MODULE_BACKLINKS.md`.
 - Scheduled pulls.

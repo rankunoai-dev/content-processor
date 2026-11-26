@@ -269,6 +269,24 @@ class Settings(BaseSettings):
     # stand-in, `research standin serve`) is accepted, so the key never goes elsewhere.
     cp_semrush_base_url: str = "https://api.semrush.com/"
 
+    # -- Backlinks module (Ahrefs API v3, src/modules/backlinks) ------------
+    # Off until switched on; a monthly unit cap of 0 means unset and refuses every pull.
+    # Ahrefs bills per row and field (at least 50 units a request); key: AHREFS_API_KEY.
+    cp_ahrefs_enabled: bool = False
+    cp_ahrefs_monthly_units: int = Field(default=0, ge=0)
+    cp_ahrefs_pull_units: int = Field(default=10000, ge=0, description="Most one pull may use")
+    cp_ahrefs_refdomains_limit: int = Field(
+        default=500, ge=10, le=10000, description="Referring domains asked per website"
+    )
+    cp_ahrefs_pages_limit: int = Field(
+        default=100, ge=5, le=1000, description="Top pages by links asked per website"
+    )
+    cp_ahrefs_min_interval_ms: int = Field(
+        default=500, ge=0, le=10000, description="Pause between two Ahrefs calls (all pulls)"
+    )
+    # Only the real address or one on this computer (the stand-in) is accepted.
+    cp_ahrefs_base_url: str = "https://api.ahrefs.com/v3/"
+
     # -- Content Scraper: the shared scrape queue and its emails ------------
     # One scrape runs at a time on the instance; the others wait in one queue.
     # Without an SMTP host, emails are written to <app data>/outbox/ instead of sent.
