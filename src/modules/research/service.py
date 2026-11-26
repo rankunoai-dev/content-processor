@@ -10,6 +10,7 @@ from pathlib import Path
 import httpx
 
 from src.modules.analyst.playground import Playground
+from src.modules.analytics.models import Ga4Snapshot
 from src.modules.content_processor.projects.store import ProjectStore
 from src.modules.content_processor.webapi.projects_api import KnowledgeAccess
 from src.modules.research.build import (
@@ -443,6 +444,16 @@ def _paragraphs(path: Path) -> dict[str, list[str]]:
     return out
 
 
+def _ga4_for(projects: ProjectStore, project_id: str, website: str) -> Ga4Snapshot | None:
+    """The latest GA4 snapshot of this website, if any."""
+    from src.modules.analytics.service import analytics_store
+
+    snapshot = analytics_store(projects).latest(project_id)
+    if snapshot is None or snapshot.website != website.removeprefix("www."):
+        return None
+    return snapshot
+
+
 def build_project_pages(
     projects: ProjectStore, access: KnowledgeAccess, project_id: str
 ) -> tuple[PageReport, dict[str, str]]:
@@ -488,6 +499,7 @@ def build_project_pages(
         now=datetime.now(UTC),
         run_id=data.run_name if data else None,
         paragraphs=paragraphs,
+        ga4=_ga4_for(projects, project_id, website),
         brands=brand_terms([w.key for w in play.websites()] + [w.name for w in play.websites()]),
     )
     path = store.save_pages(report)
@@ -508,10 +520,14 @@ def page_report(
     if snapshot is None and gsc is None:
         return None
     saved = store.latest_pages(project_id)
+    from src.modules.analytics.service import analytics_store
+
+    ga4 = analytics_store(projects).latest(project_id)
     if (
         saved is not None
         and saved.research_snapshot_id == (snapshot.snapshot_id if snapshot else None)
         and saved.gsc_imported_at == (gsc.imported_at if gsc else None)
+        and saved.ga4_snapshot_id == (ga4.snapshot_id if ga4 else None)
     ):
         return saved
     report, _files = build_project_pages(projects, access, project_id)

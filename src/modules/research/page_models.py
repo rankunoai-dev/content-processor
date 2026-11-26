@@ -54,6 +54,13 @@ class PageRow(StrictModel):
     gsc_impressions: int | None = None
     gsc_ctr: float | None = None
     gsc_position: float | None = None
+    ga_sessions: int | None = Field(default=None, description="GA4 sessions landing here")
+    ga_organic_sessions: int | None = None
+    ga_engagement_rate: float | None = None
+    ga_avg_engagement_s: float | None = None
+    ga_conversions: float | None = Field(default=None, description="GA4 key events")
+    ga_revenue: float | None = None
+    ga_ai_sessions: int | None = Field(default=None, description="Sessions from AI assistants")
     indexable: bool = True
 
 
@@ -140,6 +147,9 @@ class ConsolidationPair(StrictModel):
     priority: Literal["High", "Medium", "Low"]
     searches: list[SearchLine] = Field(default_factory=list)
     shared_paragraphs: int = 0
+    owner_check: str = Field(
+        default="", description="GA4 says the competing page converts better: confirm the owner"
+    )
 
 
 class LinkChange(StrictModel):
@@ -196,10 +206,15 @@ class PageReport(StrictModel):
     run_id: str | None = None
     gsc_period: str | None = None
     gsc_imported_at: datetime | None = None
+    ga4_snapshot_id: str | None = None
     pages: list[PageRow] = Field(default_factory=list)
     cannibalisation: list[Cannibalisation] = Field(default_factory=list)
     zero_traffic: list[str] = Field(
         default_factory=list, description="Indexable pages that rank for nothing"
+    )
+    kept_by_ga4: list[str] = Field(
+        default_factory=list,
+        description="Rank for nothing but convert or draw visits in GA4: not to prune",
     )
     orphans: list[str] = Field(default_factory=list, description="No link from any page's text")
     near_orphans: list[str] = Field(default_factory=list, description="One link from page text")

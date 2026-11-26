@@ -56,6 +56,8 @@ from src.integrations.http_client import FetchLimits, HttpFetcher
 from src.integrations.impersonated_client import ImpersonatedFetcher, impersonation_available
 from src.modules.accounts.commands import register as register_account_commands
 from src.modules.analyst.commands import register as register_analyst_commands
+from src.modules.analytics.commands import register as register_analytics_commands
+from src.modules.analytics.commands import register_standin as register_analytics_standin
 from src.modules.backlinks.commands import register as register_backlinks_commands
 from src.modules.backlinks.commands import register_standin as register_backlinks_standin
 from src.modules.content_processor.contracts import InteractionPolicy, RunScope
@@ -1066,6 +1068,8 @@ def main(argv: list[str] | None = None) -> int:
     register_research_commands(sub)
     register_standin(sub)
     register_backlinks_commands(sub)
+    register_analytics_commands(sub)
+    register_analytics_standin(sub)
     register_backlinks_standin(sub)
     register_gap_commands(sub)
     register_account_commands(sub)

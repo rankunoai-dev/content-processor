@@ -23,6 +23,7 @@ from collections.abc import Mapping, Sequence
 from datetime import datetime
 from typing import Final
 
+from src.modules.analytics.models import Ga4Snapshot
 from src.modules.content_processor.knowledge.inventory_models import PageInventory
 from src.modules.content_processor.knowledge.models import PageStamp
 from src.modules.research.build import estimated_visits
@@ -32,6 +33,7 @@ from src.modules.research.links import LinkGraph, build_graph, page_key
 from src.modules.research.models import KeywordRow, ResearchSnapshot, WebsiteResearch
 from src.modules.research.page_models import (
     Cannibalisation,
+    ConsolidationPair,
     LinkSuggestion,
     PageReport,
     PageRow,
@@ -181,6 +183,31 @@ def _suggestions(
     return out
 
 
+_GA4_MIN_NEW_ROW: Final = 10
+_GA4_KEEP_SESSIONS: Final = 50
+_GA4_BETTER: Final = 2.0
+_GA4_MIN_EVENTS: Final = 5
+
+
+def _owner_checks(pairs: Sequence[ConsolidationPair], rows: Mapping[str, PageRow]) -> None:
+    """Flag pairs whose competing page converts clearly better than the chosen owner."""
+    for pair in pairs:
+        page, owner = rows.get(page_key(pair.page)), rows.get(page_key(pair.owner))
+        if page is None or owner is None or not page.ga_sessions:
+            continue
+        rate = (page.ga_conversions or 0) / page.ga_sessions
+        owner_rate = (owner.ga_conversions or 0) / owner.ga_sessions if owner.ga_sessions else 0.0
+        if (page.ga_conversions or 0) >= _GA4_MIN_EVENTS and rate >= _GA4_BETTER * max(
+            owner_rate, 1e-9
+        ):
+            pair.owner_check = (
+                f"GA4: this page converts {rate:.1%} of its sessions against {owner_rate:.1%} "
+                f"for the chosen owner (engagement {page.ga_engagement_rate or 0:.0%} against "
+                f"{owner.ga_engagement_rate or 0:.0%}); confirm which page should own the topic "
+                "before consolidating"
+            )
+
+
 def build_page_report(
     project_id: str,
     website: str,
@@ -195,6 +222,7 @@ def build_page_report(
     run_id: str | None = None,
     paragraphs: Mapping[str, Sequence[str]] | None = None,
     brands: Sequence[str] = (),
+    ga4: Ga4Snapshot | None = None,
 ) -> PageReport:
     """The report for one website (the client's); every input may be missing."""
     report = PageReport(
@@ -205,6 +233,7 @@ def build_page_report(
         run_id=run_id,
         gsc_period=gsc.period if gsc else None,
         gsc_imported_at=gsc.imported_at if gsc else None,
+        ga4_snapshot_id=ga4.snapshot_id if ga4 else None,
     )
     site = _client(snapshot, website) if snapshot else None
     keywords = site.keywords if site else []
@@ -274,15 +303,37 @@ def build_page_report(
                 row.gsc_ctr, row.gsc_position = round(g.ctr, 4), round(g.position, 1)
         report.ctr_opportunities = ctr_opportunities(gsc)
 
+    if ga4 is not None:
+        for ga in ga4.rows:
+            key = page_key(ga.url)
+            if key not in rows and ga.sessions < _GA4_MIN_NEW_ROW:
+                continue
+            row = row_for(ga.url)
+            row.ga_sessions, row.ga_organic_sessions = ga.sessions, ga.organic_sessions
+            row.ga_engagement_rate, row.ga_avg_engagement_s = (
+                ga.engagement_rate,
+                ga.avg_engagement_s,
+            )
+            row.ga_conversions, row.ga_revenue = ga.key_events, ga.revenue
+            row.ga_ai_sessions = ga.ai_sessions
     report.pages = sorted(rows.values(), key=lambda r: (-r.visits, -r.volume, r.url))
     previous_site = _client(previous, website) if previous else None
     report.cannibalisation = _cannibals(keywords, previous_site, gsc)
     if keywords:
-        report.zero_traffic = sorted(
-            r.url
+        unranked = [
+            r
             for k, r in rows.items()
             if k in graph.urls and r.indexable and not r.keywords and not graph.is_home(k)
-        )
+        ]
+        # a page that ranks for nothing may still convert or draw visits from other
+        # channels (direct, email, paid): never suggest pruning it
+        kept = [
+            r
+            for r in unranked
+            if (r.ga_conversions or 0) > 0 or (r.ga_sessions or 0) >= _GA4_KEEP_SESSIONS
+        ]
+        report.kept_by_ga4 = sorted(r.url for r in kept)
+        report.zero_traffic = sorted(r.url for r in unranked if r not in kept)
     report.orphans = graph.orphans()
     report.near_orphans = graph.near_orphans()
     report.stuck = [
@@ -304,6 +355,8 @@ def build_page_report(
             brands=brands,
             top_keyword={k: r.top_keyword for k, r in rows.items() if r.top_keyword},
         )
+        if ga4 is not None:
+            _owner_checks(report.plan.pairs, rows)
 
     if inventory:
         report.notes.append(
@@ -326,5 +379,10 @@ def build_page_report(
         report.notes.append(
             "No Search Console data: import its Performance export for real clicks, "
             "impressions and CTR."
+        )
+    if ga4 is None:
+        report.notes.append(
+            "No GA4 data: import the GA4 landing page export for sessions, engagement and "
+            "conversions per page."
         )
     return report

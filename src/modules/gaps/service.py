@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from src.modules.analyst.playground import Playground
+from src.modules.analytics.models import AnalyticsReport
 from src.modules.backlinks.service import backlinks_store
 from src.modules.content_processor.knowledge.catalog_models import Catalog
 from src.modules.content_processor.projects.store import ProjectStore
@@ -38,6 +39,16 @@ def _catalogs(play: Playground) -> dict[str, list[tuple[str, str | None]]]:
         catalog = Catalog.model_validate_json(path.read_text(encoding="utf-8"))
         out[website.key] = [(o.name, o.href) for o in catalog.offerings]
     return out
+
+
+def _analytics(
+    projects: ProjectStore, access: KnowledgeAccess, project_id: str
+) -> AnalyticsReport | None:
+    """The GA4 report when the project has GA4 data."""
+    from src.modules.analytics.service import build_analytics_report
+
+    built = build_analytics_report(projects, access, project_id)
+    return built[0] if built else None
 
 
 def build_project_gaps(
@@ -76,6 +87,7 @@ def build_project_gaps(
         client_domains=client_domains_everywhere(projects.projects()),
         pages=pages,
         backlinks=backlinks_store(projects).latest(project_id),
+        analytics=_analytics(projects, access, project_id),
     )
     store = gap_store(projects)
     statuses = store.statuses(project_id)

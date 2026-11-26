@@ -36,6 +36,7 @@ import {
 import { DownloadMenu } from '../components/DownloadMenu';
 import { QueryState } from '../components/QueryState';
 import { RESEARCH } from '../vocabulary';
+import { AnalyticsCard } from './AnalyticsCard';
 import { BacklinksCard } from './BacklinksCard';
 import { GscCard, PageReportCard } from './PageReport';
 import { SuggestedCompetitors } from './SuggestedCompetitors';
@@ -324,6 +325,7 @@ export function ResearchTab({ project, token }: { project: Project; token: strin
       <SuggestedCompetitors projectId={project.project_id} token={token} />
       <PageReportCard projectId={project.project_id} />
       <BacklinksCard project={project} token={token} />
+      <AnalyticsCard projectId={project.project_id} token={token} />
       <QueryState query={research} rows={6}>
         {(snap) =>
           snap === null ? (

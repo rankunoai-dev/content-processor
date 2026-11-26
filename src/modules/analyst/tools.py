@@ -185,6 +185,30 @@ class PageReportInput(StrictModel):
     limit: int = Field(default=25, ge=1, le=200)
 
 
+class AnalyticsInput(StrictModel):
+    """One section of the project's GA4 report."""
+
+    section: Literal[
+        "summary",
+        "themes",
+        "funnel",
+        "pages",
+        "leaky",
+        "decays",
+        "ctas",
+        "ai_referrals",
+        "after_edits",
+    ] = Field(
+        default="summary",
+        description="summary (totals, channels, counts), themes and funnel (sessions, "
+        "conversions and revenue per theme or buying stage), pages (top landing pages), leaky "
+        "(search traffic that does not convert), decays (organic visits or conversions down "
+        "against the period before), ctas (forms or calls to action nobody completes), "
+        "ai_referrals (visits from AI assistants), after_edits (pages changed between scrapes)",
+    )
+    limit: int = Field(default=25, ge=1, le=200)
+
+
 class RankingsInput(StrictModel):
     """A website's rankings in the latest research snapshot."""
 
@@ -1229,6 +1253,88 @@ def _page_report(play: Playground, args: PageReportInput) -> dict[str, Any]:
     return out
 
 
+def _analytics(play: Playground, args: AnalyticsInput) -> dict[str, Any]:
+    from src.modules.analytics.service import analytics_store, build_analytics_report
+
+    project_id = play.project_ids[0]
+    built = build_analytics_report(play.store, play.access, project_id)
+    if built is None:
+        msg = (
+            "this project has no GA4 data yet: import the GA4 landing page export or pull from "
+            "the GA4 Data API in the Research tab first"
+        )
+        raise ToolError(msg)
+    report, _files = built
+    n = args.limit
+
+    def ref(key: str, title: str, text: str, url: str | None = None) -> str:
+        return play.ledger.fact(
+            f"ga4\x1f{report.snapshot_id}\x1f{args.section}\x1f{key}",
+            kind="analytics",
+            website=report.website,
+            title=title,
+            url=url,
+            text=text,
+        )
+
+    out: dict[str, Any] = {
+        "website": report.website,
+        "period": report.period,
+        "source": "GA4 (real visits, not estimates)",
+        "notes": report.notes,
+    }
+    if args.section == "summary":
+        out |= {
+            "ref": ref("totals", "GA4 totals", json.dumps(report.totals)),
+            "totals": report.totals,
+            "channels": report.channels,
+            "counts": {
+                "leaky_pages": len(report.leaky),
+                "decays": len(report.decays),
+                "ctas_without_conversions": len(report.cta_gaps),
+                "ai_referral_pages": len(report.ai_referrals),
+                "pages_changed_between_scrapes": len(report.post_edit),
+            },
+        }
+    elif args.section in ("themes", "funnel"):
+        groups = report.themes if args.section == "themes" else report.funnel
+        out[args.section] = [
+            {
+                "ref": ref(g.key, f"GA4 {args.section}: {g.label}",
+                           f"{g.sessions} sessions, {g.key_events} key events"),
+                **g.model_dump(),
+                "conversion_rate": round(g.conversion_rate, 4),
+            }
+            for g in groups[:n]
+        ]  # fmt: skip
+    elif args.section == "pages":
+        snapshot = analytics_store(play.store).latest(project_id)
+        rows = snapshot.rows[:n] if snapshot else []
+        out["pages"] = [
+            {
+                "ref": ref(r.url, f"GA4 page: {r.url}",
+                           f"{r.sessions} sessions, {r.key_events} key events", r.url),
+                **r.model_dump(),
+                "conversion_rate": round(r.conversion_rate, 4),
+            }
+            for r in rows
+        ]  # fmt: skip
+    else:
+        items: list[Any] = {
+            "leaky": report.leaky,
+            "decays": report.decays,
+            "ctas": report.cta_gaps,
+            "ai_referrals": report.ai_referrals,
+            "after_edits": report.post_edit,
+        }[args.section]  # type: ignore[assignment]
+        out[args.section] = [
+            {"ref": ref(i.url, f"GA4 {args.section}: {i.url}", i.model_dump_json(), i.url),
+             **i.model_dump()}
+            for i in items[:n]
+        ]  # fmt: skip
+    return out
+
+
 def _competitors(play: Playground, _args: NoInput) -> dict[str, Any]:
     from src.modules.research.competitors import SOURCE_LABELS
     from src.modules.research.service import competitor_book
@@ -1556,6 +1662,18 @@ TOOLS: dict[str, ToolSpec] = {
             "text and pages that rank for nothing. Ask one section at a time.",
             PageReportInput,
             _page_report,
+        ),
+        ToolSpec(
+            "get_analytics",
+            "research",
+            "What happens after the click, from GA4 (real visits, not estimates): totals and "
+            "channels, sessions, conversions and revenue per theme and buying stage, top landing "
+            "pages, leaky pages (search traffic that does not convert), organic visits or "
+            "conversions falling against the period before, forms or calls to action nobody "
+            "completes, visits from AI assistants, and pages changed between scrapes. Ask one "
+            "section at a time.",
+            AnalyticsInput,
+            _analytics,
         ),
         ToolSpec(
             "get_competitor_suggestions",

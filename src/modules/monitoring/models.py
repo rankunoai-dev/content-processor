@@ -51,6 +51,8 @@ AlertKind = Literal[
     "competitor_messaging_shift",
     "competitor_new_tables",
     "competitor_topic_drift",
+    "client_traffic_decay",
+    "client_conversion_drop",
 ]
 
 

@@ -18,6 +18,9 @@ Status: **built 2026-11-02** on `feat/research-gaps` (`src/modules/gaps/`). Step
 | `ctr_opportunity` | Search Console: a page-one page or query with a CTR under 60% of what its position usually gets; `demand` holds its impressions | page report |
 | `unlinked_pages` | Ranking pages that no scraped page links to from its text (one finding) | page report |
 | `zero_traffic` | Indexable scraped pages that rank for no keyword (one finding) | page report |
+| `leaky_page` | GA4: 100+ visits from search to a page that engages under 40% or converts nothing while the site converts | analytics |
+| `traffic_decay` | GA4: organic sessions or key events down 30%+ against the period before | analytics |
+| `cta_no_conversions` | GA4: a strong call to action or a form, 100+ sessions, no key event | analytics |
 | `keyword_behind` | **Page far behind**: the client ranks 21-100; evidence gives the client's position and page | research |
 | `striking_distance` | Client keywords at positions 11-20 (page two), grouped by theme | research |
 | `competitor_momentum` | A competitor adding pages in a theme (from monitoring's theme drift) | monitoring |

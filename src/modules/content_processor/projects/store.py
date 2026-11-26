@@ -68,7 +68,14 @@ __all__ = [
 
 _ID = re.compile(r"^[a-z0-9][a-z0-9-]{0,80}$")
 
-PROJECT_DATA_MODULES = ("theming", "monitoring", "gaps", "research", "backlinks")
+PROJECT_DATA_MODULES = (
+    "theming",
+    "monitoring",
+    "gaps",
+    "research",
+    "backlinks",
+    "analytics",
+)
 """Modules that keep `<root>/<module>/<project id>/` (see each module's `store.py`)."""
 
 

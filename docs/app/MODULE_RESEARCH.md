@@ -53,6 +53,11 @@ No live Semrush call has been made yet. The whole module has run end to end agai
   (the best-placed page is the keyword's page, the others `other_urls`) instead of the
   second being dropped.
 
+**GA4 in the page report** (see `MODULE_ANALYTICS.md`): GA4 sessions, engagement and key
+events per page; pages that rank for nothing but convert or draw visits are kept
+(`kept_by_ga4`), and competing pages that convert clearly better than the owner get an
+`owner_check`.
+
 ## Keyword cannibalisation plan ($0, `research/cannibal.py`)
 
 The rules of the keyword-cannibalisation playbook (v1.0, first proven on a 200-URL B2B

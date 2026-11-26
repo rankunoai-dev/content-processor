@@ -340,7 +340,8 @@ def test_page_report_joins_rankings_links_health_history_and_search_console() ->
 
 def test_an_empty_report_says_what_is_missing() -> None:
     report = build_page_report("p1", "example.com", snapshot=None, now=NOW)
-    assert report.pages == [] and len(report.notes) == 3
+    assert report.pages == [] and len(report.notes) == 4
+    assert "GA4" in report.notes[3]
     assert "no scrape inventory" in report.notes[0] and "Search Console" in report.notes[2]
 
 

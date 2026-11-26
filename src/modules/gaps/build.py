@@ -29,6 +29,7 @@ from collections import Counter, defaultdict
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 
+from src.modules.analytics.models import AnalyticsReport
 from src.modules.backlinks.models import BacklinkSnapshot
 from src.modules.gaps.models import EvidenceItem, Finding, FindingKind, GapSettings
 from src.modules.monitoring.models import MonitorCheck
@@ -59,7 +60,12 @@ _BASE: dict[FindingKind, int] = {
     "zero_traffic": 15,
     "link_intersect": 35,
     "authority_gap": 30,
+    "leaky_page": 45,
+    "traffic_decay": 45,
+    "cta_no_conversions": 40,
 }
+_CONVERTING_THEME = 1.5  # a theme converting 1.5x the site average: its findings rank higher
+_ROI_BONUS = 6
 _COMMERCIAL_SHARE = 0.5  # buyer intent is the bigger part: priority up
 _INFORMATIONAL_SHARE = 0.2  # buyer intent is a small part: priority down
 _MAX_PAGE_FINDINGS = 10
@@ -964,6 +970,101 @@ def _backlink_findings(snapshot: BacklinkSnapshot) -> list[Finding]:
     return out
 
 
+def _analytics_findings(report: AnalyticsReport) -> list[Finding]:
+    """GA4: leaky pages, falling traffic or conversions, CTAs that never convert."""
+    out: list[Finding] = []
+    period = f" ({report.period})" if report.period else ""
+    for p in report.leaky[:_MAX_PAGE_FINDINGS]:
+        search = p.organic_sessions or p.gsc_clicks or 0
+        out.append(
+            _finding(
+                "leaky_page",
+                p.url,
+                title=f"Search traffic that does not convert: {p.url}",
+                detail=f"{search:,} visits from search{period}, but {p.reason}. Visitors arrive "
+                "and leave: the page does not match what they searched for, or its next step is "
+                "hard to find.",
+                action="Check the searches that bring visitors here against what the page "
+                "offers first; make the next step (form, call, product) visible above the fold.",
+                demand=search,
+                evidence=[EvidenceItem(kind="page", label=p.url, url=p.url, value=search)],
+            )
+        )
+    for d in report.decays[:_MAX_PAGE_FINDINGS]:
+        what = {
+            "organic_sessions": "organic sessions",
+            "sessions": "sessions",
+            "key_events": "conversions",
+        }[d.metric]
+        out.append(
+            _finding(
+                "traffic_decay",
+                f"{d.metric}:{d.url}",
+                title=f"{what.capitalize()} down {abs(d.change):.0%}: {d.url}",
+                detail=f"{d.before:,.0f} to {d.after:,.0f} {what} against the period before"
+                f"{period}. Rankings can look flat while visits fall (an AI Overview above the "
+                "result) or conversions stop (a broken form after a release).",
+                action="Compare the page's rankings and search results for the same dates; if "
+                "they held, test the form and the call to action, then check recent edits.",
+                demand=round(d.before),
+                evidence=[
+                    EvidenceItem(
+                        kind="change",
+                        label=f"{what}: {d.before:,.0f} -> {d.after:,.0f}",
+                        url=d.url,
+                        value=d.change,
+                    )
+                ],
+            )
+        )
+    for c in report.cta_gaps[:_MAX_PAGE_FINDINGS]:
+        offers = ", ".join(c.ctas[:3]) or f"{c.forms} form(s)"
+        out.append(
+            _finding(
+                "cta_no_conversions",
+                c.url,
+                title=f"A call to action nobody completes: {c.url}",
+                detail=f"{c.sessions:,} sessions started here{period}, the page offers "
+                f"{offers}, and GA4 recorded no key event, while other pages convert.",
+                action="Submit the form yourself and check the key event fires in GA4 "
+                "DebugView; if it does, move or reword the call to action.",
+                demand=c.sessions,
+                evidence=[EvidenceItem(kind="page", label=offers, url=c.url, value=c.sessions)],
+            )
+        )
+    return out
+
+
+def _roi_weighted(findings: list[Finding], report: AnalyticsReport) -> list[Finding]:
+    """Findings in themes whose pages convert well above the site's average rank higher."""
+    sessions = report.totals.get("sessions", 0) or 0
+    average = (report.totals.get("key_events", 0) or 0) / sessions if sessions else 0.0
+    converting = {
+        t.key: t.conversion_rate
+        for t in report.themes
+        if average and t.sessions >= 50 and t.conversion_rate >= _CONVERTING_THEME * average
+    }
+    out = []
+    for f in findings:
+        rate = converting.get(f.theme_id or "")
+        if rate is None:
+            out.append(f)
+            continue
+        score = min(100, f.priority + _ROI_BONUS)
+        out.append(
+            f.model_copy(
+                update={
+                    "priority": score,
+                    "severity": _severity(score),
+                    "detail": f.detail
+                    + f" GA4: this theme's pages convert {rate:.1%} of sessions against "
+                    f"{average:.1%} for the site, so it ranks higher.",
+                }
+            )
+        )
+    return out
+
+
 def build_findings(
     theme_map: ThemeMap,
     roles: Mapping[str, str],
@@ -976,6 +1077,7 @@ def build_findings(
     client_domains: Sequence[str] = (),
     pages: PageReport | None = None,
     backlinks: BacklinkSnapshot | None = None,
+    analytics: AnalyticsReport | None = None,
 ) -> list[Finding]:
     """Every finding, highest priority first.
 
@@ -996,6 +1098,9 @@ def build_findings(
         findings += _page_findings(pages)
     if backlinks is not None:
         findings += _backlink_findings(backlinks)
+    if analytics is not None:
+        findings += _analytics_findings(analytics)
+        findings = _roi_weighted(findings, analytics)
     findings = [_with_basis(f, theme_map) for f in findings]
     return sorted(findings, key=lambda f: (-f.priority, f.kind, f.title))
 
