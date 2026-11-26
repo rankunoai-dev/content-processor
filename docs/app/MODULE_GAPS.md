@@ -21,6 +21,7 @@ Status: **built 2026-11-02** on `feat/research-gaps` (`src/modules/gaps/`). Step
 | `leaky_page` | GA4: 100+ visits from search to a page that engages under 40% or converts nothing while the site converts | analytics |
 | `traffic_decay` | GA4: organic sessions or key events down 30%+ against the period before | analytics |
 | `cta_no_conversions` | GA4: a strong call to action or a form, 100+ sessions, no key event | analytics |
+| `ranking_drop` | A client keyword that left page one or fell 10+ places from the top 30 between the two latest research snapshots (`research.build.ranking_drops`); a keyword missing from a list cut short is reported as uncertain, 10 points lower; buyer keywords +8; up to 10 | research |
 | `keyword_behind` | **Page far behind**: the client ranks 21-100; evidence gives the client's position and page | research |
 | `striking_distance` | Client keywords at positions 11-20 (page two), grouped by theme | research |
 | `competitor_momentum` | A competitor adding pages in a theme (from monitoring's theme drift) | monitoring |
@@ -49,7 +50,6 @@ John Hancock + Flynn's offline test project (no research yet): 15 findings in un
 ## Not done yet
 
 - A multi-project playground screen (one project at a time for now).
-- Ranking drops as findings (monitoring of research movers).
 
 ## Lite-scanned competitors
 

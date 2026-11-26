@@ -178,6 +178,36 @@ def analytics_alerts(projects: ProjectStore, project_id: str) -> list[Alert]:
     return out
 
 
+def ranking_alerts(projects: ProjectStore, project_id: str) -> list[Alert]:
+    """Client keywords that left page one or fell 10+ places between two research snapshots."""
+    from src.modules.research.build import ranking_drops
+    from src.modules.research.service import research_store
+
+    store = research_store(projects)
+    new, old = store.latest(project_id), store.previous(project_id)
+    if new is None or old is None:
+        return []
+    clients = [w.website for w in new.websites if w.role == "client"]
+    out: list[Alert] = []
+    for d in [x for x in ranking_drops(old, new, clients) if x.certain][:_DECAY_ALERTS]:
+        where = f"#{d.after}" if d.after is not None else "out of the top 100"
+        out.append(
+            _alert(
+                "client_ranking_drop",
+                "high"
+                if d.before <= 3 or d.intent in ("commercial", "transactional")
+                else "medium",
+                d.website,
+                f"“{d.keyword}” fell from #{d.before} to {where}",
+                f"{d.volume:,} searches a month"
+                + (f"; ranking page {d.url}" if d.url else "")
+                + ". Compare the page with those now above it for this search.",
+                urls=[d.url] if d.url else [],
+            )
+        )
+    return out
+
+
 def run_project_check(
     projects: ProjectStore,
     access: KnowledgeAccess,
@@ -226,7 +256,7 @@ def run_project_check(
     finally:
         if cache is not None:
             cache.close()
-    extra = analytics_alerts(projects, project_id)
+    extra = analytics_alerts(projects, project_id) + ranking_alerts(projects, project_id)
     if extra:
         check = check.model_copy(update={"alerts": [*check.alerts, *extra]})
     path = store.save(check)

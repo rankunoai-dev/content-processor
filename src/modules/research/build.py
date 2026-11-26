@@ -25,7 +25,7 @@ from __future__ import annotations
 import re
 from collections.abc import Iterable, Mapping, Sequence
 from datetime import UTC, datetime
-from typing import Literal
+from typing import Final, Literal
 
 from src.modules.analyst.playground import Playground
 from src.modules.research.importer import keyword_rows
@@ -35,6 +35,7 @@ from src.modules.research.models import (
     KeywordMetrics,
     KeywordRow,
     Mover,
+    RankingDrop,
     ResearchSnapshot,
     SerpRow,
     Source,
@@ -392,3 +393,52 @@ def keywords_of(snapshot: ResearchSnapshot, website: str) -> Iterable[KeywordRow
     for site in snapshot.websites:
         if site.website == website:
             yield from site.keywords
+
+
+DROP_PAGE_ONE: Final = 10
+DROP_PLACES: Final = 10
+DROP_FROM: Final = 30
+
+
+def ranking_drops(
+    old: ResearchSnapshot, new: ResearchSnapshot, clients: Iterable[str]
+) -> list[RankingDrop]:
+    """The client websites' keywords that left page one or fell 10+ places from the top 30.
+
+    A keyword missing from the newest data counts as a certain drop only when that website's
+    list is complete; otherwise it may still rank beyond the keywords pulled.
+    """
+    wanted = {c.removeprefix("www.") for c in clients}
+    latest = {w.website: w for w in new.websites if w.website.removeprefix("www.") in wanted}
+    out: list[RankingDrop] = []
+    for site in old.websites:
+        now_site = latest.get(site.website)
+        if now_site is None:
+            continue
+        now = {r.keyword.casefold(): r for r in now_site.keywords}
+        for row in site.keywords:
+            if row.position > DROP_FROM:
+                continue
+            current = now.get(row.keyword.casefold())
+            after = current.position if current else None
+            left_page_one = row.position <= DROP_PAGE_ONE and (
+                after is None or after > DROP_PAGE_ONE
+            )
+            fell = after is not None and after - row.position >= DROP_PLACES
+            gone = after is None
+            if not (left_page_one or fell or gone):
+                continue
+            out.append(
+                RankingDrop(
+                    website=site.website,
+                    keyword=row.keyword,
+                    before=row.position,
+                    after=after,
+                    volume=(current.volume if current else row.volume) or row.volume,
+                    intent=(current.intent if current else None) or row.intent,
+                    url=(current.url if current else None) or row.url,
+                    theme_id=(current.theme_id if current else None) or row.theme_id,
+                    certain=not gone or now_site.complete,
+                )
+            )
+    return sorted(out, key=lambda d: (not d.certain, -d.volume))
