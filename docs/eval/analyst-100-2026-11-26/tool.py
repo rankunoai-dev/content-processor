@@ -20,7 +20,7 @@ from src.modules.content_processor.projects.store import ProjectStore  # noqa: E
 from src.modules.content_processor.webapi.__main__ import knowledge_access  # noqa: E402
 
 PID = "john-hancock-test-5-31372c"
-LIMIT = 12_000
+LIMIT = 40_000  # the engine caps answers at 40,000 characters itself (MAX_RESULT_CHARS)
 
 
 def main() -> None:
