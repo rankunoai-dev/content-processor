@@ -79,6 +79,11 @@ export interface PageRow {
   gsc_impressions: number | null;
   gsc_ctr: number | null;
   gsc_position: number | null;
+  ga_sessions?: number | null;
+  ga_organic_sessions?: number | null;
+  ga_engagement_rate?: number | null;
+  ga_conversions?: number | null;
+  ga_ai_sessions?: number | null;
   indexable: boolean;
 }
 

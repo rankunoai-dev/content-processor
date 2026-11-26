@@ -331,7 +331,7 @@ Phase 4 - Propose the target cluster structure and the internal links between hu
     ),
     ActionCard(
         id="funnel-coverage",
-        version=1,
+        version=2,
         title="Customer Journey Funnel Audit",
         module="theming",
         category="Content strategy",
@@ -354,9 +354,17 @@ Phase 2 - For each competitor, search per stage (search_knowledge with per_site)
 content they offer at each stage that the client does not.
 
 Phase 3 - Report empty or thin stages and the calls to action at each stage (role "cta").
+Phase 4 - With GA4 (get_analytics, section funnel), give each stage's real sessions and
+conversions, and say where visitors arrive but do not move on.
 """,
         required_tools=["list_pages", "search_knowledge"],
-        optional_tools=["get_page_facts", "get_offering_catalog", "get_page", "get_theme_map"],
+        optional_tools=[
+            "get_page_facts",
+            "get_offering_catalog",
+            "get_page",
+            "get_theme_map",
+            "get_analytics",
+        ],
         prefetch=[
             Prefetch(tool="list_pages", args={"website": "{{client}}"}),
             Prefetch(
@@ -534,7 +542,7 @@ same keyword.
     ),
     ActionCard(
         id="keyword-cannibalisation",
-        version=1,
+        version=2,
         title="Keyword Cannibalisation & Consolidation Plan",
         module="research",
         category="Keyword research",
@@ -576,9 +584,16 @@ at template level, instead of on every page.
 
 Stay in scope: heading hierarchy, schema, general meta optimisation and other technical
 hygiene are separate work; do not include them.
+With GA4 (get_analytics, section pages): when a pair carries an owner_check, compare the two
+pages' engagement and conversion rates before choosing the page that stays.
 """,
         required_tools=["get_page_report", "get_page"],
-        optional_tools=["get_keyword_rankings", "get_page_facts", "search_knowledge"],
+        optional_tools=[
+            "get_keyword_rankings",
+            "get_page_facts",
+            "search_knowledge",
+            "get_analytics",
+        ],
         prefetch=[
             Prefetch(tool="get_page_report", args={"section": "consolidation", "limit": 40}),
         ],
@@ -651,7 +666,7 @@ Phase 3 - Executive threat assessment: what the competitor is trying to achieve,
     ),
     ActionCard(
         id="content-refresh-queue",
-        version=1,
+        version=2,
         title="Content Decay & Refresh Queue",
         module="monitoring",
         category="Content maintenance",
@@ -670,9 +685,18 @@ Phase 2 - Look for outdated facts: past years, superseded figures, expired offer
 passage). If get_changes is available, use what changed recently as context.
 Phase 3 - Ranking data is only available with the Research module; without it, say so and rank
 by business importance (page type, offering) and staleness.
+Phase 4 - With GA4 (get_analytics, sections decays and leaky): rank first the pages whose
+organic visits or conversions fell against the period before, then pages with search
+traffic that does not convert. Without GA4, say so.
 """,
         required_tools=["list_pages", "get_page_facts"],
-        optional_tools=["get_page", "get_changes", "get_keyword_rankings", "get_monitoring_alerts"],
+        optional_tools=[
+            "get_page",
+            "get_changes",
+            "get_keyword_rankings",
+            "get_monitoring_alerts",
+            "get_analytics",
+        ],
         prefetch=[Prefetch(tool="list_pages", args={"website": "{{website}}"})],
         output_format="""\
 # Priority Content Update List: {website}
@@ -804,7 +828,7 @@ H2 / H3 with the sub-questions each section answers and the competitor evidence 
     # -- Playground: across modules -------------------------------------------------------------
     ActionCard(
         id="executive-briefing",
-        version=1,
+        version=2,
         title="Executive Competitive Briefing",
         module="playground",
         category="Strategy",
@@ -823,6 +847,9 @@ offerings and on proof points.
 Phase 3 - Health and moves: get_seo_issues for {{client}}; get_changes for each competitor
 when available (skip with a note when a competitor has only one scrape).
 Phase 4 - The five things that matter most, each with evidence and a recommended move.
+With GA4 (get_analytics, summary and themes), report real organic sessions, engagement and
+conversions (key events) instead of estimated traffic, and say which themes bring leads
+rather than visits. Without GA4, say the traffic figures are estimates.
 """,
         required_tools=["list_websites", "get_offering_catalog", "search_knowledge"],
         optional_tools=[
@@ -834,6 +861,7 @@ Phase 4 - The five things that matter most, each with evidence and a recommended
             "get_monitoring_alerts",
             "get_gap_findings",
             "get_search_demand",
+            "get_analytics",
         ],
         prefetch=[Prefetch(tool="list_websites")],
         output_format="""\

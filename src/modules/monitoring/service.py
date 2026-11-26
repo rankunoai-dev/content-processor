@@ -37,9 +37,9 @@ from src.modules.content_processor.projects.notify import Notifier, notifier_fro
 from src.modules.content_processor.projects.runner import ScrapeRunner
 from src.modules.content_processor.projects.store import ProjectStore
 from src.modules.content_processor.webapi.projects_api import KnowledgeAccess
-from src.modules.monitoring.check import run_check
+from src.modules.monitoring.check import _alert, run_check
 from src.modules.monitoring.digest import send_digest
-from src.modules.monitoring.models import MonitorCheck, RecrawlPlan, SiteDiff
+from src.modules.monitoring.models import Alert, MonitorCheck, RecrawlPlan, SiteDiff
 from src.modules.monitoring.store import MonitorStore, write_check_workbook
 
 __all__ = ["MonitorWatcher", "monitor_store", "recrawl_project", "run_project_check"]
@@ -139,6 +139,45 @@ def _deliver_digest(
     )
 
 
+_DECAY_ALERTS = 10
+
+
+def analytics_alerts(projects: ProjectStore, project_id: str) -> list[Alert]:
+    """GA4 decays of the client's pages as alerts.
+
+    Organic sessions or conversions down against the period before: rankings can look flat
+    while visits fall, or a form can stop working.
+    """
+    from src.modules.analytics.insights import build_report
+    from src.modules.analytics.service import analytics_store
+
+    store = analytics_store(projects)
+    current = store.latest(project_id)
+    previous = store.previous(project_id)
+    if current is None or previous is None:
+        return []
+    report = build_report(current, previous=previous, now=datetime.now(UTC))
+    out: list[Alert] = []
+    for d in report.decays[:_DECAY_ALERTS]:
+        conversions = d.metric == "key_events"
+        drop = abs(d.change)
+        out.append(
+            _alert(
+                "client_conversion_drop" if conversions else "client_traffic_decay",
+                "high" if drop >= 0.5 else "medium",
+                current.website,
+                f"{'Conversions' if conversions else 'Organic visits'} down {drop:.0%} on {d.url}",
+                f"GA4: {d.before:,.0f} to {d.after:,.0f} "
+                f"{'key events' if conversions else d.metric.replace('_', ' ')} against the "
+                f"period before ({report.period or 'latest import'}). Check rankings and the "
+                "search results for the same dates; if they held, test the page's form and "
+                "call to action.",
+                urls=[d.url],
+            )
+        )
+    return out
+
+
 def run_project_check(
     projects: ProjectStore,
     access: KnowledgeAccess,
@@ -187,6 +226,9 @@ def run_project_check(
     finally:
         if cache is not None:
             cache.close()
+    extra = analytics_alerts(projects, project_id)
+    if extra:
+        check = check.model_copy(update={"alerts": [*check.alerts, *extra]})
     path = store.save(check)
     workbook = write_check_workbook(check, store.workbook(check))
     _deliver_digest(projects, store, check, notifier)

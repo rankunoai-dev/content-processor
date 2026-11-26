@@ -287,6 +287,19 @@ class Settings(BaseSettings):
     # Only the real address or one on this computer (the stand-in) is accepted.
     cp_ahrefs_base_url: str = "https://api.ahrefs.com/v3/"
 
+    # -- Analytics module (GA4, src/modules/analytics) -----------------------
+    # CSV import is always free. Data API pulls are off until switched on; they sign in with
+    # a service account whose email is added to the GA4 property as a Viewer.
+    ga4_credentials_file: Path | None = None
+    cp_ga4_enabled: bool = False
+    cp_ga4_base_url: str = "https://analyticsdata.googleapis.com/"
+    cp_ga4_token_url: str = "https://oauth2.googleapis.com/token"  # noqa: S105 - an address
+    cp_ga4_max_requests: int = Field(default=20, ge=1, le=500, description="Most per pull")
+    cp_ga4_min_interval_ms: int = Field(default=500, ge=0, le=10000)
+    cp_ga4_period_days: int = Field(
+        default=28, ge=7, le=366, description="Days per period (compared with the one before)"
+    )
+
     # -- Content Scraper: the shared scrape queue and its emails ------------
     # One scrape runs at a time on the instance; the others wait in one queue.
     # Without an SMTP host, emails are written to <app data>/outbox/ instead of sent.

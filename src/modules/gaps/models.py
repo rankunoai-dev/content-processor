@@ -48,6 +48,9 @@ FindingKind = Literal[
     "zero_traffic",
     "link_intersect",
     "authority_gap",
+    "leaky_page",
+    "traffic_decay",
+    "cta_no_conversions",
 ]
 FindingStatus = Literal["open", "accepted", "done", "dismissed"]
 

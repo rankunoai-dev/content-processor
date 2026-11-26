@@ -1,6 +1,6 @@
 # Content Processor: A Plain-Language Guide
 
-Last updated: 26 November 2026 · Code version: main with monitoring of rankings, links and search-engine facts and an alert digest by email, a Backlinks module (Ahrefs: Domain Rating, referring domains, link intersect and authority gap, by export or a capped pull, with a stand-in), a keyword cannibalisation plan, a page report, keyword intent and Search Console import in Research, a Semrush stand-in (dummy data for trying the Research module), confidential projects closed to Claude Desktop, background warming of search, sign-in that fails closed and a record of sign-ins and downloads, passages handed over with their surrounding section, one search for every scope, relevance checking and better search results (reranking, "not found", dates, diversity), bge-m3 multilingual embeddings, competitor lite scan, in-app verdict reviews, team accounts, and topic drift
+Last updated: 26 November 2026 · Code version: main with GA4 analytics (what visitors do after the click), monitoring of rankings, links and search-engine facts and an alert digest by email, a Backlinks module (Ahrefs: Domain Rating, referring domains, link intersect and authority gap, by export or a capped pull, with a stand-in), a keyword cannibalisation plan, a page report, keyword intent and Search Console import in Research, a Semrush stand-in (dummy data for trying the Research module), confidential projects closed to Claude Desktop, background warming of search, sign-in that fails closed and a record of sign-ins and downloads, passages handed over with their surrounding section, one search for every scope, relevance checking and better search results (reranking, "not found", dates, diversity), bge-m3 multilingual embeddings, competitor lite scan, in-app verdict reviews, team accounts, and topic drift
 
 ## 1. What this is, in one paragraph
 
@@ -459,6 +459,23 @@ Each pull or import is kept, with a workbook (websites, referring domains, top p
 
 **Trying it before Ahrefs is connected (dummy data).** A stand-in invents link data in Ahrefs' own formats (the two export files and the API's answers) and can act as Ahrefs on this computer. Every number is invented and every pull from it is labelled "DUMMY DATA". Tried on a test project with John Hancock, MetLife and Prudential: the worst case of a pull was 13,800 units against a limit of 10,000, so the lists were shortened fairly; it spent 2,216 units, found 14 websites linking to both competitors and not to John Hancock, Domain Ratings of 37 against 56 and 53, and the gap analysis gave three findings. Ahrefs has not been called for real yet: it waits for a key and a cap. How to connect it is in `docs/app/MODULE_BACKLINKS.md`.
 
+### Step 19c: Analytics (GA4: what visitors do after they land)
+
+Everything before this step looks at search results and at the pages themselves. Google Analytics 4 (GA4) shows what happens after a visitor arrives: how many visits each page starts, how many of them engage, how many end in a conversion (what GA4 calls a key event: a form sent, a call booked, a purchase), the revenue, which channel brought them (search, direct, email, paid) and how many came from AI assistants such as ChatGPT, Perplexity or Gemini.
+
+- **Free import.** In GA4, open the Landing page report, add the channel as a second column, download it as a CSV file and upload it in the Research tab. No sign-in is needed.
+- **Or a direct connection.** An operator can connect the GA4 Data API with a service account (a technical Google account given read-only access to the GA4 property). It is off until switched on, the key is only ever sent to Google, and each pull fetches the last 28 days and the 28 days before.
+
+What it adds across the app:
+- **Per page:** real visits and conversions next to the estimated search traffic. A page that ranks for nothing in search but still converts or gets visits from other channels is never suggested for removal. When two pages compete for the same searches, the one that converts clearly better is flagged so the team checks which page should stay.
+- **Per theme and buying stage:** which themes bring visits and which bring leads.
+- **New gaps:** pages with search traffic that does not engage or convert (fix the page before writing new ones), pages whose visits or conversions fell against the period before (even when rankings look the same), and pages with a form or call to action that nobody completes (often a broken form).
+- **Gap priority:** findings in themes that convert well above the site's average rank higher.
+- **Monitoring:** each check alerts on falling visits or conversions, and lists pages changed between scrapes with their visits and conversions before and after.
+- **Claude Desktop and the analyst cards** (content refresh, executive briefing, funnel coverage, cannibalisation) use real visits and conversions instead of estimates when the project has GA4 data.
+
+A stand-in invents GA4 data for trying all of this before GA4 is connected. How to connect is in `docs/app/MODULE_ANALYTICS.md`.
+
 ### Step 20: Gaps (what the client is missing, most important first)
 
 The **Gaps** tab brings the other modules together and lists what the client is missing compared with its competitors, ranked by priority:
@@ -628,6 +645,7 @@ On the John Hancock scrape the Review tab opens on four pages out of 306: a PDF 
 | Date | Significant change |
 |---|---|
 | 2026-11-26 | Monitoring upgrades: each changed page says whether it got worse for search engines (noindex, canonical moved, structured data removed or broken, more images without descriptions), with an alert for the client; competitors adding rich-result labels or calls to action raise alerts. With search or backlink data, each check now raises ranking drops (matched with what changed on the page in the same weeks), competitor top-3 gains, lost referring domains and Domain Rating shifts, never twice for the same data. An optional email digest of new high (or high and medium) alerts, counts only for confidential projects. Pinned core pages can be set in the Monitoring tab. |
+| 2026-11-26 | GA4 analytics: real visits, engagement, conversions, revenue, channels and AI-assistant visits per page, from GA4's free landing page export or a read-only Data API connection (off until switched on). Used in the page report (pages that convert are never pruned; better-converting competing pages are flagged), per theme and buying stage, three new gaps (traffic that does not convert, falling visits or conversions, calls to action nobody completes), higher priority for converting themes, Monitoring alerts, Claude Desktop and four analyst cards. |
 | 2026-11-26 | Keyword cannibalisation plan: which page should rank for each search (the theme map's main page of its topic), how much of each page's search traffic belongs on it (strong, within tolerance, needs work), competing pages with one of eight fixes, internal link changes and redirects or noindex, from Search Console or the search data; in the Research tab, the page report workbook, the gap analysis, Claude Desktop and a new analyst card that writes the copy. |
 | 2026-11-26 | Backlinks module (Ahrefs): each website's Domain Rating, referring domains and most linked pages; the link intersect (websites linking to competitors but not to the client), the authority gap and lost linking websites; by a free Ahrefs export (UTF-16 files read) or a capped, paced API pull that prices every request before sending it. A card in the Research tab, a workbook, two new gap findings (link intersect, authority gap) and a Claude Desktop tool. A stand-in with dummy data lets it be tried end to end; Ahrefs itself has not been called yet. |
 | 2026-11-26 | Search data follows the theme map: when themes are rebuilt, the latest search data is placed in the new themes and demand per theme is recounted at once (and before every gap analysis), instead of pointing at the old themes. |

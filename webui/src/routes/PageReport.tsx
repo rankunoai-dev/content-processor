@@ -134,6 +134,13 @@ function PagesTable({ rows }: { rows: PageRow[] }) {
             r.gsc_impressions === null ? '-' : `${r.gsc_clicks ?? 0} / ${r.gsc_impressions.toLocaleString()}`,
         },
         {
+          title: C.ga4,
+          render: (_v, r) =>
+            r.ga_sessions === null || r.ga_sessions === undefined
+              ? '-'
+              : `${r.ga_sessions.toLocaleString()} / ${(r.ga_conversions ?? 0).toLocaleString()}`,
+        },
+        {
           title: C.flags,
           render: (_v, r) => (
             <Space size={[4, 4]} wrap>

@@ -342,6 +342,9 @@ def create_app(
             from src.modules.backlinks.api import register_backlinks_routes
 
             register_backlinks_routes(app, projects=project_store, access=knowledge, signer=signer)
+            from src.modules.analytics.api import register_analytics_routes
+
+            register_analytics_routes(app, projects=project_store, access=knowledge, signer=signer)
             from src.modules.gaps.api import register_gap_routes
 
             register_gap_routes(app, projects=project_store, access=knowledge, signer=signer)

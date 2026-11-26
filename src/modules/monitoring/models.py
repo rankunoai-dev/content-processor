@@ -62,6 +62,8 @@ AlertKind = Literal[
     "client_seo_regression",
     "competitor_schema_added",
     "competitor_intent_shift",
+    "client_traffic_decay",
+    "client_conversion_drop",
 ]
 DigestLevel = Literal["off", "high", "medium"]
 
