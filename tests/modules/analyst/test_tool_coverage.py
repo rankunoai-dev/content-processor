@@ -1,5 +1,8 @@
-"""Analyst tools that answer whole-site questions: paging and filters, technical checks,
-structured data, the page report without search data, and size-cut paging."""
+"""Analyst tools that answer whole-site questions.
+
+Paging and filters, technical checks, structured data, the page report without search
+data, and size-cut paging.
+"""
 
 from __future__ import annotations
 

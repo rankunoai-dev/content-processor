@@ -379,7 +379,9 @@ def test_api_cli_and_a_pull_through_the_standin(
     assert report["previous_snapshot_id"] and report["totals"]["sessions"] > 0
     assert client.get(f"{base}/workbook").content[:2] == b"PK"
     pages = client.get(f"/api/projects/{themed.project_id}/research/pages")
-    assert pages.status_code == 404, "no research: the page report waits for search data"
+    # no search data: the page report is built from the scrape, with the GA4 figures joined
+    assert pages.status_code == 200 and pages.json()["research_snapshot_id"] is None
+    assert pages.json()["ga4_snapshot_id"] == store.latest(themed.project_id).snapshot_id
 
     app_data = ["--app-data", str(themed.store.root)]
     assert cli.main(["analytics", "show", "--project", themed.project_id, *app_data]) == 0

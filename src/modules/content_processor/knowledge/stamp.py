@@ -388,7 +388,8 @@ def _mark_duplicates(pages: list[_Page]) -> None:
     A page whose canonical names another captured page, and pages with the same text and
     the same title (`_same_page`), are grouped (groups chain: A=B and B=C is one
     group). Each group keeps one page searchable: one whose canonical names no other page
-    (the end of a canonical chain), the most named, else the shortest address, and every other page points to it with `duplicate_of`.
+    (the end of a canonical chain), the most named, else the shortest address; every
+    other page points to it with `duplicate_of`.
     Same-text pages that are different pages (two forms with shared instructions) stay
     searchable and are noted as near duplicates.
     """
